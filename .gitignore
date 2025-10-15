@@ -1,0 +1,225 @@
+# HeroSSID - .NET 9.0 + CLI + PostgreSQL + Indy Project .gitignore
+
+## .NET Core / C#
+*.swp
+*.*~
+project.lock.json
+.DS_Store
+*.pyc
+nupkg/
+
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# Visual Studio
+.vs/
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+# Rider
+.idea/
+*.sln.iml
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# .NET Core
+project.fragment.lock.json
+artifacts/
+
+# ASP.NET Scaffolding
+ScaffoldingReadMe.txt
+
+# NuGet
+*.nupkg
+*.snupkg
+**/packages/*
+!**/packages/build/
+*.nuget.props
+*.nuget.targets
+
+# Test Results
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+*.trx
+*.coverage
+*.coveragexml
+TestResults/
+
+# Code Coverage
+*.coverage
+*.coveragexml
+coverage/
+*.lcov
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Entity Framework Core
+**/Migrations/*_*.cs
+!**/Migrations/*_Initial*.cs
+
+# Logs
+logs/
+*.log
+log-*.txt
+
+# Encryption Keys (Local Development)
+keys/
+*.key
+*.pfx
+*.pem
+
+# Wallet Storage (Indy)
+wallets/
+*.wallet
+.indy_client/
+
+# Configuration (Sensitive)
+appsettings.Development.json
+appsettings.Production.json
+appsettings.*.json
+!appsettings.json
+secrets.json
+**/secrets/
+
+# Docker
+docker-compose.override.yml
+.dockerignore
+
+# OS Files
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Temporary Files
+tmp/
+temp/
+*.tmp
+
+# Node modules (if any frontend tools)
+node_modules/
+
+# Backup files
+*.bak
+*.backup
+
+# CLI Output
+output/
+credentials/
+*.credential.json
+
+# Genesis Files (Indy - use docker volume instead)
+genesis/
+
+# Certificate Files
+*.crt
+*.cer
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+
+# JetBrains Rider
+.idea/
+*.sln.iml
+_ReSharper.Caches/
+
+# User-specific files
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Auto-generated files
+*_i.c
+*_p.c
+*_h.h
+*.ilk
+*.meta
+*.obj
+*.iobj
+*.pch
+*.pdb
+*.ipdb
+*.pgc
+*.pgd
+*.rsp
+*.sbr
+*.tlb
+*.tli
+*.tlh
+*.tmp_proj
+*_wpftmp.csproj
+*.vspscc
+*.vssscc
+.builds
+*.pidb
+*.svclog
+*.scc
+
+# Benchmark Results
+BenchmarkDotNet.Artifacts/
+
+# .NET Core 3.1+ publish output
+publish/
+
+# Azure Functions
+local.settings.json
+
+# Python (if using any scripts)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Specify files to KEEP (override above rules)
+!.gitignore
+!.editorconfig
+!Directory.Build.props
+!docker-compose.yml
+
+# Keep sample/template configs
+!appsettings.json.sample
+!appsettings.Template.json
+
+# Keep important documentation
+!README.md
+!LICENSE
+!CONTRIBUTING.md
+
+# Keep test genesis files (if committed)
+!tests/docker/indy-pool/genesis/
+
+# AI
+.claude
+CLAUDE.md
+.specify
+specs
