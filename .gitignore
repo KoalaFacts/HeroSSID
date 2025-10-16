@@ -218,8 +218,10 @@ __pycache__/
 # Keep test genesis files (if committed)
 !tests/docker/indy-pool/genesis/
 
-# AI
+# User-specific AI assistant files (Claude Code local settings)
 .claude
-CLAUDE.md
 .specify
 specs
+CLAUDE.md
+nul
+NUL
