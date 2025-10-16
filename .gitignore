@@ -219,9 +219,9 @@ __pycache__/
 !tests/docker/indy-pool/genesis/
 
 # User-specific AI assistant files (Claude Code local settings)
-.claude
-.specify
-specs
+.claude/
+.specify/
+specs/
 CLAUDE.md
 nul
 NUL
