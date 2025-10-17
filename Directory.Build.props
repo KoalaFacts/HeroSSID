@@ -1,0 +1,40 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AnalysisMode>All</AnalysisMode>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Common package versions for dependency management -->
+    <PackageReference Update="Aspire.Hosting.AppHost" Version="9.5.1" />
+    <PackageReference Update="Aspire.Hosting.PostgreSQL" Version="9.5.1" />
+    <PackageReference Update="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.5.1" />
+    <PackageReference Update="Microsoft.Extensions.DependencyInjection" Version="9.0.0" />
+    <PackageReference Update="Microsoft.Extensions.Configuration" Version="9.0.0" />
+    <PackageReference Update="Microsoft.Extensions.Configuration.Json" Version="9.0.0" />
+    <PackageReference Update="Microsoft.Extensions.Configuration.Binder" Version="9.0.0" />
+    <PackageReference Update="Microsoft.Extensions.Caching.Memory" Version="9.0.0" />
+    <PackageReference Update="Microsoft.Extensions.Logging" Version="9.0.0" />
+    <PackageReference Update="Microsoft.EntityFrameworkCore" Version="9.0.10" />
+    <PackageReference Update="Microsoft.EntityFrameworkCore.Design" Version="9.0.10" />
+    <PackageReference Update="Microsoft.EntityFrameworkCore.Tools" Version="9.0.10" />
+    <PackageReference Update="Microsoft.EntityFrameworkCore.InMemory" Version="9.0.10" />
+    <PackageReference Update="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.4" />
+    <PackageReference Update="Serilog" Version="4.1.0" />
+    <PackageReference Update="Serilog.Extensions.Logging" Version="8.0.0" />
+    <PackageReference Update="Serilog.Sinks.File" Version="6.0.0" />
+    <PackageReference Update="Serilog.Sinks.Console" Version="6.0.0" />
+    <PackageReference Update="Spectre.Console" Version="0.49.1" />
+    <PackageReference Update="System.CommandLine" Version="2.0.0-beta4.22272.1" />
+    <PackageReference Update="xunit.v3" Version="3.1.0" />
+    <PackageReference Update="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageReference Update="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Update="Microsoft.AspNetCore.DataProtection" Version="9.0.0" />
+    <PackageReference Update="Microsoft.AspNetCore.DataProtection.Extensions" Version="9.0.0" />
+  </ItemGroup>
+</Project>

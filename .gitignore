@@ -204,7 +204,6 @@ __pycache__/
 !.gitignore
 !.editorconfig
 !Directory.Build.props
-!docker-compose.yml
 
 # Keep sample/template configs
 !appsettings.json.sample
@@ -219,10 +218,11 @@ __pycache__/
 !tests/docker/indy-pool/genesis/
 
 # User-specific AI assistant files (Claude Code local settings)
+# Note: .specify/memory/ is tracked for project constitution
 .claude/
-.specify/
+.specify/*
+!.specify/memory/
 specs/
 CLAUDE.md
 nul
 NUL
-.specify/memory/constitution.md
