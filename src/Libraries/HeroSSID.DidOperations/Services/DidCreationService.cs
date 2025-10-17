@@ -151,13 +151,21 @@ public sealed class DidCreationService : IDidCreationService
                 // Step 5: Create entity and save to database
                 DateTimeOffset createdAt = DateTimeOffset.UtcNow;
 
+                // Create copies of arrays for entity storage (arrays are reference types)
+                // This prevents the subsequent SecureZeroMemory calls from zeroing the entity's data
+                byte[] publicKeyCopy = new byte[publicKey.Length];
+                Array.Copy(publicKey, publicKeyCopy, publicKey.Length);
+
+                byte[] encryptedPrivateKeyCopy = new byte[encryptedPrivateKey.Length];
+                Array.Copy(encryptedPrivateKey, encryptedPrivateKeyCopy, encryptedPrivateKey.Length);
+
                 DidEntity didEntity = new DidEntity
                 {
                     Id = Guid.NewGuid(),
                     TenantId = HeroDbContext.DefaultTenantId,
                     DidIdentifier = didIdentifier,
-                    PublicKeyEd25519 = publicKey,
-                    PrivateKeyEd25519Encrypted = encryptedPrivateKey,
+                    PublicKeyEd25519 = publicKeyCopy,
+                    PrivateKeyEd25519Encrypted = encryptedPrivateKeyCopy,
                     DidDocumentJson = didDocumentJson,
                     Status = "active",
                     CreatedAt = createdAt
@@ -237,9 +245,16 @@ public sealed class DidCreationService : IDidCreationService
         // Use NSec's Ed25519 signature algorithm
         SignatureAlgorithm algorithm = SignatureAlgorithm.Ed25519;
 
+        // Configure key creation to allow export (required for database storage)
+        // NSec defaults to non-exportable keys for security, but we need to persist them
+        KeyCreationParameters keyParams = new KeyCreationParameters
+        {
+            ExportPolicy = KeyExportPolicies.AllowPlaintextExport
+        };
+
         // Generate a new key using NSec's Key class
         // This generates a cryptographically secure Ed25519 keypair
-        using Key key = Key.Create(algorithm);
+        using Key key = Key.Create(algorithm, keyParams);
 
         // Export public key (32 bytes)
         byte[] publicKey = key.PublicKey.Export(KeyBlobFormat.RawPublicKey);
