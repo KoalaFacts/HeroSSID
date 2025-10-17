@@ -1,4 +1,4 @@
-# HeroSSID - .NET 9.0 + CLI + PostgreSQL + Indy Project .gitignore
+# HeroSSID - .NET 9.0 + CLI + PostgreSQL + W3C SSI Project .gitignore
 
 ## .NET Core / C#
 *.swp
@@ -96,10 +96,9 @@ keys/
 *.pfx
 *.pem
 
-# Wallet Storage (Indy)
+# Wallet Storage
 wallets/
 *.wallet
-.indy_client/
 
 # Configuration (Sensitive)
 appsettings.Development.json
@@ -136,8 +135,9 @@ output/
 credentials/
 *.credential.json
 
-# Genesis Files (Indy - use docker volume instead)
+# DID/Credential Storage
 genesis/
+did-documents/
 
 # Certificate Files
 *.crt
@@ -214,14 +214,21 @@ __pycache__/
 !LICENSE
 !CONTRIBUTING.md
 
-# Keep test genesis files (if committed)
-!tests/docker/indy-pool/genesis/
-
 # User-specific AI assistant files (Claude Code local settings)
 # Note: .specify/memory/ is tracked for project constitution
 .claude/
 .specify/
 specs/
 CLAUDE.md
+
+# Temporary documentation files (session-specific)
+*-SUMMARY.md
+*-RESULTS.md
+*-REVIEW.md
+*-STATUS.md
+GETTING-STARTED.md
+RUNNING-*.md
+
+# Windows null device files
 nul
 NUL
