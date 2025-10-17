@@ -220,8 +220,7 @@ __pycache__/
 # User-specific AI assistant files (Claude Code local settings)
 # Note: .specify/memory/ is tracked for project constitution
 .claude/
-.specify/*
-!.specify/memory/
+.specify/
 specs/
 CLAUDE.md
 nul
