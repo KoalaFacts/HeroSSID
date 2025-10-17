@@ -1,20 +1,21 @@
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using HeroSSID.Core.Interfaces;
 using HeroSSID.Data;
 using HeroSSID.Data.Entities;
+using HeroSSID.DidOperations.Helpers;
 using HeroSSID.DidOperations.Interfaces;
 using HeroSSID.DidOperations.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using NSec.Cryptography;
 
 namespace HeroSSID.DidOperations.Services;
 
 /// <summary>
-/// Service for creating W3C-compliant DIDs
-/// Current: Uses simulated Ed25519 key generation and database storage
-/// Future: Will use .NET 9 native Ed25519 and support did:web/did:key methods
+/// Service for creating W3C-compliant DIDs with Ed25519 cryptography
+/// Generates did:key identifiers using Ed25519 signatures via NSec library (libsodium-based)
+/// Implements W3C DID Core 1.0 specification with secure key storage and memory handling
 /// </summary>
 public sealed class DidCreationService : IDidCreationService
 {
@@ -122,9 +123,9 @@ public sealed class DidCreationService : IDidCreationService
                 {
                     s_logDidCollision(_logger, didIdentifier, attempt, maxRetries, null);
 
-                    // Clear keys from memory before retrying
-                    Array.Clear(publicKey, 0, publicKey.Length);
-                    Array.Clear(privateKey, 0, privateKey.Length);
+                    // Securely clear keys from memory before retrying
+                    SecureZeroMemory(publicKey);
+                    SecureZeroMemory(privateKey);
 
                     if (attempt < maxRetries)
                     {
@@ -140,8 +141,8 @@ public sealed class DidCreationService : IDidCreationService
                 s_logEncryptingPrivateKey(_logger, null);
                 byte[] encryptedPrivateKey = _keyEncryptionService.Encrypt(privateKey);
 
-                // Clear private key from memory immediately after encryption
-                Array.Clear(privateKey, 0, privateKey.Length);
+                // Securely clear private key from memory immediately after encryption
+                SecureZeroMemory(privateKey);
 
                 // Step 4: Create W3C DID Document
                 s_logCreatingDidDocument(_logger, null);
@@ -176,9 +177,9 @@ public sealed class DidCreationService : IDidCreationService
                     // Remove the failed entity from tracking
                     _dbContext.Entry(didEntity).State = EntityState.Detached;
 
-                    // Clear public key from memory
-                    Array.Clear(publicKey, 0, publicKey.Length);
-                    Array.Clear(encryptedPrivateKey, 0, encryptedPrivateKey.Length);
+                    // Securely clear sensitive data from memory
+                    SecureZeroMemory(publicKey);
+                    SecureZeroMemory(encryptedPrivateKey);
 
                     if (attempt < maxRetries)
                     {
@@ -192,7 +193,12 @@ public sealed class DidCreationService : IDidCreationService
 
                 s_logDidCreatedSuccessfully(_logger, didIdentifier, attempt, null);
 
-                // Step 6: Return result
+                // Step 6: Securely clear the local publicKey variable before returning
+                // Note: The entity already has a copy, so we can safely clear the local variable
+                SecureZeroMemory(publicKey);
+                SecureZeroMemory(encryptedPrivateKey);
+
+                // Step 7: Return result
                 return new DidCreationResult
                 {
                     Id = didEntity.Id,
@@ -218,25 +224,29 @@ public sealed class DidCreationService : IDidCreationService
     }
 
     /// <summary>
-    /// Generates an Ed25519 key pair for signing
-    /// MVP: Uses cryptographically secure random bytes to simulate Ed25519 keys
-    /// v2: Use proper Ed25519 from WalletFramework or libsodium
+    /// Generates an Ed25519 key pair for signing using NSec library (libsodium-based)
     /// </summary>
     /// <returns>Tuple of (publicKey, privateKey)</returns>
+    /// <remarks>
+    /// Ed25519 produces 32-byte public keys and 32-byte private seeds.
+    /// This implementation uses NSec.Cryptography which is a modern .NET wrapper
+    /// around libsodium, providing production-ready Ed25519 cryptographic operations.
+    /// </remarks>
     private static (byte[] publicKey, byte[] privateKey) GenerateEd25519KeyPair()
     {
-        // For MVP, generate 32-byte keys using cryptographically secure random number generator
-        // This is NOT actual Ed25519 key generation, but sufficient for MVP testing
-        // v2: Replace with proper Ed25519 from WalletFramework SDK or libsodium
+        // Use NSec's Ed25519 signature algorithm
+        SignatureAlgorithm algorithm = SignatureAlgorithm.Ed25519;
 
-        byte[] publicKey = new byte[32];
-        byte[] privateKey = new byte[32];
+        // Generate a new key using NSec's Key class
+        // This generates a cryptographically secure Ed25519 keypair
+        using Key key = Key.Create(algorithm);
 
-        using (RandomNumberGenerator rng = RandomNumberGenerator.Create())
-        {
-            rng.GetBytes(publicKey);
-            rng.GetBytes(privateKey);
-        }
+        // Export public key (32 bytes)
+        byte[] publicKey = key.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+
+        // Export private key seed (32 bytes)
+        // Note: Ed25519 private key is actually a 32-byte seed from which the keypair is derived
+        byte[] privateKey = key.Export(KeyBlobFormat.RawPrivateKey);
 
         return (publicKey, privateKey);
     }
@@ -244,10 +254,9 @@ public sealed class DidCreationService : IDidCreationService
     /// <summary>
     /// Generates a DID identifier from a public key
     /// Format: did:key:z{multibase-multicodec-publicKey}
-    /// MVP: Simplified did:key format
-    /// Future: Proper multibase/multicodec encoding for full did:key spec
+    /// Implements W3C did:key spec with proper multibase/multicodec encoding
     /// </summary>
-    /// <param name="publicKey">Ed25519 public key</param>
+    /// <param name="publicKey">Ed25519 public key (32 bytes)</param>
     /// <returns>DID identifier</returns>
     private static string GenerateDidIdentifier(byte[] publicKey)
     {
@@ -258,12 +267,39 @@ public sealed class DidCreationService : IDidCreationService
             throw new ArgumentException("Public key must be 32 bytes for Ed25519", nameof(publicKey));
         }
 
-        // For MVP, use simplified did:key format
-        // did:key uses multibase (z = base58btc) + multicodec (0xed01 for Ed25519-pub) + public key
-        // For now, we'll use a simplified version with just base58 encoding
-        string base58PublicKey = ConvertToBase58(publicKey);
+        // 1. Add multicodec prefix (0xed01 for Ed25519-pub)
+        byte[] multicodecKey = MulticodecHelper.AddEd25519Prefix(publicKey);
 
-        return $"did:key:z6M{base58PublicKey}";
+        // 2. Encode with Base58 Bitcoin alphabet
+        string multibaseKey = SimpleBase.Base58.Bitcoin.Encode(multicodecKey);
+
+        // 3. Add 'z' prefix for Base58 multibase encoding
+        return $"did:key:z{multibaseKey}";
+    }
+
+    /// <summary>
+    /// Extracts the public key from a DID identifier
+    /// Reverses the multibase/multicodec encoding
+    /// </summary>
+    /// <param name="did">DID identifier (e.g., did:key:z...)</param>
+    /// <returns>Ed25519 public key (32 bytes)</returns>
+    private static byte[] ExtractPublicKeyFromDid(string did)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(did);
+
+        if (!did.StartsWith("did:key:z", StringComparison.Ordinal))
+        {
+            throw new ArgumentException("DID must start with 'did:key:z'", nameof(did));
+        }
+
+        // Extract multibase encoded portion
+        string multibaseKey = did.Replace("did:key:z", "", StringComparison.Ordinal);
+
+        // Decode Base58
+        byte[] multicodecKey = SimpleBase.Base58.Bitcoin.Decode(multibaseKey);
+
+        // Remove multicodec prefix and return public key
+        return MulticodecHelper.RemoveEd25519Prefix(multicodecKey);
     }
 
     /// <summary>
@@ -277,11 +313,16 @@ public sealed class DidCreationService : IDidCreationService
         ArgumentException.ThrowIfNullOrWhiteSpace(didIdentifier);
         ArgumentNullException.ThrowIfNull(publicKey);
 
-        string publicKeyBase58 = ConvertToBase58(publicKey);
+        string publicKeyBase58 = SimpleBase.Base58.Bitcoin.Encode(publicKey);
         string verificationMethodId = $"{didIdentifier}#keys-1";
 
         var didDocument = new
         {
+            @context = new[]
+            {
+                "https://www.w3.org/ns/did/v1",
+                "https://w3id.org/security/suites/ed25519-2020/v1"
+            },
             id = didIdentifier,
             verificationMethod = new[]
             {
@@ -300,31 +341,35 @@ public sealed class DidCreationService : IDidCreationService
     }
 
     /// <summary>
-    /// Converts bytes to Base58 encoding (Bitcoin alphabet)
-    /// MVP: Simplified implementation
-    /// v2: Use proper Base58 library
+    /// Securely zeros sensitive data from memory to prevent recovery from memory dumps.
+    /// Uses unsafe code to pin the array and ensure the compiler doesn't optimize away the zeroing.
     /// </summary>
-    /// <param name="data">Data to encode</param>
-    /// <returns>Base58-encoded string</returns>
-    private static string ConvertToBase58(byte[] data)
+    /// <param name="buffer">The sensitive buffer to zero</param>
+    private static void SecureZeroMemory(byte[] buffer)
     {
-        ArgumentNullException.ThrowIfNull(data);
-
-        const string base58Alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-
-        // MVP: Simple hex-like encoding using Base58 characters
-        // This is NOT proper Base58 encoding, but sufficient for MVP testing
-        // v2: Replace with proper Base58 encoding library
-
-        StringBuilder result = new StringBuilder();
-
-        foreach (byte b in data)
+        if (buffer == null || buffer.Length == 0)
         {
-            // Map each byte to Base58 characters
-            result.Append(base58Alphabet[b % base58Alphabet.Length]);
-            result.Append(base58Alphabet[(b / base58Alphabet.Length) % base58Alphabet.Length]);
+            return;
         }
 
-        return result.ToString();
+        // Pin the array in memory to prevent garbage collector from moving it
+        System.Runtime.InteropServices.GCHandle handle = System.Runtime.InteropServices.GCHandle.Alloc(buffer, System.Runtime.InteropServices.GCHandleType.Pinned);
+        try
+        {
+            // Use unsafe code to ensure zeroing isn't optimized away by the compiler
+            unsafe
+            {
+                byte* ptr = (byte*)handle.AddrOfPinnedObject();
+                for (int i = 0; i < buffer.Length; i++)
+                {
+                    ptr[i] = 0;
+                }
+            }
+        }
+        finally
+        {
+            handle.Free();
+        }
     }
+
 }

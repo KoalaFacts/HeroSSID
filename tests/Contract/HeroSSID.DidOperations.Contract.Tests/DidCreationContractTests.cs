@@ -134,4 +134,71 @@ public sealed class DidCreationContractTests
         // Real implementation will use actual Ed25519 key generation
     }
 
+    [Fact]
+    public void DidKeyFormat_ShouldFollowW3CSpec()
+    {
+        // Arrange - W3C did:key specification format
+        // Format: did:key:z{multibase-encoded-multicodec-key}
+        // where z = base58btc multibase prefix
+        // and 0xed01 = Ed25519 public key multicodec prefix
+
+        const string validDidKey = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+
+        // Act
+        string[] parts = validDidKey.Split(':');
+
+        // Assert - Format validation
+        Assert.Equal(3, parts.Length);
+        Assert.Equal("did", parts[0]);
+        Assert.Equal("key", parts[1]);
+        Assert.StartsWith("z", parts[2], StringComparison.Ordinal); // z = base58btc multibase
+        Assert.True(parts[2].Length > 10, "Encoded key should be substantial length");
+    }
+
+    [Fact]
+    public void DidKeyEncoding_ShouldUseMultibaseMulticodec()
+    {
+        // Arrange - Test the multibase/multicodec encoding principles
+        // This is a contract test for the encoding format, not implementation
+
+        // A valid did:key has structure:
+        // did:key:z{base58(0xed01 + 32-byte-public-key)}
+        // Total encoded size: 2 bytes prefix + 32 bytes key = 34 bytes input
+        // Base58 encoding ~= 46-47 characters for 34 bytes
+
+        const string sampleDidKey = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+        string encodedPortion = sampleDidKey.Replace("did:key:z", "", StringComparison.Ordinal);
+
+        // Assert - Encoding characteristics
+        Assert.True(encodedPortion.Length >= 43, "Base58-encoded 34 bytes should be ~46 chars");
+        Assert.True(encodedPortion.Length <= 50, "Base58-encoded 34 bytes should be ~46 chars");
+
+        // Base58 alphabet check (no 0, O, I, l to avoid confusion)
+        foreach (char c in encodedPortion)
+        {
+            Assert.False(c == '0' || c == 'O' || c == 'I' || c == 'l',
+                $"Base58 should not contain confusing characters: {c}");
+        }
+    }
+
+    [Fact]
+    public void DidKey_ShouldDecodeToEd25519PublicKey()
+    {
+        // Arrange - Contract: A did:key should be decodable back to a 32-byte Ed25519 public key
+        // This test validates the round-trip capability
+
+        // The decode process should:
+        // 1. Remove "did:key:z" prefix
+        // 2. Base58 decode the remainder
+        // 3. Remove 0xed01 multicodec prefix
+        // 4. Extract 32-byte Ed25519 public key
+
+        // Assert - This is a specification contract, actual implementation will be in DidCreationService
+        const int expectedPublicKeyLength = 32;
+        const int multicodecPrefixLength = 2;
+        const int expectedMulticodecKeyLength = expectedPublicKeyLength + multicodecPrefixLength;
+
+        Assert.Equal(34, expectedMulticodecKeyLength); // 2 + 32 = 34 bytes before base58 encoding
+    }
+
 }

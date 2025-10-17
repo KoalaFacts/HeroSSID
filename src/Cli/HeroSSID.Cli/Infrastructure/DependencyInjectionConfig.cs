@@ -31,9 +31,33 @@ internal static class DependencyInjectionConfig
         });
 
         // Data Protection for encryption
-        var keyStoragePath = configuration["Encryption:KeyStoragePath"] ?? "./keys";
+        // Use OS-specific secure storage by default, or override with absolute path
+        string? configuredPath = configuration["Encryption:KeyStoragePath"];
+        string keyStoragePath;
+
+        if (string.IsNullOrWhiteSpace(configuredPath))
+        {
+            // Use OS-specific secure application data directory
+            string appData = Environment.GetFolderPath(
+                Environment.SpecialFolder.ApplicationData,
+                Environment.SpecialFolderOption.Create);
+            keyStoragePath = Path.Combine(appData, "HeroSSID", "keys");
+        }
+        else
+        {
+            // Use configured absolute path
+            keyStoragePath = configuredPath;
+        }
+
+        var keyDirectory = new DirectoryInfo(keyStoragePath);
+        if (!keyDirectory.Exists)
+        {
+            keyDirectory.Create();
+            // Note: Consider setting ACLs here for production scenarios
+        }
+
         services.AddDataProtection()
-            .PersistKeysToFileSystem(new DirectoryInfo(keyStoragePath))
+            .PersistKeysToFileSystem(keyDirectory)
             .SetApplicationName("HeroSSID");
 
         // Core services
