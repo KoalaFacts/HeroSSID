@@ -1,37 +1,31 @@
-# HeroSSID - Self-Sovereign Identity Platform
+# HeroSSID - Australia's Self-Sovereign Identity Platform
 
-**Status**: 🔄 **PIVOTING TO MODERN STANDARDS** - Phase 2 Complete, Migrating to W3C/OpenWallet
-**Architecture**: CLI-first, W3C Standards-compliant, Modern SSI Stack
+**Status**: ✅ **W3C STANDARDS + OPENID4VC** - Building Australia's SSI Infrastructure
+**Architecture**: Production-ready, W3C-compliant, OpenID4VC wallet-compatible
 
-A production-ready CLI tool for decentralized identity management built on **W3C DID Core** and **Verifiable Credentials standards**, using modern `did:web` and `did:key` methods.
+A production-ready self-sovereign identity platform built on **W3C DID Core 1.0** and **W3C Verifiable Credentials 2.0**, with **OpenID4VC** wallet integration for global interoperability.
 
 ---
 
-## 🚨 **IMPORTANT: Technology Pivot Announcement (2025-10-17)**
+## 🎯 **Vision: Australia's Digital Sovereignty**
 
-HeroSSID is pivoting from Hyperledger Indy to **modern W3C/OpenWallet Foundation standards**:
+HeroSSID is building Australia's decentralized identity infrastructure to serve millions of businesses and individuals, positioning Australia as APAC's digital identity leader.
 
-### Why the Pivot?
-- ❌ **Hyperledger Indy SDK is deprecated**
-- ❌ **Hyperledger Aries moved to OpenWallet Foundation**
-- ✅ **W3C standards are industry-standard and future-proof**
-- ✅ **`did:web` and `did:key` are simpler, more practical**
-- ✅ **Our architecture is already 80% compatible**
+### Why HeroSSID?
+- ✅ **W3C Standards-Compliant** - DID Core 1.0 + VC 2.0 official specifications
+- ✅ **OpenID4VC Protocol** - Compatible with 30+ jurisdictions (UK, Switzerland, Japan, EU eIDAS 2.0)
+- ✅ **Australian Sovereignty** - Data residency, legal jurisdiction, local support
+- ✅ **.NET 9 Native** - Enterprise-grade, no deprecated dependencies
+- ✅ **Production-Ready** - Ed25519 cryptography, PostgreSQL 17, OAuth 2.0
 
-### What's Changing?
-- **Primary DID Method**: `did:web` (web-based DIDs using your domain)
-- **Secondary DID Method**: `did:key` (self-contained, offline-capable DIDs)
-- **Credential Format**: W3C Verifiable Credentials (JWT-VC)
-- **Protocols**: DIDComm v2, OpenID4VC (via OpenWallet Foundation's ACA-Py)
+### Technology Stack
+- **DID Methods**: `did:web` (primary), `did:key` (secondary)
+- **Credential Format**: W3C Verifiable Credentials (JWT-VC, JSON-LD)
+- **Wallet Protocols**: OpenID4VCI (issuance) + OpenID4VP (presentation)
+- **Cryptography**: .NET 9 native Ed25519 (Ed25519Signature2020)
+- **No Blockchain Required** - Web-based DIDs, optional DLT integration
 
-### What's NOT Changing?
-- ✅ .NET 9.0 stack
-- ✅ PostgreSQL database
-- ✅ CLI-first approach
-- ✅ Your existing DID data (backward compatible)
-- ✅ All Phase 2 work remains valid
-
-**📚 See [docs/PIVOT-PLAN.md](docs/PIVOT-PLAN.md) for full details.**
+**📚 See [docs/VISION.md](docs/VISION.md) for the full strategic vision.**
 
 ---
 
@@ -61,12 +55,11 @@ cd src/Services/HeroSSID.AppHost
 dotnet run
 
 # This automatically starts:
-# - PostgreSQL with PgAdmin
-# - Hyperledger Indy pool (Von Network)
+# - PostgreSQL 17 with PgAdmin
 # - Aspire Dashboard at http://localhost:15888
 ```
 
-**Alternative**: Use manual docker-compose (see [RUNNING-WITH-ASPIRE.md](RUNNING-WITH-ASPIRE.md) for details):
+**Alternative**: Use manual docker-compose:
 ```bash
 docker-compose up -d
 ```
@@ -81,11 +74,11 @@ dotnet ef database update --startup-project ../../Services/HeroSSID.AppHost
 # Run tests
 dotnet test
 
-# Run CLI (when ready)
-dotnet run --project src/Cli/HeroSSID.Cli
+# Run developer platform API
+dotnet run --project src/Services/HeroSSID.Api
 ```
 
-**See [RUNNING-WITH-ASPIRE.md](RUNNING-WITH-ASPIRE.md) for detailed setup and troubleshooting.**
+**See [GETTING-STARTED.md](GETTING-STARTED.md) for detailed setup and troubleshooting.**
 
 ---
 
@@ -94,25 +87,25 @@ dotnet run --project src/Cli/HeroSSID.Cli
 ```
 HeroSSID/
 ├── src/
-│   ├── HeroSSID.Cli/                    # CLI interface
 │   ├── Services/
+│   │   ├── HeroSSID.Api/                # REST API + OpenID4VC endpoints
 │   │   └── HeroSSID.AppHost/            # .NET Aspire orchestration
 │   ├── Libraries/
 │   │   ├── HeroSSID.Core/               # Domain models, interfaces
-│   │   ├── HeroSSID.Data/               # EF Core, entities
-│   │   ├── HeroSSID.DidOperations/      # DID creation
-│   │   ├── HeroSSID.SchemaManagement/   # Schemas + Credential Definitions
-│   │   ├── HeroSSID.CredentialIssuance/ # Credential issuance
-│   │   └── HeroSSID.CredentialVerification/ # Credential verification
+│   │   ├── HeroSSID.Data/               # EF Core, PostgreSQL entities
+│   │   ├── HeroSSID.DidOperations/      # W3C DID creation (did:web, did:key)
+│   │   ├── HeroSSID.CredentialIssuance/ # W3C VC issuance + OpenID4VCI
+│   │   ├── HeroSSID.CredentialVerification/ # W3C VC verification + OpenID4VP
+│   │   └── HeroSSID.OAuth/              # OAuth 2.0 authorization server
 │   └── Shared/
-│       ├── HeroSSID.Contracts/          # DTOs
-│       └── HeroSSID.LedgerClient/       # Indy SDK wrapper
+│       └── HeroSSID.Contracts/          # DTOs, API models
 ├── tests/
 │   ├── Unit/                            # Service unit tests
-│   ├── Integration/                     # End-to-end tests
-│   └── Contract/                        # Indy ledger tests
-├── specs/001-core-herossid-identity/    # 📚 Implementation plan & docs
-├── docker-compose.yml                   # Local infrastructure
+│   ├── Integration/                     # End-to-end API tests
+│   └── Interoperability/                # OpenID4VC wallet tests
+├── specs/001-core-herossid-identity/    # 📚 Implementation plan (Q3 2025)
+├── docs/                                # Vision, roadmap, pitch deck
+├── docker-compose.yml                   # PostgreSQL infrastructure
 └── HeroSSID.sln
 ```
 
@@ -120,81 +113,145 @@ HeroSSID/
 
 ## Documentation
 
-### Implementation Guides
-- **[specs/001-core-herossid-identity/README.md](specs/001-core-herossid-identity/README.md)** - MVP overview & quick start
-- **[specs/001-core-herossid-identity/tasks.md](specs/001-core-herossid-identity/tasks.md)** - 77-task implementation checklist
-- **[specs/001-core-herossid-identity/DEPENDENCIES-REVISED.md](specs/001-core-herossid-identity/DEPENDENCIES-REVISED.md)** - Dependency strategy (11 packages with Aspire)
+### Vision & Strategy
+- **[docs/VISION.md](docs/VISION.md)** - Australia's SSI Infrastructure vision (why this matters)
+- **[docs/STRATEGIC-ROADMAP.md](docs/STRATEGIC-ROADMAP.md)** - Path to 1 million credentials by 2026
+- **[docs/PITCH-DECK-OUTLINE.md](docs/PITCH-DECK-OUTLINE.md)** - Investor/government presentation guide
+
+### Implementation Guides (Q3 2025)
+- **[specs/001-core-herossid-identity/spec.md](specs/001-core-herossid-identity/spec.md)** - Feature specification (W3C + OpenID4VC)
+- **[specs/001-core-herossid-identity/plan.md](specs/001-core-herossid-identity/plan.md)** - 12-week technical implementation plan
+- **[specs/001-core-herossid-identity/tasks.md](specs/001-core-herossid-identity/tasks.md)** - Week 1-4 task breakdown
 
 ### Architecture & Decisions
-- **[specs/001-core-herossid-identity/mvp-architecture-decisions.md](specs/001-core-herossid-identity/mvp-architecture-decisions.md)** - 10 ADRs explaining design choices
-- **[specs/001-core-herossid-identity/data-model.md](specs/001-core-herossid-identity/data-model.md)** - Entity relationship model
-- **[specs/001-core-herossid-identity/plan.md](specs/001-core-herossid-identity/plan.md)** - Technical implementation plan
-
-### Future Planning
-- **[specs/001-core-herossid-identity/MVP-TO-FULL-PLATFORM-RECONCILIATION.md](specs/001-core-herossid-identity/MVP-TO-FULL-PLATFORM-RECONCILIATION.md)** - Migration path to v2.0+
+- **[specs/001-core-herossid-identity/architecture/ADR-001-pivot-to-w3c-did-methods.md](specs/001-core-herossid-identity/architecture/ADR-001-pivot-to-w3c-did-methods.md)** - W3C standards adoption decision
+- **[specs/001-core-herossid-identity/architecture/modern-ssi-stack-2025.md](specs/001-core-herossid-identity/architecture/modern-ssi-stack-2025.md)** - Modern SSI landscape analysis
 
 ---
 
 ## Technology Stack
 
-### Core Dependencies (11 NuGet packages)
-- **.NET 9.0** - Runtime and SDK
-- **.NET Aspire 9.5.1** - Cloud-native orchestration with dashboard
-- **PostgreSQL 17** - Database with EF Core
-- **Open Wallet Foundation SDK** - Hyperledger Indy/Aries integration
+### Core Dependencies
+- **.NET 9.0** - Runtime with native Ed25519 cryptography
+- **.NET Aspire 9.5.1** - Cloud-native orchestration
+- **PostgreSQL 17** - Primary database with EF Core 9
+- **SimpleBase** - Multibase/multicodec encoding (did:key format)
 - **xUnit.v3** - Testing framework
-- **Serilog** - File-based logging
-- **Spectre.Console** - Beautiful CLI interface
-- **System.CommandLine** - CLI command parsing
-- **Microsoft.Extensions.Caching.Memory** - In-memory caching for schema lookups
+- **ASP.NET Core 9** - REST API and OpenID4VC endpoints
+- **OAuth 2.0** - Authorization server for credential issuance
+
+### W3C Standards Implementation
+- **W3C DID Core 1.0** - DID document creation and resolution
+- **W3C Verifiable Credentials 2.0** - Credential data model
+- **Ed25519Signature2020** - Cryptographic proof suite
+- **JSON-LD and JWT-VC** - Credential serialization formats
+
+### OpenID4VC Protocols
+- **OpenID4VCI** - Wallet-based credential issuance
+- **OpenID4VP** - Wallet-based presentation protocol
+- **Presentation Exchange** - Flexible verification requests (DIF)
 
 ### Infrastructure
-- **.NET Aspire AppHost** - Service discovery and configuration management
-- **Docker Compose** - PostgreSQL + Indy test pool
-- **Von Network** - Local Hyperledger Indy test ledger
-
-See [DEPENDENCIES-REVISED.md](specs/001-core-herossid-identity/DEPENDENCIES-REVISED.md) for full rationale.
+- **.NET Aspire AppHost** - Service orchestration
+- **Docker Compose** - PostgreSQL infrastructure
+- **No blockchain required** - Web-based DIDs (did:web)
 
 ---
 
-## CLI Commands (Target - Day 20)
+## API Examples (Week 9-12 Target)
+
+### W3C DID Operations
 
 ```bash
-# Create a DID
-herossid did create --name "Acme University Issuer"
+# Create a did:web DID
+POST /api/dids
+{
+  "method": "web",
+  "domain": "herossid.au",
+  "verificationMethod": {
+    "type": "Ed25519VerificationKey2020",
+    "publicKeyMultibase": "z6Mk..."
+  }
+}
 
-# Publish a credential schema
-herossid schema publish \
-  --name "UniversityDegree" \
-  --version "1.0" \
-  --attributes "name,degree,university,graduationYear"
+# Resolve a DID
+GET /api/dids/{did}
+# Returns W3C DID Document with @context
 
-# Create credential definition
-herossid credential-definition create \
-  --schema <schema-id> \
-  --issuer <issuer-did>
+# Create a did:key DID (offline)
+POST /api/dids
+{
+  "method": "key",
+  "keyType": "Ed25519"
+}
+# Returns did:key:z6Mk... with embedded public key
+```
 
+### W3C Verifiable Credentials
+
+```bash
 # Issue a credential
-herossid credential issue \
-  --issuer <issuer-did> \
-  --holder <holder-did> \
-  --cred-def <cred-def-id> \
-  --attributes '{"name":"Alice Smith","degree":"BSc CS","university":"Acme University","graduationYear":"2024"}'
+POST /api/credentials/issue
+{
+  "issuer": "did:web:herossid.au",
+  "credentialSubject": {
+    "id": "did:key:z6Mk...",
+    "degree": "Bachelor of Computer Science",
+    "university": "University of Technology Sydney"
+  },
+  "type": ["VerifiableCredential", "UniversityDegreeCredential"]
+}
 
 # Verify a credential
-herossid credential verify --file credential.json
+POST /api/credentials/verify
+{
+  "verifiableCredential": { ... }
+}
+```
+
+### OpenID4VC Wallet Integration
+
+```bash
+# Create credential offer for wallet
+POST /openid4vci/offer
+{
+  "credentials": ["UniversityDegree"],
+  "subjectDid": "did:key:z6Mk..."
+}
+# Returns: openid-credential-offer://?credential_offer_uri=...
+
+# Wallet exchanges code for credential
+POST /oauth2/token
+{
+  "grant_type": "urn:ietf:params:oauth:grant-type:pre-authorized_code",
+  "pre-authorized_code": "eyJhbGc..."
+}
+
+POST /openid4vci/credential
+Authorization: Bearer {access_token}
+{
+  "format": "jwt_vc_json",
+  "credential_definition": {
+    "type": ["VerifiableCredential", "UniversityDegreeCredential"]
+  }
+}
 ```
 
 ---
 
 ## Development Workflow
 
+### Weekly Cadence (Q3 2025)
+1. **Week 1-4**: W3C Core (DID methods, Ed25519, multibase/multicodec)
+2. **Week 5-8**: Credential Issuance/Verification (W3C VC 2.0)
+3. **Week 9-10**: Developer Platform (REST API + OpenID4VC protocols)
+4. **Week 11-12**: SDKs and Documentation
+
 ### Daily Workflow (TDD)
 1. **Morning**: Read next task from [tasks.md](specs/001-core-herossid-identity/tasks.md)
 2. **Write Tests First**: Create unit/integration tests (verify they fail ⚠️)
 3. **Implement**: Make tests pass ✅
-4. **Integrate**: Add CLI command if needed
-5. **Commit**: One task per commit
+4. **Commit**: One task per commit with clear message
 
 ### Running Tests
 ```bash
@@ -222,12 +279,11 @@ dotnet ef database update PreviousMigrationName --project src/Libraries/HeroSSID
 
 ### Viewing Logs
 ```bash
-# View application logs
-tail -f logs/herossid-*.log
+# View Aspire Dashboard
+# Navigate to http://localhost:15888 for live logs, traces, and metrics
 
 # View Docker logs
 docker-compose logs -f postgres
-docker-compose logs -f indy-pool
 ```
 
 ---
@@ -237,84 +293,96 @@ docker-compose logs -f indy-pool
 ### appsettings.json
 ```json
 {
-  "Indy": {
-    "PoolName": "herossid-local-pool",
-    "GenesisPath": "./genesis/pool_transactions_genesis"
+  "DID": {
+    "DefaultMethod": "web",
+    "WebDomain": "herossid.au"
+  },
+  "Cryptography": {
+    "DefaultAlgorithm": "Ed25519",
+    "SignatureSuite": "Ed25519Signature2020"
+  },
+  "OpenID4VC": {
+    "IssuerUrl": "https://herossid.au",
+    "AuthorizationServer": "https://herossid.au/oauth2",
+    "TokenLifetimeSeconds": 3600
   },
   "Logging": {
-    "File": {
-      "Path": "./logs/herossid-.log"
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
     }
-  },
-  "Tenant": {
-    "DefaultTenantId": "11111111-1111-1111-1111-111111111111"
-  },
-  "Encryption": {
-    "Type": "Local",
-    "KeyStoragePath": "./keys"
   }
 }
 ```
 
 **Note**:
-- Connection strings are managed by .NET Aspire AppHost (no hardcoded strings needed)
-- For production, use environment variables or .NET secrets for sensitive values
-- Local encryption uses .NET Data Protection API (can swap to Azure Key Vault in v2.0)
+- Connection strings managed by .NET Aspire AppHost
+- Production: Use Azure Key Vault or AWS Secrets Manager
+- Ed25519 keys use .NET 9 native cryptography (no external dependencies)
 
 ---
 
-## MVP Scope (v1.0)
+## Q3 2025 Scope (12-Week Implementation)
 
-### ✅ Included
-- DID creation on Hyperledger Indy
-- Credential schema publishing
-- Credential definition management
-- Credential issuance (W3C VC format)
-- Credential verification
-- CLI interface
-- Single-tenant deployment
-- Local encryption (.NET Data Protection)
-- Full TDD test coverage
+### ✅ Week 1-4: W3C Core Foundation
+- W3C DID Core 1.0 compliance (did:web, did:key)
+- .NET 9 native Ed25519 cryptography
+- Proper multibase/multicodec encoding
+- DID method abstraction layer
+- W3C @context in all DID Documents
 
-### ⏸️ Deferred to v2.0+
-- Multi-tenancy (Month 2)
-- REST API (Month 2)
-- User authentication (Month 2)
-- Azure Key Vault encryption (optional - Month 2)
-- Credential revocation (Month 3)
-- DID resolution/deactivation (Month 3)
-- Distributed tracing & metrics (Month 3)
+### ✅ Week 5-8: Credential Lifecycle
+- W3C VC 2.0 data model implementation
+- Credential issuance API (JWT-VC and JSON-LD)
+- Credential verification with Ed25519Signature2020
+- Selective disclosure primitives
+- Revocation registry (placeholder)
 
-See [mvp-architecture-decisions.md](specs/001-core-herossid-identity/mvp-architecture-decisions.md) for rationale.
+### ✅ Week 9-12: Developer Platform + OpenID4VC
+- REST API with OpenAPI specification
+- OpenID4VCI protocol (wallet issuance)
+- OpenID4VP protocol (wallet presentations)
+- OAuth 2.0 authorization server
+- .NET SDK (NuGet) + JavaScript SDK (npm)
+- Developer sandbox and documentation
+
+### ⏸️ Deferred to Q4 2025+
+- Multi-tenancy (Q4 2025 - pilot deployments)
+- Consumer wallet apps (Q3 2026)
+- DIDComm v2 messaging (Q2 2026)
+- Credential marketplace (Q3 2026)
+
+See [plan.md](specs/001-core-herossid-identity/plan.md) for complete timeline.
 
 ---
 
-## Timeline
+## 12-Week Timeline (Q3 2025)
 
-| Week | Focus | Deliverable |
-|------|-------|-------------|
-| **Week 1** | Foundation (Days 1-7) | Can run CLI, connect to ledger/DB |
-| **Week 2** | DID Operations (Days 8-10) | `herossid did create` works |
-| **Week 3** | Schemas + Cred Defs (Days 11-15) | Can publish schemas |
-| **Week 4** | Issuance + Verification (Days 16-20) | Complete credential lifecycle ✅ |
+| Weeks | Focus | Key Deliverable |
+|-------|-------|-----------------|
+| **1-4** | W3C Core Foundation | did:web, did:key, Ed25519, multibase/multicodec |
+| **5-8** | Credential Lifecycle | W3C VC 2.0 issuance + verification |
+| **9-10** | REST API + OpenID4VC | OpenID4VCI, OpenID4VP, OAuth 2.0 server |
+| **11-12** | SDKs + Documentation | .NET SDK (NuGet), JS SDK (npm), developer docs |
 
-**Total**: 77 tasks in 20 days
+**Target**: Production-ready W3C + OpenID4VC platform by September 2025
 
 ---
 
 ## Contributing
 
 ### Development Setup
-1. Read [specs/001-core-herossid-identity/README.md](specs/001-core-herossid-identity/README.md)
-2. Review [tasks.md](specs/001-core-herossid-identity/tasks.md) for current progress
+1. Read [specs/001-core-herossid-identity/spec.md](specs/001-core-herossid-identity/spec.md) - Feature specification
+2. Review [tasks.md](specs/001-core-herossid-identity/tasks.md) for Week 1-4 tasks
 3. Follow TDD workflow (tests before implementation)
-4. Commit format: `[T###] Brief description` (e.g., `[T042] Implement DID creation service`)
+4. Check [VISION.md](docs/VISION.md) to understand the strategic context
 
 ### Code Quality Standards
 - ✅ Follow .NET coding conventions (enforced via `.editorconfig`)
-- ✅ All tests must pass before commit
+- ✅ All tests must pass before commit (xUnit.v3)
 - ✅ Test coverage >80% for service layer
 - ✅ No compiler warnings
+- ✅ W3C standards compliance (DID Core 1.0, VC 2.0)
 - ✅ Constitution compliance (see [.specify/memory/constitution.md](.specify/memory/constitution.md))
 
 ---
@@ -327,18 +395,23 @@ TBD - Add license information
 
 ## Support & Resources
 
-### Documentation
-- **Implementation Guide**: [specs/001-core-herossid-identity/](specs/001-core-herossid-identity/)
-- **W3C DID Core**: https://www.w3.org/TR/did-core/
-- **W3C Verifiable Credentials**: https://www.w3.org/TR/vc-data-model/
-- **Hyperledger Indy**: https://www.hyperledger.org/use/hyperledger-indy
+### W3C Standards
+- **W3C DID Core 1.0**: https://www.w3.org/TR/did-core/
+- **W3C Verifiable Credentials 2.0**: https://www.w3.org/TR/vc-data-model-2.0/
+- **Ed25519Signature2020**: https://w3c-ccg.github.io/lds-ed25519-2020/
 
-### External Resources
+### OpenID4VC Protocols
+- **OpenID4VCI Specification**: https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html
+- **OpenID4VP Specification**: https://openid.net/specs/openid-4-verifiable-presentations-1_0.html
+- **Presentation Exchange (DIF)**: https://identity.foundation/presentation-exchange/
+
+### Community
 - **Open Wallet Foundation**: https://openwallet.foundation/
-- **Von Network (Indy Test Pool)**: https://github.com/bcgov/von-network
+- **W3C Credentials Community Group**: https://www.w3.org/community/credentials/
+- **Decentralized Identity Foundation**: https://identity.foundation/
 
 ---
 
-**Built with** ❤️ **using .NET 9.0, Hyperledger Indy, and Test-Driven Development**
+**Built with** ❤️ **using .NET 9.0, W3C Standards, and OpenID4VC Protocols**
 
-*Last Updated: 2025-10-15 | Status: MVP Implementation Phase*
+*Last Updated: 2025-10-17 | Status: W3C + OpenID4VC Implementation Phase*
