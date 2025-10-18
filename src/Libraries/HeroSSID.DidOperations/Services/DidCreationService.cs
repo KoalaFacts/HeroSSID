@@ -201,11 +201,41 @@ public sealed class DidCreationService : IDidCreationService
                 try
                 {
                     await _dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+                    // SECURITY: Immediately clone the arrays for return result BEFORE clearing entity
+                    // This minimizes the time window where sensitive data exists in entity memory
+                    byte[] publicKeyForResult = (byte[])didEntity.PublicKeyEd25519.Clone();
+                    byte[] encryptedPrivateKeyForResult = (byte[])didEntity.PrivateKeyEd25519Encrypted.Clone();
+
+                    // SECURITY: Clear sensitive data from entity IMMEDIATELY after cloning for result
+                    // This minimizes sensitive data lifetime in memory
+                    SecureZeroMemory(didEntity.PublicKeyEd25519);
+                    SecureZeroMemory(didEntity.PrivateKeyEd25519Encrypted);
+                    _dbContext.Entry(didEntity).State = EntityState.Detached;
+
+                    s_logDidCreatedSuccessfully(_logger, didIdentifier, attempt, null);
+
+                    // Step 6: Return result with cloned arrays
+                    return new DidCreationResult
+                    {
+                        Id = didEntity.Id,
+                        TenantId = didEntity.TenantId,
+                        DidIdentifier = didIdentifier,
+                        PublicKey = publicKeyForResult,
+                        EncryptedPrivateKey = encryptedPrivateKeyForResult,
+                        DidDocumentJson = didDocumentJson,
+                        Status = "active",
+                        CreatedAt = createdAt
+                    };
                 }
                 catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) == true)
                 {
                     // Handle race condition where another thread created the same DID between our check and save
                     s_logRaceCondition(_logger, attempt, maxRetries, ex);
+
+                    // SECURITY: Clear sensitive data from failed entity before retrying
+                    SecureZeroMemory(didEntity.PublicKeyEd25519);
+                    SecureZeroMemory(didEntity.PrivateKeyEd25519Encrypted);
 
                     // Remove the failed entity from tracking
                     _dbContext.Entry(didEntity).State = EntityState.Detached;
@@ -220,31 +250,6 @@ public sealed class DidCreationService : IDidCreationService
                         throw new InvalidOperationException($"Failed to save DID after {maxRetries} attempts due to collisions", ex);
                     }
                 }
-
-                s_logDidCreatedSuccessfully(_logger, didIdentifier, attempt, null);
-
-                // Step 6: Return result
-                // Clone arrays to prevent external code from modifying stored data
-                var result = new DidCreationResult
-                {
-                    Id = didEntity.Id,
-                    TenantId = didEntity.TenantId,
-                    DidIdentifier = didEntity.DidIdentifier,
-                    PublicKey = (byte[])didEntity.PublicKeyEd25519.Clone(),
-                    EncryptedPrivateKey = (byte[])didEntity.PrivateKeyEd25519Encrypted.Clone(),
-                    DidDocumentJson = didEntity.DidDocumentJson,
-                    Status = didEntity.Status,
-                    CreatedAt = didEntity.CreatedAt
-                };
-
-                // SECURITY: Clear sensitive data from entity and detach from tracking
-                // After SaveChanges, we don't need the entity tracked anymore
-                // Clear arrays before detaching to minimize sensitive data in memory
-                SecureZeroMemory(didEntity.PublicKeyEd25519);
-                SecureZeroMemory(didEntity.PrivateKeyEd25519Encrypted);
-                _dbContext.Entry(didEntity).State = EntityState.Detached;
-
-                return result;
             }
             catch (Exception ex) when (attempt >= maxRetries ||
                                         (ex is not InvalidOperationException && ex is not DbUpdateException))
