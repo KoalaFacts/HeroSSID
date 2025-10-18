@@ -16,6 +16,7 @@ public sealed class W3cComplianceTests : IDisposable
 {
     private readonly HeroDbContext _dbContext;
     private readonly IKeyEncryptionService _mockEncryption;
+    private readonly ITenantContext _mockTenantContext;
     private readonly ILogger<DidCreationService> _mockLogger;
 
     public W3cComplianceTests()
@@ -28,6 +29,7 @@ public sealed class W3cComplianceTests : IDisposable
         _dbContext.Database.EnsureCreated();
 
         _mockEncryption = new MockKeyEncryptionService();
+        _mockTenantContext = new MockTenantContext();
         _mockLogger = new MockLogger();
     }
 
@@ -44,7 +46,7 @@ public sealed class W3cComplianceTests : IDisposable
         // Reference: https://www.w3.org/TR/did-core/#contexts
 
         // Arrange
-        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockLogger);
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act
         var result = await service.CreateDidAsync(TestContext.Current.CancellationToken);
@@ -62,7 +64,7 @@ public sealed class W3cComplianceTests : IDisposable
         // Reference: https://www.w3.org/TR/did-core/#contexts
 
         // Arrange
-        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockLogger);
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act
         var result = await service.CreateDidAsync(TestContext.Current.CancellationToken);
@@ -91,7 +93,7 @@ public sealed class W3cComplianceTests : IDisposable
         // Reference: https://www.w3.org/TR/did-core/#did-subject
 
         // Arrange
-        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockLogger);
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act
         var result = await service.CreateDidAsync(TestContext.Current.CancellationToken);
@@ -113,7 +115,7 @@ public sealed class W3cComplianceTests : IDisposable
         // Reference: https://www.w3.org/TR/did-core/#did-syntax
 
         // Arrange
-        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockLogger);
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act
         var result = await service.CreateDidAsync(TestContext.Current.CancellationToken);
@@ -140,7 +142,7 @@ public sealed class W3cComplianceTests : IDisposable
         // Reference: https://www.w3.org/TR/did-core/#verification-methods
 
         // Arrange
-        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockLogger);
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act
         var result = await service.CreateDidAsync(TestContext.Current.CancellationToken);
@@ -163,7 +165,7 @@ public sealed class W3cComplianceTests : IDisposable
         // Reference: https://www.w3.org/TR/did-core/#verification-methods
 
         // Arrange
-        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockLogger);
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act
         var result = await service.CreateDidAsync(TestContext.Current.CancellationToken);
@@ -191,7 +193,7 @@ public sealed class W3cComplianceTests : IDisposable
         // Reference: https://www.w3.org/TR/did-core/#verification-material
 
         // Arrange
-        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockLogger);
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act
         var result = await service.CreateDidAsync(TestContext.Current.CancellationToken);
@@ -219,7 +221,7 @@ public sealed class W3cComplianceTests : IDisposable
         // Reference: https://www.w3.org/TR/did-spec-registries/#publickeyMultibase
 
         // Arrange
-        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockLogger);
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act
         var result = await service.CreateDidAsync(TestContext.Current.CancellationToken);
@@ -244,7 +246,7 @@ public sealed class W3cComplianceTests : IDisposable
         // Reference: https://www.w3.org/TR/did-spec-registries/#verification-method-types
 
         // Arrange
-        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockLogger);
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act
         var result = await service.CreateDidAsync(TestContext.Current.CancellationToken);
@@ -280,7 +282,7 @@ public sealed class W3cComplianceTests : IDisposable
         // Reference: https://www.w3.org/TR/did-core/#authentication
 
         // Arrange
-        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockLogger);
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act
         var result = await service.CreateDidAsync(TestContext.Current.CancellationToken);
@@ -315,7 +317,7 @@ public sealed class W3cComplianceTests : IDisposable
         // Reference: https://www.w3.org/TR/did-core/#json
 
         // Arrange
-        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockLogger);
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act
         var result = await service.CreateDidAsync(TestContext.Current.CancellationToken);
@@ -332,7 +334,7 @@ public sealed class W3cComplianceTests : IDisposable
         // Prefer publicKeyMultibase instead
 
         // Arrange
-        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockLogger);
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act
         var result = await service.CreateDidAsync(TestContext.Current.CancellationToken);
@@ -356,7 +358,7 @@ public sealed class W3cComplianceTests : IDisposable
         // Reference: https://www.w3.org/TR/did-core/#verification-methods
 
         // Arrange
-        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockLogger);
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act
         var result = await service.CreateDidAsync(TestContext.Current.CancellationToken);
@@ -423,6 +425,11 @@ public sealed class W3cComplianceTests : IDisposable
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public bool IsEnabled(LogLevel logLevel) => false;
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) { }
+    }
+
+    private sealed class MockTenantContext : ITenantContext
+    {
+        public Guid GetCurrentTenantId() => Guid.Parse("11111111-1111-1111-1111-111111111111");
     }
 }
 #pragma warning restore CA1707

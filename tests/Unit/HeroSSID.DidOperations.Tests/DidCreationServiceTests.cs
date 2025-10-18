@@ -23,6 +23,7 @@ public sealed class DidCreationServiceTests : IAsyncLifetime
 {
     private HeroDbContext? _dbContext;
     private IKeyEncryptionService? _mockEncryption;
+    private ITenantContext? _mockTenantContext;
     private ILogger<DidCreationService>? _mockLogger;
     private bool _disposed;
 
@@ -64,6 +65,10 @@ public sealed class DidCreationServiceTests : IAsyncLifetime
             return encrypted;
         });
 
+        // Setup mocked tenant context
+        _mockTenantContext = Substitute.For<ITenantContext>();
+        _mockTenantContext.GetCurrentTenantId().Returns(Guid.Parse("11111111-1111-1111-1111-111111111111"));
+
         // Setup mocked logger
         _mockLogger = Substitute.For<ILogger<DidCreationService>>();
     }
@@ -91,9 +96,10 @@ public sealed class DidCreationServiceTests : IAsyncLifetime
         // Arrange
         Assert.NotNull(_dbContext);
         Assert.NotNull(_mockEncryption);
+        Assert.NotNull(_mockTenantContext);
         Assert.NotNull(_mockLogger);
 
-        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockLogger);
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act
         var result = await service.CreateDidAsync(TestContext.Current.CancellationToken);
@@ -109,9 +115,10 @@ public sealed class DidCreationServiceTests : IAsyncLifetime
         // Arrange
         Assert.NotNull(_dbContext);
         Assert.NotNull(_mockEncryption);
+        Assert.NotNull(_mockTenantContext);
         Assert.NotNull(_mockLogger);
 
-        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockLogger);
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act
         var result = await service.CreateDidAsync(TestContext.Current.CancellationToken);
@@ -128,9 +135,10 @@ public sealed class DidCreationServiceTests : IAsyncLifetime
         // Arrange
         Assert.NotNull(_dbContext);
         Assert.NotNull(_mockEncryption);
+        Assert.NotNull(_mockTenantContext);
         Assert.NotNull(_mockLogger);
 
-        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockLogger);
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act
         var result = await service.CreateDidAsync(TestContext.Current.CancellationToken);
@@ -151,9 +159,10 @@ public sealed class DidCreationServiceTests : IAsyncLifetime
         // Arrange
         Assert.NotNull(_dbContext);
         Assert.NotNull(_mockEncryption);
+        Assert.NotNull(_mockTenantContext);
         Assert.NotNull(_mockLogger);
 
-        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockLogger);
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act
         var result = await service.CreateDidAsync(TestContext.Current.CancellationToken);
@@ -174,6 +183,7 @@ public sealed class DidCreationServiceTests : IAsyncLifetime
     {
         // Arrange
         Assert.NotNull(_mockEncryption);
+        Assert.NotNull(_mockTenantContext);
         Assert.NotNull(_mockLogger);
 
         // Create a disposed DbContext to simulate database error
@@ -185,7 +195,7 @@ public sealed class DidCreationServiceTests : IAsyncLifetime
         await errorDbContext.Database.EnsureCreatedAsync(TestContext.Current.CancellationToken);
         await errorDbContext.DisposeAsync();
 
-        DidCreationService service = new DidCreationService(errorDbContext, _mockEncryption, _mockLogger);
+        DidCreationService service = new DidCreationService(errorDbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act & Assert
         await Assert.ThrowsAsync<ObjectDisposedException>(async () => await service.CreateDidAsync(TestContext.Current.CancellationToken).ConfigureAwait(true));
@@ -197,9 +207,10 @@ public sealed class DidCreationServiceTests : IAsyncLifetime
         // Arrange
         Assert.NotNull(_dbContext);
         Assert.NotNull(_mockEncryption);
+        Assert.NotNull(_mockTenantContext);
         Assert.NotNull(_mockLogger);
 
-        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockLogger);
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act
         var result = await service.CreateDidAsync(TestContext.Current.CancellationToken);
@@ -215,9 +226,10 @@ public sealed class DidCreationServiceTests : IAsyncLifetime
         // Arrange
         Assert.NotNull(_dbContext);
         Assert.NotNull(_mockEncryption);
+        Assert.NotNull(_mockTenantContext);
         Assert.NotNull(_mockLogger);
 
-        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockLogger);
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act
         var did1 = await service.CreateDidAsync(TestContext.Current.CancellationToken);
@@ -269,9 +281,10 @@ public sealed class DidCreationServiceTests : IAsyncLifetime
         // Arrange
         Assert.NotNull(_dbContext);
         Assert.NotNull(_mockEncryption);
+        Assert.NotNull(_mockTenantContext);
         Assert.NotNull(_mockLogger);
 
-        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockLogger);
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act
         var result = await service.CreateDidAsync(TestContext.Current.CancellationToken);

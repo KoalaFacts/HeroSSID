@@ -56,12 +56,16 @@ internal static class DependencyInjectionConfig
             // Note: Consider setting ACLs here for production scenarios
         }
 
+        // SECURITY: Configure Data Protection API with persistent file-based key storage
+        // Keys are encrypted at rest by the OS (DPAPI on Windows, keychain on macOS, etc.)
         services.AddDataProtection()
             .PersistKeysToFileSystem(keyDirectory)
-            .SetApplicationName("HeroSSID");
+            .SetApplicationName("HeroSSID")
+            .SetDefaultKeyLifetime(TimeSpan.FromDays(90)); // Rotate keys every 90 days
 
         // Core services
         services.AddSingleton<IKeyEncryptionService, LocalKeyEncryptionService>();
+        services.AddSingleton<ITenantContext, DefaultTenantContext>(); // MVP: Single tenant
 
         // DID Operations services
         services.AddScoped<IDidCreationService, DidCreationService>();

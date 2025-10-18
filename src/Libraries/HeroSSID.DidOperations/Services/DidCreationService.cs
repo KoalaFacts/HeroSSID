@@ -27,6 +27,7 @@ public sealed class DidCreationService : IDidCreationService
 
     private readonly HeroDbContext _dbContext;
     private readonly IKeyEncryptionService _keyEncryptionService;
+    private readonly ITenantContext _tenantContext;
     private readonly ILogger<DidCreationService> _logger;
 
     // LoggerMessage delegates
@@ -87,10 +88,12 @@ public sealed class DidCreationService : IDidCreationService
     public DidCreationService(
         HeroDbContext dbContext,
         IKeyEncryptionService keyEncryptionService,
+        ITenantContext tenantContext,
         ILogger<DidCreationService> logger)
     {
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
         _keyEncryptionService = keyEncryptionService ?? throw new ArgumentNullException(nameof(keyEncryptionService));
+        _tenantContext = tenantContext ?? throw new ArgumentNullException(nameof(tenantContext));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -170,13 +173,21 @@ public sealed class DidCreationService : IDidCreationService
                 byte[] publicKeyCopy = new byte[publicKey.Length];
                 Array.Copy(publicKey, publicKeyCopy, publicKey.Length);
 
+                // SECURITY: Clear original public key immediately after copy
+                SecureZeroMemory(publicKey);
+                publicKey = null;
+
                 byte[] encryptedPrivateKeyCopy = new byte[encryptedPrivateKey.Length];
                 Array.Copy(encryptedPrivateKey, encryptedPrivateKeyCopy, encryptedPrivateKey.Length);
+
+                // SECURITY: Clear original encrypted private key immediately after copy
+                SecureZeroMemory(encryptedPrivateKey);
+                encryptedPrivateKey = null;
 
                 DidEntity didEntity = new DidEntity
                 {
                     Id = Guid.NewGuid(),
-                    TenantId = HeroDbContext.DefaultTenantId,
+                    TenantId = _tenantContext.GetCurrentTenantId(),
                     DidIdentifier = didIdentifier,
                     PublicKeyEd25519 = publicKeyCopy,
                     PrivateKeyEd25519Encrypted = encryptedPrivateKeyCopy,
@@ -306,18 +317,24 @@ public sealed class DidCreationService : IDidCreationService
             throw new CryptographicException("Key generation produced invalid all-zero keys - insufficient entropy or generation failure");
         }
 
+        // SECURITY: Validate key pair by performing test signature/verification
+        // This ensures the keys are mathematically valid and work correctly
+        ValidateKeyPair(algorithm, publicKey, privateKey);
+
         return (publicKey, privateKey);
     }
 
     /// <summary>
     /// Validates that the system has sufficient entropy for secure key generation.
     /// SECURITY: This is a critical defense against weak key generation on systems with poor entropy sources.
+    /// Uses larger sample size and statistical tests for robust validation.
     /// </summary>
     /// <exception cref="CryptographicException">Thrown if entropy validation fails</exception>
     private static void ValidateSystemEntropy()
     {
-        // Generate test entropy from system RNG
-        byte[] entropyTest = new byte[32];
+        // Use larger sample for more reliable entropy testing
+        const int sampleSize = 256;
+        byte[] entropyTest = new byte[sampleSize];
         using (RandomNumberGenerator rng = RandomNumberGenerator.Create())
         {
             rng.GetBytes(entropyTest);
@@ -342,11 +359,88 @@ public sealed class DidCreationService : IDidCreationService
             throw new CryptographicException("CRITICAL: System RNG returned all 0xFF - insufficient entropy. Key generation aborted.");
         }
 
-        // 4. Check for minimal variance (at least 8 unique byte values expected in 32 bytes)
+        // 4. Check for sufficient unique values (require at least 50% unique bytes)
         int uniqueBytes = entropyTest.Distinct().Count();
-        if (uniqueBytes < 8)
+        int minUniqueBytes = sampleSize / 2; // 128 of 256
+        if (uniqueBytes < minUniqueBytes)
         {
-            throw new CryptographicException($"CRITICAL: System RNG has insufficient entropy - only {uniqueBytes} unique values in 32 bytes. Key generation aborted.");
+            throw new CryptographicException($"CRITICAL: System RNG has insufficient entropy - only {uniqueBytes} unique values in {sampleSize} bytes (minimum: {minUniqueBytes}). Key generation aborted.");
+        }
+
+        // 5. Chi-square test for uniform distribution
+        // Divide byte range (0-255) into 16 buckets of 16 values each
+        int[] buckets = new int[16];
+        foreach (byte b in entropyTest)
+        {
+            buckets[b / 16]++;
+        }
+
+        // Calculate chi-square statistic
+        double expectedCount = sampleSize / 16.0; // 256 / 16 = 16 samples per bucket expected
+        double chiSquare = buckets.Sum(count => Math.Pow(count - expectedCount, 2) / expectedCount);
+
+        // Chi-square critical value for 15 degrees of freedom at 99% confidence is ~30.58
+        // If chi-square exceeds this, the distribution is non-uniform (potential entropy issue)
+        const double chiSquareCriticalValue = 30.58;
+        if (chiSquare > chiSquareCriticalValue)
+        {
+            throw new CryptographicException($"CRITICAL: System RNG failed distribution test (chi-square: {chiSquare:F2} > {chiSquareCriticalValue}). Key generation aborted.");
+        }
+    }
+
+    /// <summary>
+    /// Validates a generated key pair by performing a test signature and verification.
+    /// SECURITY: This ensures the keys are mathematically valid and work correctly before storage.
+    /// </summary>
+    /// <param name="algorithm">The signature algorithm to use (Ed25519)</param>
+    /// <param name="publicKey">Public key bytes to validate</param>
+    /// <param name="privateKey">Private key bytes to validate</param>
+    /// <exception cref="CryptographicException">Thrown if key validation fails</exception>
+    private static void ValidateKeyPair(SignatureAlgorithm algorithm, byte[] publicKey, byte[] privateKey)
+    {
+        byte[]? testSignature = null;
+
+        try
+        {
+            // Create test message for signing
+            byte[] testMessage = System.Text.Encoding.UTF8.GetBytes("HeroSSID key validation test");
+
+            // Import private key and create test signature
+            using Key testKey = Key.Import(algorithm, privateKey, KeyBlobFormat.RawPrivateKey);
+            testSignature = algorithm.Sign(testKey, testMessage);
+
+            // Verify signature fails with null or empty signature
+            if (testSignature == null || testSignature.Length == 0)
+            {
+                throw new CryptographicException("Generated key pair validation failed: signature creation produced empty result");
+            }
+
+            // Import public key and verify the signature
+            PublicKey testPublicKey = PublicKey.Import(algorithm, publicKey, KeyBlobFormat.RawPublicKey);
+            bool isValid = algorithm.Verify(testPublicKey, testMessage, testSignature);
+
+            if (!isValid)
+            {
+                throw new CryptographicException("Generated key pair validation failed: signature verification failed");
+            }
+        }
+        catch (CryptographicException)
+        {
+            // Re-throw cryptographic exceptions as-is
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Wrap other exceptions with context
+            throw new CryptographicException("Generated key pair validation failed with unexpected error", ex);
+        }
+        finally
+        {
+            // SECURITY: Clear test signature from memory
+            if (testSignature != null)
+            {
+                SecureZeroMemory(testSignature);
+            }
         }
     }
 
@@ -374,31 +468,6 @@ public sealed class DidCreationService : IDidCreationService
 
         // 3. Add 'z' prefix for Base58 multibase encoding
         return $"did:key:z{multibaseKey}";
-    }
-
-    /// <summary>
-    /// Extracts the public key from a DID identifier
-    /// Reverses the multibase/multicodec encoding
-    /// </summary>
-    /// <param name="did">DID identifier (e.g., did:key:z...)</param>
-    /// <returns>Ed25519 public key (32 bytes)</returns>
-    private static byte[] ExtractPublicKeyFromDid(string did)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(did);
-
-        if (!did.StartsWith("did:key:z", StringComparison.Ordinal))
-        {
-            throw new ArgumentException("DID must start with 'did:key:z'", nameof(did));
-        }
-
-        // Extract multibase encoded portion
-        string multibaseKey = did.Replace("did:key:z", "", StringComparison.Ordinal);
-
-        // Decode Base58
-        byte[] multicodecKey = SimpleBase.Base58.Bitcoin.Decode(multibaseKey);
-
-        // Remove multicodec prefix and return public key
-        return MulticodecHelper.RemoveEd25519Prefix(multicodecKey);
     }
 
     /// <summary>

@@ -20,6 +20,7 @@ public sealed class DidCreationContractTests : IDisposable
 {
     private readonly HeroDbContext _dbContext;
     private readonly IKeyEncryptionService _mockEncryption;
+    private readonly ITenantContext _mockTenantContext;
     private readonly ILogger<DidCreationService> _mockLogger;
 
     public DidCreationContractTests()
@@ -32,6 +33,7 @@ public sealed class DidCreationContractTests : IDisposable
         _dbContext.Database.EnsureCreated();
 
         _mockEncryption = new MockKeyEncryptionService();
+        _mockTenantContext = new MockTenantContext();
         _mockLogger = new MockLogger();
     }
 
@@ -45,7 +47,7 @@ public sealed class DidCreationContractTests : IDisposable
     public async Task CreateDid_ShouldPersistToDatabase()
     {
         // Arrange
-        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockLogger);
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act - Call DidCreationService.CreateDidAsync()
         var result = await service.CreateDidAsync(TestContext.Current.CancellationToken);
@@ -65,7 +67,7 @@ public sealed class DidCreationContractTests : IDisposable
     public async Task GeneratedKeys_ShouldBeEd25519Format()
     {
         // Arrange
-        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockLogger);
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act - Generate keys using DidCreationService
         var result = await service.CreateDidAsync(TestContext.Current.CancellationToken);
@@ -282,5 +284,10 @@ public sealed class DidCreationContractTests : IDisposable
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public bool IsEnabled(LogLevel logLevel) => false;
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) { }
+    }
+
+    private sealed class MockTenantContext : ITenantContext
+    {
+        public Guid GetCurrentTenantId() => Guid.Parse("11111111-1111-1111-1111-111111111111");
     }
 }
