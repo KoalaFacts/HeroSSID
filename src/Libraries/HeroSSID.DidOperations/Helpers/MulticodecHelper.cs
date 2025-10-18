@@ -17,7 +17,7 @@ public static class MulticodecHelper
     /// <param name="publicKey">The 32-byte Ed25519 public key</param>
     /// <returns>A 34-byte array with the multicodec prefix</returns>
     /// <exception cref="ArgumentNullException">Thrown when publicKey is null</exception>
-    /// <exception cref="ArgumentException">Thrown when publicKey is not 32 bytes</exception>
+    /// <exception cref="ArgumentException">Thrown when publicKey is not 32 bytes or invalid</exception>
     public static byte[] AddEd25519Prefix(byte[] publicKey)
     {
         ArgumentNullException.ThrowIfNull(publicKey);
@@ -26,6 +26,22 @@ public static class MulticodecHelper
         {
             throw new ArgumentException(
                 $"Ed25519 public key must be {Ed25519PublicKeyLength} bytes, but was {publicKey.Length} bytes.",
+                nameof(publicKey));
+        }
+
+        // SECURITY: Validate key is not all zeros (indicates failed generation or attack)
+        if (publicKey.All(b => b == 0))
+        {
+            throw new ArgumentException(
+                "Invalid Ed25519 public key: all bytes are zero. This indicates key generation failure or malicious input.",
+                nameof(publicKey));
+        }
+
+        // SECURITY: Validate key is not all 0xFF (another common failure pattern)
+        if (publicKey.All(b => b == 0xFF))
+        {
+            throw new ArgumentException(
+                "Invalid Ed25519 public key: all bytes are 0xFF. This indicates key generation failure or malicious input.",
                 nameof(publicKey));
         }
 
@@ -64,6 +80,22 @@ public static class MulticodecHelper
 
         var result = new byte[Ed25519PublicKeyLength];
         Array.Copy(multicodecKey, 2, result, 0, Ed25519PublicKeyLength);
+
+        // SECURITY: Validate extracted key is not all zeros
+        if (result.All(b => b == 0))
+        {
+            throw new ArgumentException(
+                "Invalid Ed25519 public key after prefix removal: all bytes are zero.",
+                nameof(multicodecKey));
+        }
+
+        // SECURITY: Validate extracted key is not all 0xFF
+        if (result.All(b => b == 0xFF))
+        {
+            throw new ArgumentException(
+                "Invalid Ed25519 public key after prefix removal: all bytes are 0xFF.",
+                nameof(multicodecKey));
+        }
 
         return result;
     }

@@ -262,5 +262,34 @@ public sealed class DidCreationServiceTests : IAsyncLifetime
 
         Assert.Equal(32, samplePublicKey.Length);
     }
+
+    [Fact]
+    public async Task CreateDid_ShouldUsePublicKeyMultibase()
+    {
+        // Arrange
+        Assert.NotNull(_dbContext);
+        Assert.NotNull(_mockEncryption);
+        Assert.NotNull(_mockLogger);
+
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockLogger);
+
+        // Act
+        var result = await service.CreateDidAsync(TestContext.Current.CancellationToken);
+
+        // Assert - Verify DID document uses publicKeyMultibase with 'z' prefix
+        using var didDoc = System.Text.Json.JsonDocument.Parse(result.DidDocumentJson);
+        Assert.True(didDoc.RootElement.TryGetProperty("verificationMethod", out var vmArray));
+        Assert.True(vmArray.GetArrayLength() > 0);
+
+        var firstVm = vmArray[0];
+        Assert.True(firstVm.TryGetProperty("publicKeyMultibase", out var pkMultibase));
+
+        string? multibaseKey = pkMultibase.GetString();
+        Assert.NotNull(multibaseKey);
+        Assert.StartsWith("z", multibaseKey, StringComparison.Ordinal); // 'z' prefix indicates Base58 multibase encoding
+
+        // Verify publicKeyBase58 is NOT present (deprecated field)
+        Assert.False(firstVm.TryGetProperty("publicKeyBase58", out _));
+    }
 }
 #pragma warning restore CA1707

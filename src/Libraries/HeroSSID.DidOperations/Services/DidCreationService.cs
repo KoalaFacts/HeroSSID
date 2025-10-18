@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using HeroSSID.Core.Interfaces;
+using HeroSSID.Core.Models;
 using HeroSSID.Data;
 using HeroSSID.Data.Entities;
 using HeroSSID.DidOperations.Helpers;
@@ -213,8 +214,7 @@ public sealed class DidCreationService : IDidCreationService
 
                 // Step 6: Return result
                 // Clone arrays to prevent external code from modifying stored data
-                // Keys will be cleared in finally block after return
-                return new DidCreationResult
+                var result = new DidCreationResult
                 {
                     Id = didEntity.Id,
                     TenantId = didEntity.TenantId,
@@ -225,6 +225,15 @@ public sealed class DidCreationService : IDidCreationService
                     Status = didEntity.Status,
                     CreatedAt = didEntity.CreatedAt
                 };
+
+                // SECURITY: Clear sensitive data from entity and detach from tracking
+                // After SaveChanges, we don't need the entity tracked anymore
+                // Clear arrays before detaching to minimize sensitive data in memory
+                SecureZeroMemory(didEntity.PublicKeyEd25519);
+                SecureZeroMemory(didEntity.PrivateKeyEd25519Encrypted);
+                _dbContext.Entry(didEntity).State = EntityState.Detached;
+
+                return result;
             }
             catch (Exception ex) when (attempt >= maxRetries ||
                                         (ex is not InvalidOperationException && ex is not DbUpdateException))
@@ -266,6 +275,10 @@ public sealed class DidCreationService : IDidCreationService
     /// </remarks>
     private static (byte[] publicKey, byte[] privateKey) GenerateEd25519KeyPair()
     {
+        // SECURITY: Validate system has sufficient entropy before generating keys
+        // This protects against weak key generation on fresh VMs or containers with poor entropy
+        ValidateSystemEntropy();
+
         // Use NSec's Ed25519 signature algorithm
         SignatureAlgorithm algorithm = SignatureAlgorithm.Ed25519;
 
@@ -287,7 +300,54 @@ public sealed class DidCreationService : IDidCreationService
         // Note: Ed25519 private key is actually a 32-byte seed from which the keypair is derived
         byte[] privateKey = key.Export(KeyBlobFormat.RawPrivateKey);
 
+        // SECURITY: Validate generated keys are not all zeros (indicates failed generation)
+        if (publicKey.All(b => b == 0) || privateKey.All(b => b == 0))
+        {
+            throw new CryptographicException("Key generation produced invalid all-zero keys - insufficient entropy or generation failure");
+        }
+
         return (publicKey, privateKey);
+    }
+
+    /// <summary>
+    /// Validates that the system has sufficient entropy for secure key generation.
+    /// SECURITY: This is a critical defense against weak key generation on systems with poor entropy sources.
+    /// </summary>
+    /// <exception cref="CryptographicException">Thrown if entropy validation fails</exception>
+    private static void ValidateSystemEntropy()
+    {
+        // Generate test entropy from system RNG
+        byte[] entropyTest = new byte[32];
+        using (RandomNumberGenerator rng = RandomNumberGenerator.Create())
+        {
+            rng.GetBytes(entropyTest);
+        }
+
+        // Check for obvious patterns indicating poor entropy:
+        // 1. All bytes are the same (complete failure)
+        if (entropyTest.All(b => b == entropyTest[0]))
+        {
+            throw new CryptographicException("CRITICAL: System RNG failed entropy test - all bytes identical. Key generation aborted.");
+        }
+
+        // 2. All bytes are zero (common failure mode)
+        if (entropyTest.All(b => b == 0))
+        {
+            throw new CryptographicException("CRITICAL: System RNG returned all zeros - insufficient entropy. Key generation aborted.");
+        }
+
+        // 3. All bytes are 0xFF (another common failure mode)
+        if (entropyTest.All(b => b == 0xFF))
+        {
+            throw new CryptographicException("CRITICAL: System RNG returned all 0xFF - insufficient entropy. Key generation aborted.");
+        }
+
+        // 4. Check for minimal variance (at least 8 unique byte values expected in 32 bytes)
+        int uniqueBytes = entropyTest.Distinct().Count();
+        if (uniqueBytes < 8)
+        {
+            throw new CryptographicException($"CRITICAL: System RNG has insufficient entropy - only {uniqueBytes} unique values in 32 bytes. Key generation aborted.");
+        }
     }
 
     /// <summary>
@@ -355,25 +415,25 @@ public sealed class DidCreationService : IDidCreationService
         string publicKeyBase58 = SimpleBase.Base58.Bitcoin.Encode(publicKey);
         string verificationMethodId = $"{didIdentifier}#keys-1";
 
-        var didDocument = new
+        DidDocument didDocument = new DidDocument
         {
-            @context = new[]
+            Context = new[]
             {
                 "https://www.w3.org/ns/did/v1",
                 "https://w3id.org/security/suites/ed25519-2020/v1"
             },
-            id = didIdentifier,
-            verificationMethod = new[]
+            Id = didIdentifier,
+            VerificationMethod = new[]
             {
-                new
+                new VerificationMethod
                 {
-                    id = verificationMethodId,
-                    type = "Ed25519VerificationKey2020",
-                    controller = didIdentifier,
-                    publicKeyBase58 = publicKeyBase58
+                    Id = verificationMethodId,
+                    Type = "Ed25519VerificationKey2020",
+                    Controller = didIdentifier,
+                    PublicKeyMultibase = $"z{publicKeyBase58}"
                 }
             },
-            authentication = new[] { verificationMethodId }
+            Authentication = new[] { verificationMethodId }
         };
 
         return JsonSerializer.Serialize(didDocument, s_jsonOptions);
