@@ -105,11 +105,16 @@ public sealed class DidCreationService : IDidCreationService
         {
             attempt++;
 
+            // Initialize key variables outside try to ensure they're in scope for finally
+            byte[]? publicKey = null;
+            byte[]? privateKey = null;
+            byte[]? encryptedPrivateKey = null;
+
             try
             {
                 // Step 1: Generate Ed25519 key pair
                 s_logGeneratingKeyPair(_logger, attempt, maxRetries, null);
-                (byte[] publicKey, byte[] privateKey) = GenerateEd25519KeyPair();
+                (publicKey, privateKey) = GenerateEd25519KeyPair();
 
                 // Step 2: Generate DID identifier from public key
                 s_logGeneratingDidIdentifier(_logger, null);
@@ -123,10 +128,7 @@ public sealed class DidCreationService : IDidCreationService
                 {
                     s_logDidCollision(_logger, didIdentifier, attempt, maxRetries, null);
 
-                    // Securely clear keys from memory before retrying
-                    SecureZeroMemory(publicKey);
-                    SecureZeroMemory(privateKey);
-
+                    // Keys will be cleared in finally block
                     if (attempt < maxRetries)
                     {
                         continue; // Retry with new keys
@@ -139,10 +141,21 @@ public sealed class DidCreationService : IDidCreationService
 
                 // Step 3: Encrypt private key for secure storage
                 s_logEncryptingPrivateKey(_logger, null);
-                byte[] encryptedPrivateKey = _keyEncryptionService.Encrypt(privateKey);
+                encryptedPrivateKey = _keyEncryptionService.Encrypt(privateKey);
 
-                // Securely clear private key from memory immediately after encryption
+                // Validate encryption output is non-empty and different from input
+                if (encryptedPrivateKey == null || encryptedPrivateKey.Length == 0)
+                {
+                    throw new InvalidOperationException("Encryption service returned empty result");
+                }
+                if (encryptedPrivateKey.SequenceEqual(privateKey))
+                {
+                    throw new InvalidOperationException("Encryption service did not encrypt the private key");
+                }
+
+                // Securely clear private key from memory immediately after successful encryption
                 SecureZeroMemory(privateKey);
+                privateKey = null; // Mark as cleared
 
                 // Step 4: Create W3C DID Document
                 s_logCreatingDidDocument(_logger, null);
@@ -185,10 +198,7 @@ public sealed class DidCreationService : IDidCreationService
                     // Remove the failed entity from tracking
                     _dbContext.Entry(didEntity).State = EntityState.Detached;
 
-                    // Securely clear sensitive data from memory
-                    SecureZeroMemory(publicKey);
-                    SecureZeroMemory(encryptedPrivateKey);
-
+                    // Keys will be cleared in finally block
                     if (attempt < maxRetries)
                     {
                         continue; // Retry with new keys
@@ -201,19 +211,16 @@ public sealed class DidCreationService : IDidCreationService
 
                 s_logDidCreatedSuccessfully(_logger, didIdentifier, attempt, null);
 
-                // Step 6: Securely clear the local publicKey variable before returning
-                // Note: The entity already has a copy, so we can safely clear the local variable
-                SecureZeroMemory(publicKey);
-                SecureZeroMemory(encryptedPrivateKey);
-
-                // Step 7: Return result
+                // Step 6: Return result
+                // Clone arrays to prevent external code from modifying stored data
+                // Keys will be cleared in finally block after return
                 return new DidCreationResult
                 {
                     Id = didEntity.Id,
                     TenantId = didEntity.TenantId,
                     DidIdentifier = didEntity.DidIdentifier,
-                    PublicKey = didEntity.PublicKeyEd25519,
-                    EncryptedPrivateKey = didEntity.PrivateKeyEd25519Encrypted,
+                    PublicKey = (byte[])didEntity.PublicKeyEd25519.Clone(),
+                    EncryptedPrivateKey = (byte[])didEntity.PrivateKeyEd25519Encrypted.Clone(),
                     DidDocumentJson = didEntity.DidDocumentJson,
                     Status = didEntity.Status,
                     CreatedAt = didEntity.CreatedAt
@@ -224,6 +231,23 @@ public sealed class DidCreationService : IDidCreationService
             {
                 s_logDidCreationFailed(_logger, attempt, ex);
                 throw;
+            }
+            finally
+            {
+                // Always clear sensitive data from memory, regardless of success or failure
+                // This ensures keys are zeroed even if exceptions occur
+                if (publicKey != null)
+                {
+                    SecureZeroMemory(publicKey);
+                }
+                if (privateKey != null)
+                {
+                    SecureZeroMemory(privateKey);
+                }
+                if (encryptedPrivateKey != null)
+                {
+                    SecureZeroMemory(encryptedPrivateKey);
+                }
             }
         }
 
