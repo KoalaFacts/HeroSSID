@@ -69,6 +69,7 @@ internal static class DependencyInjectionConfig
 
         // DID Operations services
         services.AddScoped<IDidCreationService, DidCreationService>();
+        services.AddScoped<IDidSigningService, DidSigningService>();
 
         // Add structured logger
         services.AddSingleton(typeof(HeroSSID.Observability.StructuredLogger<>));
