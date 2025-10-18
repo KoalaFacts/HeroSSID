@@ -1,6 +1,7 @@
 using HeroSSID.Core.Interfaces;
 using HeroSSID.Core.Services;
 using HeroSSID.Data;
+using HeroSSID.DidOperations.DidMethods;
 using HeroSSID.DidOperations.Interfaces;
 using HeroSSID.DidOperations.Services;
 using Microsoft.AspNetCore.DataProtection;
@@ -66,6 +67,11 @@ internal static class DependencyInjectionConfig
         // Core services
         services.AddSingleton<IKeyEncryptionService, LocalKeyEncryptionService>();
         services.AddSingleton<ITenantContext, DefaultTenantContext>(); // MVP: Single tenant
+
+        // DID Method implementations
+        services.AddSingleton<IDidMethod, DidKeyMethod>();
+        services.AddSingleton<IDidMethod, DidWebMethod>();
+        services.AddSingleton<DidMethodResolver>();
 
         // DID Operations services
         services.AddScoped<IDidCreationService, DidCreationService>();

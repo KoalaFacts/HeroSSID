@@ -1,6 +1,7 @@
 using System.Text.Json;
 using HeroSSID.Core.Interfaces;
 using HeroSSID.Data;
+using HeroSSID.DidOperations.DidMethods;
 using HeroSSID.DidOperations.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -21,6 +22,7 @@ public sealed class DidCreationContractTests : IDisposable
     private readonly HeroDbContext _dbContext;
     private readonly IKeyEncryptionService _mockEncryption;
     private readonly ITenantContext _mockTenantContext;
+    private readonly DidMethodResolver _didMethodResolver;
     private readonly ILogger<DidCreationService> _mockLogger;
 
     public DidCreationContractTests()
@@ -35,6 +37,14 @@ public sealed class DidCreationContractTests : IDisposable
         _mockEncryption = new MockKeyEncryptionService();
         _mockTenantContext = new MockTenantContext();
         _mockLogger = new MockLogger();
+
+        // Setup DID method resolver with did:key and did:web implementations
+        IDidMethod[] didMethods = new IDidMethod[]
+        {
+            new DidKeyMethod(),
+            new DidWebMethod()
+        };
+        _didMethodResolver = new DidMethodResolver(didMethods);
     }
 
     public void Dispose()
@@ -47,7 +57,7 @@ public sealed class DidCreationContractTests : IDisposable
     public async Task CreateDid_ShouldPersistToDatabase()
     {
         // Arrange
-        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _didMethodResolver, _mockLogger);
 
         // Act - Call DidCreationService.CreateDidAsync()
         var result = await service.CreateDidAsync(TestContext.Current.CancellationToken);
@@ -67,7 +77,7 @@ public sealed class DidCreationContractTests : IDisposable
     public async Task GeneratedKeys_ShouldBeEd25519Format()
     {
         // Arrange
-        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
+        DidCreationService service = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, _didMethodResolver, _mockLogger);
 
         // Act - Generate keys using DidCreationService
         var result = await service.CreateDidAsync(TestContext.Current.CancellationToken);

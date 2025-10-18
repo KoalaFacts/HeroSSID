@@ -1,7 +1,5 @@
 using System.Security.Cryptography;
-using System.Text.Json;
 using HeroSSID.Core.Interfaces;
-using HeroSSID.Core.Models;
 using HeroSSID.Data;
 using HeroSSID.Data.Entities;
 using HeroSSID.DidOperations.Helpers;
@@ -20,14 +18,10 @@ namespace HeroSSID.DidOperations.Services;
 /// </summary>
 public sealed class DidCreationService : IDidCreationService
 {
-    private static readonly JsonSerializerOptions s_jsonOptions = new()
-    {
-        WriteIndented = true
-    };
-
     private readonly HeroDbContext _dbContext;
     private readonly IKeyEncryptionService _keyEncryptionService;
     private readonly ITenantContext _tenantContext;
+    private readonly DidMethodResolver _didMethodResolver;
     private readonly ILogger<DidCreationService> _logger;
 
     // LoggerMessage delegates
@@ -89,11 +83,13 @@ public sealed class DidCreationService : IDidCreationService
         HeroDbContext dbContext,
         IKeyEncryptionService keyEncryptionService,
         ITenantContext tenantContext,
+        DidMethodResolver didMethodResolver,
         ILogger<DidCreationService> logger)
     {
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
         _keyEncryptionService = keyEncryptionService ?? throw new ArgumentNullException(nameof(keyEncryptionService));
         _tenantContext = tenantContext ?? throw new ArgumentNullException(nameof(tenantContext));
+        _didMethodResolver = didMethodResolver ?? throw new ArgumentNullException(nameof(didMethodResolver));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -120,9 +116,10 @@ public sealed class DidCreationService : IDidCreationService
                 s_logGeneratingKeyPair(_logger, attempt, maxRetries, null);
                 (publicKey, privateKey) = GenerateEd25519KeyPair();
 
-                // Step 2: Generate DID identifier from public key
+                // Step 2: Generate DID identifier from public key using did:key method
                 s_logGeneratingDidIdentifier(_logger, null);
-                string didIdentifier = GenerateDidIdentifier(publicKey);
+                IDidMethod didMethod = _didMethodResolver.GetMethod("key");
+                string didIdentifier = didMethod.GenerateDidIdentifier(publicKey);
 
                 // Step 2a: Check for DID identifier collision
                 bool didExists = await _dbContext.Dids
@@ -161,9 +158,9 @@ public sealed class DidCreationService : IDidCreationService
                 SecureZeroMemory(privateKey);
                 privateKey = null; // Mark as cleared
 
-                // Step 4: Create W3C DID Document
+                // Step 4: Create W3C DID Document using did:key method
                 s_logCreatingDidDocument(_logger, null);
-                string didDocumentJson = CreateDidDocument(didIdentifier, publicKey);
+                string didDocumentJson = didMethod.CreateDidDocument(didIdentifier, publicKey);
 
                 // Step 5: Create entity and save to database
                 DateTimeOffset createdAt = DateTimeOffset.UtcNow;
@@ -447,70 +444,6 @@ public sealed class DidCreationService : IDidCreationService
                 SecureZeroMemory(testSignature);
             }
         }
-    }
-
-    /// <summary>
-    /// Generates a DID identifier from a public key
-    /// Format: did:key:z{multibase-multicodec-publicKey}
-    /// Implements W3C did:key spec with proper multibase/multicodec encoding
-    /// </summary>
-    /// <param name="publicKey">Ed25519 public key (32 bytes)</param>
-    /// <returns>DID identifier</returns>
-    private static string GenerateDidIdentifier(byte[] publicKey)
-    {
-        ArgumentNullException.ThrowIfNull(publicKey);
-
-        if (publicKey.Length != 32)
-        {
-            throw new ArgumentException("Public key must be 32 bytes for Ed25519", nameof(publicKey));
-        }
-
-        // 1. Add multicodec prefix (0xed01 for Ed25519-pub)
-        byte[] multicodecKey = MulticodecHelper.AddEd25519Prefix(publicKey);
-
-        // 2. Encode with Base58 Bitcoin alphabet
-        string multibaseKey = SimpleBase.Base58.Bitcoin.Encode(multicodecKey);
-
-        // 3. Add 'z' prefix for Base58 multibase encoding
-        return $"did:key:z{multibaseKey}";
-    }
-
-    /// <summary>
-    /// Creates a W3C DID Document (JSON-LD format)
-    /// </summary>
-    /// <param name="didIdentifier">The DID identifier</param>
-    /// <param name="publicKey">Ed25519 public key</param>
-    /// <returns>DID Document as JSON string</returns>
-    private static string CreateDidDocument(string didIdentifier, byte[] publicKey)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(didIdentifier);
-        ArgumentNullException.ThrowIfNull(publicKey);
-
-        string publicKeyBase58 = SimpleBase.Base58.Bitcoin.Encode(publicKey);
-        string verificationMethodId = $"{didIdentifier}#keys-1";
-
-        DidDocument didDocument = new DidDocument
-        {
-            Context = new[]
-            {
-                "https://www.w3.org/ns/did/v1",
-                "https://w3id.org/security/suites/ed25519-2020/v1"
-            },
-            Id = didIdentifier,
-            VerificationMethod = new[]
-            {
-                new VerificationMethod
-                {
-                    Id = verificationMethodId,
-                    Type = "Ed25519VerificationKey2020",
-                    Controller = didIdentifier,
-                    PublicKeyMultibase = $"z{publicKeyBase58}"
-                }
-            },
-            Authentication = new[] { verificationMethodId }
-        };
-
-        return JsonSerializer.Serialize(didDocument, s_jsonOptions);
     }
 
     /// <summary>

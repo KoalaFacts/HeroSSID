@@ -1,5 +1,6 @@
 using HeroSSID.Core.Interfaces;
 using HeroSSID.Data;
+using HeroSSID.DidOperations.DidMethods;
 using HeroSSID.DidOperations.Interfaces;
 using HeroSSID.DidOperations.Services;
 using Microsoft.EntityFrameworkCore;
@@ -66,8 +67,16 @@ public sealed class DidSigningServiceTests : IAsyncLifetime
         _mockLogger = Substitute.For<ILogger<DidSigningService>>();
         var mockDidCreationLogger = Substitute.For<ILogger<DidCreationService>>();
 
+        // Setup DID method resolver with did:key and did:web implementations
+        IDidMethod[] didMethods = new IDidMethod[]
+        {
+            new DidKeyMethod(),
+            new DidWebMethod()
+        };
+        var didMethodResolver = new DidMethodResolver(didMethods);
+
         // Create DID creation service for test setup
-        _didCreationService = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, mockDidCreationLogger);
+        _didCreationService = new DidCreationService(_dbContext, _mockEncryption, _mockTenantContext, didMethodResolver, mockDidCreationLogger);
     }
 
     public async ValueTask DisposeAsync()
