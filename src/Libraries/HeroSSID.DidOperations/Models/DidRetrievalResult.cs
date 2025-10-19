@@ -3,9 +3,12 @@ namespace HeroSSID.DidOperations.Models;
 /// <summary>
 /// Result of retrieving a DID from the database by ID.
 /// Similar to DidCreationResult but without sensitive private key material.
+/// SECURITY: Implements IDisposable to allow callers to securely clear public key arrays from memory.
+/// Always dispose of this object when done to ensure sensitive data is cleared.
 /// </summary>
-public sealed class DidRetrievalResult
+public sealed class DidRetrievalResult : IDisposable
 {
+    private bool _disposed;
     /// <summary>
     /// Internal database ID
     /// </summary>
@@ -41,4 +44,54 @@ public sealed class DidRetrievalResult
     /// When the DID was created
     /// </summary>
     public required DateTimeOffset CreatedAt { get; init; }
+
+    /// <summary>
+    /// Disposes the result and securely clears sensitive byte arrays from memory.
+    /// SECURITY: This uses the same SecureZeroMemory approach as DidCreationResult
+    /// to prevent sensitive data from remaining in memory or appearing in memory dumps.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        // Securely clear sensitive byte array
+        SecureZeroMemory(PublicKey);
+
+        _disposed = true;
+    }
+
+    /// <summary>
+    /// Securely zeros sensitive data from memory to prevent recovery from memory dumps.
+    /// Uses unsafe code to pin the array and ensure the compiler doesn't optimize away the zeroing.
+    /// </summary>
+    /// <param name="buffer">The sensitive buffer to zero</param>
+    private static void SecureZeroMemory(byte[] buffer)
+    {
+        if (buffer == null || buffer.Length == 0)
+        {
+            return;
+        }
+
+        // Pin the array in memory to prevent garbage collector from moving it
+        System.Runtime.InteropServices.GCHandle handle = System.Runtime.InteropServices.GCHandle.Alloc(buffer, System.Runtime.InteropServices.GCHandleType.Pinned);
+        try
+        {
+            // Use unsafe code to ensure zeroing isn't optimized away by the compiler
+            unsafe
+            {
+                byte* ptr = (byte*)handle.AddrOfPinnedObject();
+                for (int i = 0; i < buffer.Length; i++)
+                {
+                    ptr[i] = 0;
+                }
+            }
+        }
+        finally
+        {
+            handle.Free();
+        }
+    }
 }

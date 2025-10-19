@@ -17,16 +17,22 @@ public sealed class DidSigningService : IDidSigningService
 {
     private readonly HeroDbContext _dbContext;
     private readonly IKeyEncryptionService _keyEncryptionService;
+    private readonly ITenantContext _tenantContext;
+    private readonly IRateLimiter? _rateLimiter; // Optional for backward compatibility
     private readonly ILogger<DidSigningService> _logger;
 
     public DidSigningService(
         HeroDbContext dbContext,
         IKeyEncryptionService keyEncryptionService,
-        ILogger<DidSigningService> logger)
+        ITenantContext tenantContext,
+        ILogger<DidSigningService> logger,
+        IRateLimiter? rateLimiter = null) // Optional for backward compatibility
     {
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
         _keyEncryptionService = keyEncryptionService ?? throw new ArgumentNullException(nameof(keyEncryptionService));
+        _tenantContext = tenantContext ?? throw new ArgumentNullException(nameof(tenantContext));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _rateLimiter = rateLimiter; // Optional - will skip rate limiting if null
     }
 
     /// <inheritdoc />
@@ -35,10 +41,28 @@ public sealed class DidSigningService : IDidSigningService
         ArgumentException.ThrowIfNullOrWhiteSpace(didIdentifier);
         ArgumentNullException.ThrowIfNull(message);
 
-        // Retrieve DID from database
+        // SECURITY: Check rate limit to prevent resource exhaustion attacks
+        if (_rateLimiter != null)
+        {
+            Guid rateLimitTenantId = _tenantContext.GetCurrentTenantId();
+            bool isAllowed = await _rateLimiter.IsAllowedAsync(rateLimitTenantId, "DID_SIGN", cancellationToken).ConfigureAwait(false);
+
+            if (!isAllowed)
+            {
+                throw new InvalidOperationException("Rate limit exceeded for DID signing. Please try again later.");
+            }
+
+            // Record this operation for rate limiting
+            await _rateLimiter.RecordOperationAsync(rateLimitTenantId, "DID_SIGN", cancellationToken).ConfigureAwait(false);
+        }
+
+        // SECURITY: Get current tenant context
+        Guid tenantId = _tenantContext.GetCurrentTenantId();
+
+        // Retrieve DID from database with tenant isolation
         var didEntity = await _dbContext.Dids
             .AsNoTracking()
-            .FirstOrDefaultAsync(d => d.DidIdentifier == didIdentifier, cancellationToken)
+            .FirstOrDefaultAsync(d => d.DidIdentifier == didIdentifier && d.TenantId == tenantId, cancellationToken)
             .ConfigureAwait(false);
 
         if (didEntity == null)
@@ -88,10 +112,13 @@ public sealed class DidSigningService : IDidSigningService
         ArgumentNullException.ThrowIfNull(message);
         ArgumentNullException.ThrowIfNull(signature);
 
-        // Retrieve DID from database
+        // SECURITY: Get current tenant context
+        Guid tenantId = _tenantContext.GetCurrentTenantId();
+
+        // Retrieve DID from database with tenant isolation
         var didEntity = await _dbContext.Dids
             .AsNoTracking()
-            .FirstOrDefaultAsync(d => d.DidIdentifier == didIdentifier, cancellationToken)
+            .FirstOrDefaultAsync(d => d.DidIdentifier == didIdentifier && d.TenantId == tenantId, cancellationToken)
             .ConfigureAwait(false);
 
         if (didEntity == null)

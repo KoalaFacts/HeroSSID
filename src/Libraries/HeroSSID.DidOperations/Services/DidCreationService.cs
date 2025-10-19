@@ -22,6 +22,7 @@ public sealed class DidCreationService : IDidCreationService
     private readonly IKeyEncryptionService _keyEncryptionService;
     private readonly ITenantContext _tenantContext;
     private readonly DidMethodResolver _didMethodResolver;
+    private readonly IRateLimiter? _rateLimiter; // Optional for backward compatibility
     private readonly ILogger<DidCreationService> _logger;
 
     // LoggerMessage delegates
@@ -84,18 +85,35 @@ public sealed class DidCreationService : IDidCreationService
         IKeyEncryptionService keyEncryptionService,
         ITenantContext tenantContext,
         DidMethodResolver didMethodResolver,
-        ILogger<DidCreationService> logger)
+        ILogger<DidCreationService> logger,
+        IRateLimiter? rateLimiter = null) // Optional for backward compatibility
     {
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
         _keyEncryptionService = keyEncryptionService ?? throw new ArgumentNullException(nameof(keyEncryptionService));
         _tenantContext = tenantContext ?? throw new ArgumentNullException(nameof(tenantContext));
         _didMethodResolver = didMethodResolver ?? throw new ArgumentNullException(nameof(didMethodResolver));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _rateLimiter = rateLimiter; // Optional - will skip rate limiting if null
     }
 
     /// <inheritdoc />
     public async Task<DidCreationResult> CreateDidAsync(CancellationToken cancellationToken = default)
     {
+        // SECURITY: Check rate limit to prevent resource exhaustion attacks
+        if (_rateLimiter != null)
+        {
+            Guid tenantId = _tenantContext.GetCurrentTenantId();
+            bool isAllowed = await _rateLimiter.IsAllowedAsync(tenantId, "DID_CREATE", cancellationToken).ConfigureAwait(false);
+
+            if (!isAllowed)
+            {
+                throw new InvalidOperationException("Rate limit exceeded for DID creation. Please try again later.");
+            }
+
+            // Record this operation for rate limiting
+            await _rateLimiter.RecordOperationAsync(tenantId, "DID_CREATE", cancellationToken).ConfigureAwait(false);
+        }
+
         s_logStartingDidCreation(_logger, null);
 
         const int maxRetries = 3;
@@ -121,9 +139,12 @@ public sealed class DidCreationService : IDidCreationService
                 IDidMethod didMethod = _didMethodResolver.GetMethod("key");
                 string didIdentifier = didMethod.GenerateDidIdentifier(publicKey);
 
-                // Step 2a: Check for DID identifier collision
+                // SECURITY: Get tenant context for collision check
+                Guid tenantId = _tenantContext.GetCurrentTenantId();
+
+                // Step 2a: Check for DID identifier collision within tenant scope
                 bool didExists = await _dbContext.Dids
-                    .AnyAsync(d => d.DidIdentifier == didIdentifier, cancellationToken).ConfigureAwait(false);
+                    .AnyAsync(d => d.DidIdentifier == didIdentifier && d.TenantId == tenantId, cancellationToken).ConfigureAwait(false);
 
                 if (didExists)
                 {

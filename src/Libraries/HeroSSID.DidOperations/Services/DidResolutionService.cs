@@ -76,7 +76,7 @@ public sealed class DidResolutionService : IDidResolutionService
             return new DidResolutionResult
             {
                 DidIdentifier = didIdentifier,
-                Metadata = DidResolutionMetadata.CreateError("invalidDid", $"Invalid DID format: {didIdentifier}")
+                Metadata = DidResolutionMetadata.CreateError("invalidDid", "Invalid DID format")
             };
         }
 
@@ -86,7 +86,7 @@ public sealed class DidResolutionService : IDidResolutionService
             return new DidResolutionResult
             {
                 DidIdentifier = didIdentifier,
-                Metadata = DidResolutionMetadata.CreateError("methodNotSupported", $"DID method not supported for: {didIdentifier}")
+                Metadata = DidResolutionMetadata.CreateError("methodNotSupported", "DID method not supported")
             };
         }
 
@@ -105,7 +105,7 @@ public sealed class DidResolutionService : IDidResolutionService
             return new DidResolutionResult
             {
                 DidIdentifier = didIdentifier,
-                Metadata = DidResolutionMetadata.CreateError("notFound", $"DID not found: {didIdentifier}")
+                Metadata = DidResolutionMetadata.CreateError("notFound", "DID not found")
             };
         }
 

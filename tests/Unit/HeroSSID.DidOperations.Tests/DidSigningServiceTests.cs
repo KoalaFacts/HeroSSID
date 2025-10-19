@@ -102,6 +102,7 @@ public sealed class DidSigningServiceTests : IAsyncLifetime
         // Arrange
         Assert.NotNull(_dbContext);
         Assert.NotNull(_mockEncryption);
+        Assert.NotNull(_mockTenantContext);
         Assert.NotNull(_mockLogger);
         Assert.NotNull(_didCreationService);
 
@@ -109,7 +110,7 @@ public sealed class DidSigningServiceTests : IAsyncLifetime
         var didResult = await _didCreationService.CreateDidAsync(TestContext.Current.CancellationToken);
         byte[] testMessage = System.Text.Encoding.UTF8.GetBytes("Hello, HeroSSID!");
 
-        var signingService = new DidSigningService(_dbContext, _mockEncryption, _mockLogger);
+        var signingService = new DidSigningService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act
         byte[] signature = await signingService.SignAsync(didResult.DidIdentifier, testMessage, TestContext.Current.CancellationToken);
@@ -126,6 +127,7 @@ public sealed class DidSigningServiceTests : IAsyncLifetime
         // Arrange
         Assert.NotNull(_dbContext);
         Assert.NotNull(_mockEncryption);
+        Assert.NotNull(_mockTenantContext);
         Assert.NotNull(_mockLogger);
         Assert.NotNull(_didCreationService);
 
@@ -133,7 +135,7 @@ public sealed class DidSigningServiceTests : IAsyncLifetime
         var didResult = await _didCreationService.CreateDidAsync(TestContext.Current.CancellationToken);
         byte[] testMessage = System.Text.Encoding.UTF8.GetBytes("Test message for signing");
 
-        var signingService = new DidSigningService(_dbContext, _mockEncryption, _mockLogger);
+        var signingService = new DidSigningService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act - Sign message
         byte[] signature = await signingService.SignAsync(didResult.DidIdentifier, testMessage, TestContext.Current.CancellationToken);
@@ -151,6 +153,7 @@ public sealed class DidSigningServiceTests : IAsyncLifetime
         // Arrange
         Assert.NotNull(_dbContext);
         Assert.NotNull(_mockEncryption);
+        Assert.NotNull(_mockTenantContext);
         Assert.NotNull(_mockLogger);
         Assert.NotNull(_didCreationService);
 
@@ -158,7 +161,7 @@ public sealed class DidSigningServiceTests : IAsyncLifetime
         byte[] originalMessage = System.Text.Encoding.UTF8.GetBytes("Original message");
         byte[] tamperedMessage = System.Text.Encoding.UTF8.GetBytes("Tampered message");
 
-        var signingService = new DidSigningService(_dbContext, _mockEncryption, _mockLogger);
+        var signingService = new DidSigningService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Sign original message
         byte[] signature = await signingService.SignAsync(didResult.DidIdentifier, originalMessage, TestContext.Current.CancellationToken);
@@ -176,6 +179,7 @@ public sealed class DidSigningServiceTests : IAsyncLifetime
         // Arrange
         Assert.NotNull(_dbContext);
         Assert.NotNull(_mockEncryption);
+        Assert.NotNull(_mockTenantContext);
         Assert.NotNull(_mockLogger);
         Assert.NotNull(_didCreationService);
 
@@ -183,7 +187,7 @@ public sealed class DidSigningServiceTests : IAsyncLifetime
         byte[] message = System.Text.Encoding.UTF8.GetBytes("Test message");
         byte[] invalidSignature = new byte[64]; // All zeros - invalid signature
 
-        var signingService = new DidSigningService(_dbContext, _mockEncryption, _mockLogger);
+        var signingService = new DidSigningService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act
         bool isValid = await signingService.VerifyAsync(didResult.DidIdentifier, message, invalidSignature, TestContext.Current.CancellationToken);
@@ -198,13 +202,14 @@ public sealed class DidSigningServiceTests : IAsyncLifetime
         // Arrange
         Assert.NotNull(_dbContext);
         Assert.NotNull(_mockEncryption);
+        Assert.NotNull(_mockTenantContext);
         Assert.NotNull(_mockLogger);
         Assert.NotNull(_didCreationService);
 
         var didResult = await _didCreationService.CreateDidAsync(TestContext.Current.CancellationToken);
         byte[] message = System.Text.Encoding.UTF8.GetBytes("Test message");
 
-        var signingService = new DidSigningService(_dbContext, _mockEncryption, _mockLogger);
+        var signingService = new DidSigningService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Sign message
         byte[] signature = await signingService.SignAsync(didResult.DidIdentifier, message, TestContext.Current.CancellationToken);
@@ -222,9 +227,10 @@ public sealed class DidSigningServiceTests : IAsyncLifetime
         // Arrange
         Assert.NotNull(_dbContext);
         Assert.NotNull(_mockEncryption);
+        Assert.NotNull(_mockTenantContext);
         Assert.NotNull(_mockLogger);
 
-        var signingService = new DidSigningService(_dbContext, _mockEncryption, _mockLogger);
+        var signingService = new DidSigningService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
         byte[] message = System.Text.Encoding.UTF8.GetBytes("Test");
 
         // Act & Assert
@@ -238,9 +244,10 @@ public sealed class DidSigningServiceTests : IAsyncLifetime
         // Arrange
         Assert.NotNull(_dbContext);
         Assert.NotNull(_mockEncryption);
+        Assert.NotNull(_mockTenantContext);
         Assert.NotNull(_mockLogger);
 
-        var signingService = new DidSigningService(_dbContext, _mockEncryption, _mockLogger);
+        var signingService = new DidSigningService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
         byte[] invalidPublicKey = new byte[16]; // Wrong size - should be 32 bytes
         byte[] message = System.Text.Encoding.UTF8.GetBytes("Test");
         byte[] signature = new byte[64];
@@ -256,9 +263,10 @@ public sealed class DidSigningServiceTests : IAsyncLifetime
         // Arrange
         Assert.NotNull(_dbContext);
         Assert.NotNull(_mockEncryption);
+        Assert.NotNull(_mockTenantContext);
         Assert.NotNull(_mockLogger);
 
-        var signingService = new DidSigningService(_dbContext, _mockEncryption, _mockLogger);
+        var signingService = new DidSigningService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
         byte[] publicKey = new byte[32];
         byte[] message = System.Text.Encoding.UTF8.GetBytes("Test");
         byte[] invalidSignature = new byte[32]; // Wrong size - should be 64 bytes
@@ -274,6 +282,7 @@ public sealed class DidSigningServiceTests : IAsyncLifetime
         // Arrange
         Assert.NotNull(_dbContext);
         Assert.NotNull(_mockEncryption);
+        Assert.NotNull(_mockTenantContext);
         Assert.NotNull(_mockLogger);
         Assert.NotNull(_didCreationService);
 
@@ -281,7 +290,7 @@ public sealed class DidSigningServiceTests : IAsyncLifetime
         byte[] message1 = System.Text.Encoding.UTF8.GetBytes("Message 1");
         byte[] message2 = System.Text.Encoding.UTF8.GetBytes("Message 2");
 
-        var signingService = new DidSigningService(_dbContext, _mockEncryption, _mockLogger);
+        var signingService = new DidSigningService(_dbContext, _mockEncryption, _mockTenantContext, _mockLogger);
 
         // Act
         byte[] signature1 = await signingService.SignAsync(didResult.DidIdentifier, message1, TestContext.Current.CancellationToken);
