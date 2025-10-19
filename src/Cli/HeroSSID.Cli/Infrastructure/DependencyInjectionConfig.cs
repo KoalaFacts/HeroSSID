@@ -75,6 +75,7 @@ internal static class DependencyInjectionConfig
 
         // DID Operations services
         services.AddScoped<IDidCreationService, DidCreationService>();
+        services.AddScoped<IDidResolutionService, DidResolutionService>();
         services.AddScoped<IDidSigningService, DidSigningService>();
 
         // Add structured logger
