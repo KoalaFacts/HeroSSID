@@ -80,6 +80,12 @@ public sealed class DidCreationService : IDidCreationService
             new EventId(9, nameof(CreateDidAsync)),
             "Failed to create DID after {Attempt} attempts");
 
+    private static readonly Action<ILogger, Guid, Exception?> s_logKeyReuseDetected =
+        LoggerMessage.Define<Guid>(
+            LogLevel.Warning,
+            new EventId(10, nameof(CreateDidAsync)),
+            "Key reuse detected - same public key fingerprint already exists for tenant {TenantId}. Retrying with new key.");
+
     public DidCreationService(
         HeroDbContext dbContext,
         IKeyEncryptionService keyEncryptionService,
@@ -191,6 +197,33 @@ public sealed class DidCreationService : IDidCreationService
                 byte[] publicKeyCopy = new byte[publicKey.Length];
                 Array.Copy(publicKey, publicKeyCopy, publicKey.Length);
 
+                // SECURITY: Calculate key fingerprint for key reuse detection BEFORE clearing original
+                byte[] keyFingerprint = CalculateKeyFingerprint(publicKey);
+
+                // SECURITY: Check for key reuse within tenant scope
+                // TIMING ATTACK: SequenceEqual in EF Core LINQ translates to SQL comparison (database-side),
+                // so timing attacks are not a concern here as the comparison happens in PostgreSQL, not in .NET memory
+                Guid currentTenantId = _tenantContext.GetCurrentTenantId();
+                bool keyReused = await _dbContext.Dids
+                    .AnyAsync(d => d.KeyFingerprint.SequenceEqual(keyFingerprint) && d.TenantId == currentTenantId, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (keyReused)
+                {
+                    s_logKeyReuseDetected(_logger, currentTenantId, null);
+                    SecureZeroMemory(keyFingerprint);
+
+                    // Keys will be cleared in finally block
+                    if (attempt < maxRetries)
+                    {
+                        continue; // Retry with new keys
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException($"Failed to generate unique key pair after {maxRetries} attempts - key reuse detected");
+                    }
+                }
+
                 // SECURITY: Clear original public key immediately after copy
                 SecureZeroMemory(publicKey);
                 publicKey = null;
@@ -208,6 +241,7 @@ public sealed class DidCreationService : IDidCreationService
                     TenantId = _tenantContext.GetCurrentTenantId(),
                     DidIdentifier = didIdentifier,
                     PublicKeyEd25519 = publicKeyCopy,
+                    KeyFingerprint = keyFingerprint,
                     PrivateKeyEd25519Encrypted = encryptedPrivateKeyCopy,
                     DidDocumentJson = didDocumentJson,
                     Status = "active",
@@ -228,6 +262,7 @@ public sealed class DidCreationService : IDidCreationService
                     // SECURITY: Clear sensitive data from entity IMMEDIATELY after cloning for result
                     // This minimizes sensitive data lifetime in memory
                     SecureZeroMemory(didEntity.PublicKeyEd25519);
+                    SecureZeroMemory(didEntity.KeyFingerprint);
                     SecureZeroMemory(didEntity.PrivateKeyEd25519Encrypted);
                     _dbContext.Entry(didEntity).State = EntityState.Detached;
 
@@ -253,6 +288,7 @@ public sealed class DidCreationService : IDidCreationService
 
                     // SECURITY: Clear sensitive data from failed entity before retrying
                     SecureZeroMemory(didEntity.PublicKeyEd25519);
+                    SecureZeroMemory(didEntity.KeyFingerprint);
                     SecureZeroMemory(didEntity.PrivateKeyEd25519Encrypted);
 
                     // Remove the failed entity from tracking
@@ -465,6 +501,20 @@ public sealed class DidCreationService : IDidCreationService
                 SecureZeroMemory(testSignature);
             }
         }
+    }
+
+    /// <summary>
+    /// Calculates a SHA-256 fingerprint of a public key for key reuse detection.
+    /// </summary>
+    /// <param name="publicKey">The public key bytes to fingerprint</param>
+    /// <returns>32-byte SHA-256 hash of the public key</returns>
+    /// <remarks>
+    /// SECURITY: This fingerprint is used to detect if the same cryptographic key is being
+    /// reused across multiple DIDs, which is a security anti-pattern that reduces key isolation.
+    /// </remarks>
+    private static byte[] CalculateKeyFingerprint(byte[] publicKey)
+    {
+        return SHA256.HashData(publicKey);
     }
 
     /// <summary>

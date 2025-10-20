@@ -27,6 +27,16 @@ public sealed class DidEntity
     public required byte[] PublicKeyEd25519 { get; set; }
 
     /// <summary>
+    /// SHA-256 fingerprint of the public key for key reuse detection (32 bytes)
+    /// </summary>
+    /// <remarks>
+    /// SECURITY: Used to detect if the same cryptographic key is being reused across multiple DIDs,
+    /// which is a security anti-pattern that reduces key isolation.
+    /// </remarks>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1819:Properties should not return arrays", Justification = "Required for EF Core binary data mapping")]
+    public required byte[] KeyFingerprint { get; set; }
+
+    /// <summary>
     /// Encrypted Ed25519 private key (variable length)
     /// </summary>
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1819:Properties should not return arrays", Justification = "Required for EF Core binary data mapping")]
@@ -48,8 +58,6 @@ public sealed class DidEntity
     public DateTimeOffset CreatedAt { get; set; }
 
     // Navigation properties
-    public ICollection<CredentialSchemaEntity> PublishedSchemas { get; init; } = new List<CredentialSchemaEntity>();
-    public ICollection<CredentialDefinitionEntity> CredentialDefinitions { get; init; } = new List<CredentialDefinitionEntity>();
     public ICollection<VerifiableCredentialEntity> IssuedCredentials { get; init; } = new List<VerifiableCredentialEntity>();
     public ICollection<VerifiableCredentialEntity> HeldCredentials { get; init; } = new List<VerifiableCredentialEntity>();
 }

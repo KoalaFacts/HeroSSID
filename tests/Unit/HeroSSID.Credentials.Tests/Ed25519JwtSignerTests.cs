@@ -1,0 +1,175 @@
+using HeroSSID.Credentials.Utilities;
+using NSec.Cryptography;
+using System;
+using Xunit;
+
+namespace HeroSSID.Credentials.Tests;
+
+/// <summary>
+/// Tests for Ed25519 JWT signing and verification
+/// </summary>
+public sealed class Ed25519JwtSignerTests
+{
+    [Fact]
+    public void CreateSignedJwt_ValidInputs_ReturnsJwt()
+    {
+        // Arrange
+        var (privateKey, publicKey) = GenerateTestKeyPair();
+        var header = "{\"typ\":\"JWT\",\"alg\":\"EdDSA\"}";
+        var payload = "{\"iss\":\"test\",\"sub\":\"user123\"}";
+
+        // Act
+        var jwt = Ed25519JwtSigner.CreateSignedJwt(header, payload, privateKey);
+
+        // Assert
+        Assert.NotNull(jwt);
+        var parts = jwt.Split('.');
+        Assert.Equal(3, parts.Length); // header.payload.signature
+    }
+
+    [Fact]
+    public void CreateSignedJwt_AndVerify_Succeeds()
+    {
+        // Arrange
+        var (privateKey, publicKey) = GenerateTestKeyPair();
+        var header = "{\"typ\":\"JWT\",\"alg\":\"EdDSA\"}";
+        var payload = "{\"iss\":\"test\",\"sub\":\"user123\"}";
+
+        // Act
+        var jwt = Ed25519JwtSigner.CreateSignedJwt(header, payload, privateKey);
+        var isValid = Ed25519JwtSigner.VerifySignedJwt(jwt, publicKey);
+
+        // Assert
+        Assert.True(isValid);
+    }
+
+    [Fact]
+    public void VerifySignedJwt_TamperedPayload_ReturnsFalse()
+    {
+        // Arrange
+        var (privateKey, publicKey) = GenerateTestKeyPair();
+        var header = "{\"typ\":\"JWT\",\"alg\":\"EdDSA\"}";
+        var payload = "{\"iss\":\"test\",\"sub\":\"user123\"}";
+        var jwt = Ed25519JwtSigner.CreateSignedJwt(header, payload, privateKey);
+
+        // Tamper with the JWT by replacing the payload
+        var parts = jwt.Split('.');
+        var tamperedJwt = $"{parts[0]}.TAMPERED.{parts[2]}";
+
+        // Act
+        var isValid = Ed25519JwtSigner.VerifySignedJwt(tamperedJwt, publicKey);
+
+        // Assert
+        Assert.False(isValid);
+    }
+
+    [Fact]
+    public void VerifySignedJwt_WrongPublicKey_ReturnsFalse()
+    {
+        // Arrange
+        var (privateKey, _) = GenerateTestKeyPair();
+        var (_, wrongPublicKey) = GenerateTestKeyPair(); // Different key pair
+        var header = "{\"typ\":\"JWT\",\"alg\":\"EdDSA\"}";
+        var payload = "{\"iss\":\"test\",\"sub\":\"user123\"}";
+        var jwt = Ed25519JwtSigner.CreateSignedJwt(header, payload, privateKey);
+
+        // Act
+        var isValid = Ed25519JwtSigner.VerifySignedJwt(jwt, wrongPublicKey);
+
+        // Assert
+        Assert.False(isValid);
+    }
+
+    [Fact]
+    public void ExtractPayload_ValidJwt_ReturnsPayload()
+    {
+        // Arrange
+        var (privateKey, _) = GenerateTestKeyPair();
+        var header = "{\"typ\":\"JWT\",\"alg\":\"EdDSA\"}";
+        var payload = "{\"iss\":\"test\",\"sub\":\"user123\"}";
+        var jwt = Ed25519JwtSigner.CreateSignedJwt(header, payload, privateKey);
+
+        // Act
+        var extractedPayload = Ed25519JwtSigner.ExtractPayload(jwt);
+
+        // Assert
+        Assert.Equal(payload, extractedPayload);
+    }
+
+    [Fact]
+    public void ExtractHeader_ValidJwt_ReturnsHeader()
+    {
+        // Arrange
+        var (privateKey, _) = GenerateTestKeyPair();
+        var header = "{\"typ\":\"JWT\",\"alg\":\"EdDSA\"}";
+        var payload = "{\"iss\":\"test\",\"sub\":\"user123\"}";
+        var jwt = Ed25519JwtSigner.CreateSignedJwt(header, payload, privateKey);
+
+        // Act
+        var extractedHeader = Ed25519JwtSigner.ExtractHeader(jwt);
+
+        // Assert
+        Assert.Equal(header, extractedHeader);
+    }
+
+    [Fact]
+    public void CreateSignedJwt_NullHeader_ThrowsArgumentNullException()
+    {
+        // Arrange
+        var (privateKey, _) = GenerateTestKeyPair();
+
+        // Act & Assert
+        Assert.Throws<ArgumentNullException>(() =>
+            Ed25519JwtSigner.CreateSignedJwt(null!, "{}", privateKey));
+    }
+
+    [Fact]
+    public void CreateSignedJwt_NullPayload_ThrowsArgumentNullException()
+    {
+        // Arrange
+        var (privateKey, _) = GenerateTestKeyPair();
+
+        // Act & Assert
+        Assert.Throws<ArgumentNullException>(() =>
+            Ed25519JwtSigner.CreateSignedJwt("{}", null!, privateKey));
+    }
+
+    [Fact]
+    public void CreateSignedJwt_InvalidPrivateKeyLength_ThrowsArgumentException()
+    {
+        // Arrange
+        var invalidKey = new byte[16]; // Wrong length
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() =>
+            Ed25519JwtSigner.CreateSignedJwt("{}", "{}", invalidKey));
+
+        Assert.Contains("32 bytes", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void VerifySignedJwt_MalformedJwt_ReturnsFalse()
+    {
+        // Arrange
+        var (_, publicKey) = GenerateTestKeyPair();
+        var malformedJwt = "invalid.jwt"; // Only 2 parts
+
+        // Act
+        var isValid = Ed25519JwtSigner.VerifySignedJwt(malformedJwt, publicKey);
+
+        // Assert
+        Assert.False(isValid);
+    }
+
+    private static (byte[] privateKey, byte[] publicKey) GenerateTestKeyPair()
+    {
+        var algorithm = SignatureAlgorithm.Ed25519;
+        var keyParams = new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport };
+
+        using var key = Key.Create(algorithm, keyParams);
+        var privateKey = key.Export(KeyBlobFormat.RawPrivateKey);
+        var publicKey = key.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+
+        return (privateKey, publicKey);
+    }
+}

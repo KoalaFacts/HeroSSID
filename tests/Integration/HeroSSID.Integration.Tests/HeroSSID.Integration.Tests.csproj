@@ -24,6 +24,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Libraries\HeroSSID.DidOperations\HeroSSID.DidOperations.csproj" />
     <ProjectReference Include="..\..\..\src\Libraries\HeroSSID.Data\HeroSSID.Data.csproj" />
+    <ProjectReference Include="..\..\..\src\Libraries\HeroSSID.Credentials\HeroSSID.Credentials.csproj" />
   </ItemGroup>
 
 </Project>
