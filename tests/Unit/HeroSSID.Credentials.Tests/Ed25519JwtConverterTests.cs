@@ -13,7 +13,7 @@ namespace HeroSSID.Credentials.Tests;
 public sealed class Ed25519JwtConverterTests
 {
     [Fact]
-    public void ConvertToSecurityKey_ValidNSecPublicKey_ReturnsEd25519SecurityKey()
+    public void ConvertToSecurityKeyValidNSecPublicKeyReturnsEd25519SecurityKey()
     {
         // Arrange
         var publicKeyBytes = GenerateTestPublicKey();
@@ -27,7 +27,7 @@ public sealed class Ed25519JwtConverterTests
     }
 
     [Fact]
-    public void ConvertToSecurityKey_ValidPublicKey_KeyIdIsSet()
+    public void ConvertToSecurityKeyValidPublicKeyKeyIdIsSet()
     {
         // Arrange
         var publicKeyBytes = GenerateTestPublicKey();
@@ -41,7 +41,7 @@ public sealed class Ed25519JwtConverterTests
     }
 
     [Fact]
-    public void ConvertToSecurityKey_NullInput_ThrowsArgumentNullException()
+    public void ConvertToSecurityKeyNullInputThrowsArgumentNullException()
     {
         // Act & Assert
         Assert.Throws<ArgumentNullException>(() =>
@@ -49,7 +49,7 @@ public sealed class Ed25519JwtConverterTests
     }
 
     [Fact]
-    public void ConvertToSecurityKey_EmptyArray_ThrowsArgumentException()
+    public void ConvertToSecurityKeyEmptyArrayThrowsArgumentException()
     {
         // Arrange
         var emptyArray = Array.Empty<byte>();
@@ -60,7 +60,7 @@ public sealed class Ed25519JwtConverterTests
     }
 
     [Fact]
-    public void ConvertToSecurityKey_InvalidKeyLength_ThrowsArgumentException()
+    public void ConvertToSecurityKeyInvalidKeyLengthThrowsArgumentException()
     {
         // Arrange
         var invalidLengthKey = new byte[16]; // Ed25519 public keys are 32 bytes
@@ -71,7 +71,7 @@ public sealed class Ed25519JwtConverterTests
     }
 
     [Fact]
-    public void ConvertToSigningCredentials_ValidNSecPrivateKey_ReturnsSigningCredentials()
+    public void ConvertToSigningCredentialsValidNSecPrivateKeyReturnsSigningCredentials()
     {
         // Arrange
         var privateKeyBytes = GenerateTestPrivateKey();
@@ -85,7 +85,7 @@ public sealed class Ed25519JwtConverterTests
     }
 
     [Fact]
-    public void ConvertToSigningCredentials_ValidPrivateKey_AlgorithmIsEdDSA()
+    public void ConvertToSigningCredentialsValidPrivateKeyAlgorithmIsEdDSA()
     {
         // Arrange
         var privateKeyBytes = GenerateTestPrivateKey();
@@ -98,7 +98,7 @@ public sealed class Ed25519JwtConverterTests
     }
 
     [Fact]
-    public void ConvertToSigningCredentials_ValidPrivateKey_KeyIsEd25519SecurityKey()
+    public void ConvertToSigningCredentialsValidPrivateKeyKeyIsEd25519SecurityKey()
     {
         // Arrange
         var privateKeyBytes = GenerateTestPrivateKey();
@@ -111,7 +111,7 @@ public sealed class Ed25519JwtConverterTests
     }
 
     [Fact]
-    public void ConvertToSigningCredentials_NullInput_ThrowsArgumentNullException()
+    public void ConvertToSigningCredentialsNullInputThrowsArgumentNullException()
     {
         // Act & Assert
         Assert.Throws<ArgumentNullException>(() =>
@@ -119,7 +119,7 @@ public sealed class Ed25519JwtConverterTests
     }
 
     [Fact]
-    public void ConvertToSigningCredentials_EmptyArray_ThrowsArgumentException()
+    public void ConvertToSigningCredentialsEmptyArrayThrowsArgumentException()
     {
         // Arrange
         var emptyArray = Array.Empty<byte>();
@@ -130,7 +130,7 @@ public sealed class Ed25519JwtConverterTests
     }
 
     [Fact]
-    public void ConvertToSigningCredentials_InvalidKeyLength_ThrowsArgumentException()
+    public void ConvertToSigningCredentialsInvalidKeyLengthThrowsArgumentException()
     {
         // Arrange
         var invalidLengthKey = new byte[16]; // Ed25519 private keys are 32 bytes
@@ -141,7 +141,7 @@ public sealed class Ed25519JwtConverterTests
     }
 
     [Fact]
-    public void ConvertToSecurityKey_TwoCallsWithSamePublicKey_ReturnDifferentKeyIds()
+    public void ConvertToSecurityKeyTwoCallsWithSamePublicKeyReturnDifferentKeyIds()
     {
         // Arrange
         var publicKeyBytes = GenerateTestPublicKey();

@@ -11,7 +11,7 @@ namespace HeroSSID.Credentials.Tests;
 public sealed class Ed25519JwtSignerTests
 {
     [Fact]
-    public void CreateSignedJwt_ValidInputs_ReturnsJwt()
+    public void CreateSignedJwtValidInputsReturnsJwt()
     {
         // Arrange
         var (privateKey, publicKey) = GenerateTestKeyPair();
@@ -28,7 +28,7 @@ public sealed class Ed25519JwtSignerTests
     }
 
     [Fact]
-    public void CreateSignedJwt_AndVerify_Succeeds()
+    public void CreateSignedJwtAndVerifySucceeds()
     {
         // Arrange
         var (privateKey, publicKey) = GenerateTestKeyPair();
@@ -44,7 +44,7 @@ public sealed class Ed25519JwtSignerTests
     }
 
     [Fact]
-    public void VerifySignedJwt_TamperedPayload_ReturnsFalse()
+    public void VerifySignedJwtTamperedPayloadReturnsFalse()
     {
         // Arrange
         var (privateKey, publicKey) = GenerateTestKeyPair();
@@ -64,7 +64,7 @@ public sealed class Ed25519JwtSignerTests
     }
 
     [Fact]
-    public void VerifySignedJwt_WrongPublicKey_ReturnsFalse()
+    public void VerifySignedJwtWrongPublicKeyReturnsFalse()
     {
         // Arrange
         var (privateKey, _) = GenerateTestKeyPair();
@@ -81,7 +81,7 @@ public sealed class Ed25519JwtSignerTests
     }
 
     [Fact]
-    public void ExtractPayload_ValidJwt_ReturnsPayload()
+    public void ExtractPayloadValidJwtReturnsPayload()
     {
         // Arrange
         var (privateKey, _) = GenerateTestKeyPair();
@@ -97,7 +97,7 @@ public sealed class Ed25519JwtSignerTests
     }
 
     [Fact]
-    public void ExtractHeader_ValidJwt_ReturnsHeader()
+    public void ExtractHeaderValidJwtReturnsHeader()
     {
         // Arrange
         var (privateKey, _) = GenerateTestKeyPair();
@@ -113,7 +113,7 @@ public sealed class Ed25519JwtSignerTests
     }
 
     [Fact]
-    public void CreateSignedJwt_NullHeader_ThrowsArgumentNullException()
+    public void CreateSignedJwtNullHeaderThrowsArgumentNullException()
     {
         // Arrange
         var (privateKey, _) = GenerateTestKeyPair();
@@ -124,7 +124,7 @@ public sealed class Ed25519JwtSignerTests
     }
 
     [Fact]
-    public void CreateSignedJwt_NullPayload_ThrowsArgumentNullException()
+    public void CreateSignedJwtNullPayloadThrowsArgumentNullException()
     {
         // Arrange
         var (privateKey, _) = GenerateTestKeyPair();
@@ -135,7 +135,7 @@ public sealed class Ed25519JwtSignerTests
     }
 
     [Fact]
-    public void CreateSignedJwt_InvalidPrivateKeyLength_ThrowsArgumentException()
+    public void CreateSignedJwtInvalidPrivateKeyLengthThrowsArgumentException()
     {
         // Arrange
         var invalidKey = new byte[16]; // Wrong length
@@ -148,7 +148,7 @@ public sealed class Ed25519JwtSignerTests
     }
 
     [Fact]
-    public void VerifySignedJwt_MalformedJwt_ReturnsFalse()
+    public void VerifySignedJwtMalformedJwtReturnsFalse()
     {
         // Arrange
         var (_, publicKey) = GenerateTestKeyPair();

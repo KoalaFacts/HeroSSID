@@ -11,7 +11,7 @@ namespace HeroSSID.Credentials.Tests;
 public sealed class Base64UrlEncoderTests
 {
     [Fact]
-    public void Encode_ByteArray_ReturnsBase64UrlString()
+    public void EncodeByteArrayReturnsBase64UrlString()
     {
         // Arrange
         var input = new byte[] { 0x48, 0x65, 0x6C, 0x6C, 0x6F }; // "Hello"
@@ -27,7 +27,7 @@ public sealed class Base64UrlEncoderTests
     }
 
     [Fact]
-    public void Encode_String_ReturnsBase64UrlString()
+    public void EncodeStringReturnsBase64UrlString()
     {
         // Arrange
         var input = "Hello World";
@@ -41,7 +41,7 @@ public sealed class Base64UrlEncoderTests
     }
 
     [Fact]
-    public void DecodeBytes_ValidBase64Url_ReturnsOriginalBytes()
+    public void DecodeBytesValidBase64UrlReturnsOriginalBytes()
     {
         // Arrange
         var original = new byte[] { 0x48, 0x65, 0x6C, 0x6C, 0x6F };
@@ -55,7 +55,7 @@ public sealed class Base64UrlEncoderTests
     }
 
     [Fact]
-    public void DecodeString_ValidBase64Url_ReturnsOriginalString()
+    public void DecodeStringValidBase64UrlReturnsOriginalString()
     {
         // Arrange
         var original = "Hello World";
@@ -69,7 +69,7 @@ public sealed class Base64UrlEncoderTests
     }
 
     [Fact]
-    public void RoundTrip_ByteArray_PreservesData()
+    public void RoundTripByteArrayPreservesData()
     {
         // Arrange
         var original = Encoding.UTF8.GetBytes("Test data with special chars: +/=");
@@ -83,7 +83,7 @@ public sealed class Base64UrlEncoderTests
     }
 
     [Fact]
-    public void RoundTrip_String_PreservesData()
+    public void RoundTripStringPreservesData()
     {
         // Arrange
         var original = "JWT payload: {\"iss\":\"did:web:example.com\",\"sub\":\"holder123\"}";
@@ -97,7 +97,7 @@ public sealed class Base64UrlEncoderTests
     }
 
     [Fact]
-    public void Encode_NullByteArray_ThrowsArgumentNullException()
+    public void EncodeNullByteArrayThrowsArgumentNullException()
     {
         // Arrange
         byte[]? input = null;
@@ -107,7 +107,7 @@ public sealed class Base64UrlEncoderTests
     }
 
     [Fact]
-    public void Encode_NullString_ThrowsArgumentNullException()
+    public void EncodeNullStringThrowsArgumentNullException()
     {
         // Arrange
         string? input = null;
@@ -117,7 +117,7 @@ public sealed class Base64UrlEncoderTests
     }
 
     [Fact]
-    public void DecodeBytes_NullInput_ThrowsArgumentNullException()
+    public void DecodeBytesNullInputThrowsArgumentNullException()
     {
         // Arrange
         string? input = null;
@@ -127,7 +127,7 @@ public sealed class Base64UrlEncoderTests
     }
 
     [Fact]
-    public void DecodeString_NullInput_ThrowsArgumentNullException()
+    public void DecodeStringNullInputThrowsArgumentNullException()
     {
         // Arrange
         string? input = null;
@@ -137,7 +137,7 @@ public sealed class Base64UrlEncoderTests
     }
 
     [Fact]
-    public void Encode_EmptyByteArray_ReturnsEmptyString()
+    public void EncodeEmptyByteArrayReturnsEmptyString()
     {
         // Arrange
         var input = Array.Empty<byte>();
@@ -150,7 +150,7 @@ public sealed class Base64UrlEncoderTests
     }
 
     [Fact]
-    public void Encode_EmptyString_ReturnsEmptyString()
+    public void EncodeEmptyStringReturnsEmptyString()
     {
         // Arrange
         var input = string.Empty;

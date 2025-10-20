@@ -34,10 +34,10 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task IssueCredentialAsync_ValidInput_ReturnsJwtVc()
+    public async Task IssueCredentialAsyncValidInputReturnsJwtVc()
     {
         // Arrange
-        var (issuerDidId, holderDidId) = await SeedTestDidsAsync();
+        var (issuerDidId, holderDidId) = await SeedTestDidsAsync().ConfigureAwait(true);
         var credentialSubject = new Dictionary<string, object>
         {
             ["degree"] = "Bachelor of Science",
@@ -52,7 +52,7 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
             issuerDidId,
             holderDidId,
             "UniversityDegreeCredential",
-            credentialSubject);
+            credentialSubject).ConfigureAwait(true);
 
         // Assert
         Assert.NotNull(jwtVc);
@@ -61,10 +61,10 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task IssueCredentialAsync_ValidInput_StoresCredentialInDatabase()
+    public async Task IssueCredentialAsyncValidInputStoresCredentialInDatabase()
     {
         // Arrange
-        var (issuerDidId, holderDidId) = await SeedTestDidsAsync();
+        var (issuerDidId, holderDidId) = await SeedTestDidsAsync().ConfigureAwait(true);
         var credentialSubject = new Dictionary<string, object>
         {
             ["degree"] = "Bachelor of Science"
@@ -78,11 +78,11 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
             issuerDidId,
             holderDidId,
             "UniversityDegreeCredential",
-            credentialSubject);
+            credentialSubject).ConfigureAwait(true);
 
         // Assert
         var storedCredential = await _dbContext.VerifiableCredentials
-            .FirstOrDefaultAsync(c => c.IssuerDidId == issuerDidId && c.HolderDidId == holderDidId);
+            .FirstOrDefaultAsync(c => c.IssuerDidId == issuerDidId && c.HolderDidId == holderDidId).ConfigureAwait(true);
 
         Assert.NotNull(storedCredential);
         Assert.Equal("UniversityDegreeCredential", storedCredential.CredentialType);
@@ -92,10 +92,10 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task IssueCredentialAsync_WithExpirationDate_SetsExpiresAt()
+    public async Task IssueCredentialAsyncWithExpirationDateSetsExpiresAt()
     {
         // Arrange
-        var (issuerDidId, holderDidId) = await SeedTestDidsAsync();
+        var (issuerDidId, holderDidId) = await SeedTestDidsAsync().ConfigureAwait(true);
         var credentialSubject = new Dictionary<string, object> { ["claim"] = "value" };
         var expirationDate = DateTimeOffset.UtcNow.AddYears(1);
 
@@ -108,11 +108,11 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
             holderDidId,
             "TestCredential",
             credentialSubject,
-            expirationDate);
+            expirationDate).ConfigureAwait(true);
 
         // Assert
         var storedCredential = await _dbContext.VerifiableCredentials
-            .FirstOrDefaultAsync(c => c.IssuerDidId == issuerDidId);
+            .FirstOrDefaultAsync(c => c.IssuerDidId == issuerDidId).ConfigureAwait(true);
 
         Assert.NotNull(storedCredential);
         Assert.NotNull(storedCredential.ExpiresAt);
@@ -120,10 +120,10 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task IssueCredentialAsync_NullTenantContext_ThrowsArgumentNullException()
+    public async Task IssueCredentialAsyncNullTenantContextThrowsArgumentNullException()
     {
         // Arrange
-        var (issuerDidId, holderDidId) = await SeedTestDidsAsync();
+        var (issuerDidId, holderDidId) = await SeedTestDidsAsync().ConfigureAwait(true);
         var service = CreateService();
 
         // Act & Assert
@@ -133,14 +133,14 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
                 issuerDidId,
                 holderDidId,
                 "TestCredential",
-                new Dictionary<string, object>()));
+                new Dictionary<string, object>()).ConfigureAwait(true)).ConfigureAwait(true);
     }
 
     [Fact]
-    public async Task IssueCredentialAsync_NullCredentialType_ThrowsArgumentNullException()
+    public async Task IssueCredentialAsyncNullCredentialTypeThrowsArgumentNullException()
     {
         // Arrange
-        var (issuerDidId, holderDidId) = await SeedTestDidsAsync();
+        var (issuerDidId, holderDidId) = await SeedTestDidsAsync().ConfigureAwait(true);
         var service = CreateService();
 
         // Act & Assert
@@ -150,14 +150,14 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
                 issuerDidId,
                 holderDidId,
                 null!,
-                new Dictionary<string, object>()));
+                new Dictionary<string, object>()).ConfigureAwait(true)).ConfigureAwait(true);
     }
 
     [Fact]
-    public async Task IssueCredentialAsync_NullCredentialSubject_ThrowsArgumentNullException()
+    public async Task IssueCredentialAsyncNullCredentialSubjectThrowsArgumentNullException()
     {
         // Arrange
-        var (issuerDidId, holderDidId) = await SeedTestDidsAsync();
+        var (issuerDidId, holderDidId) = await SeedTestDidsAsync().ConfigureAwait(true);
         var service = CreateService();
 
         // Act & Assert
@@ -167,14 +167,14 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
                 issuerDidId,
                 holderDidId,
                 "TestCredential",
-                null!));
+                null!).ConfigureAwait(true)).ConfigureAwait(true);
     }
 
     [Fact]
-    public async Task IssueCredentialAsync_IssuerDidNotFound_ThrowsArgumentException()
+    public async Task IssueCredentialAsyncIssuerDidNotFoundThrowsArgumentException()
     {
         // Arrange
-        var (_, holderDidId) = await SeedTestDidsAsync();
+        var (_, holderDidId) = await SeedTestDidsAsync().ConfigureAwait(true);
         var nonExistentIssuerId = Guid.NewGuid();
         var service = CreateService();
 
@@ -185,16 +185,16 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
                 nonExistentIssuerId,
                 holderDidId,
                 "TestCredential",
-                new Dictionary<string, object>()));
+                new Dictionary<string, object>()).ConfigureAwait(true)).ConfigureAwait(true);
 
         Assert.Contains("issuer", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task IssueCredentialAsync_HolderDidNotFound_ThrowsArgumentException()
+    public async Task IssueCredentialAsyncHolderDidNotFoundThrowsArgumentException()
     {
         // Arrange
-        var (issuerDidId, _) = await SeedTestDidsAsync();
+        var (issuerDidId, _) = await SeedTestDidsAsync().ConfigureAwait(true);
         var nonExistentHolderId = Guid.NewGuid();
         var service = CreateService();
 
@@ -205,21 +205,21 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
                 issuerDidId,
                 nonExistentHolderId,
                 "TestCredential",
-                new Dictionary<string, object>()));
+                new Dictionary<string, object>()).ConfigureAwait(true)).ConfigureAwait(true);
 
         Assert.Contains("holder", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task IssueCredentialAsync_DeactivatedIssuerDid_ThrowsArgumentException()
+    public async Task IssueCredentialAsyncDeactivatedIssuerDidThrowsArgumentException()
     {
         // Arrange
-        var (issuerDidId, holderDidId) = await SeedTestDidsAsync();
+        var (issuerDidId, holderDidId) = await SeedTestDidsAsync().ConfigureAwait(true);
 
         // Deactivate issuer DID
-        var issuerDid = await _dbContext.Dids.FindAsync(issuerDidId);
+        var issuerDid = await _dbContext.Dids.FindAsync(issuerDidId).ConfigureAwait(true);
         issuerDid!.Status = "deactivated";
-        await _dbContext.SaveChangesAsync();
+        await _dbContext.SaveChangesAsync().ConfigureAwait(true);
 
         var service = CreateService();
 
@@ -230,21 +230,21 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
                 issuerDidId,
                 holderDidId,
                 "TestCredential",
-                new Dictionary<string, object>()));
+                new Dictionary<string, object>()).ConfigureAwait(true)).ConfigureAwait(true);
 
         Assert.Contains("deactivated", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task IssueCredentialAsync_CrossTenantIssuer_ThrowsArgumentException()
+    public async Task IssueCredentialAsyncCrossTenantIssuerThrowsArgumentException()
     {
         // Arrange
-        var (issuerDidId, holderDidId) = await SeedTestDidsAsync();
+        var (issuerDidId, holderDidId) = await SeedTestDidsAsync().ConfigureAwait(true);
 
         // Change issuer to different tenant
-        var issuerDid = await _dbContext.Dids.FindAsync(issuerDidId);
+        var issuerDid = await _dbContext.Dids.FindAsync(issuerDidId).ConfigureAwait(true);
         issuerDid!.TenantId = Guid.NewGuid();
-        await _dbContext.SaveChangesAsync();
+        await _dbContext.SaveChangesAsync().ConfigureAwait(true);
 
         var service = CreateService();
 
@@ -255,11 +255,10 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
                 issuerDidId,
                 holderDidId,
                 "TestCredential",
-                new Dictionary<string, object>()));
+                new Dictionary<string, object>()).ConfigureAwait(true)).ConfigureAwait(true);
     }
 
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1859:Use concrete types when possible for improved performance", Justification = "Test helper method - interface return type is intentional for flexibility")]
-    private ICredentialIssuanceService CreateService()
+    private HeroSSID.Credentials.Services.CredentialIssuanceService CreateService()
     {
         var mockKeyEncryption = new MockKeyEncryptionService();
         var mockRateLimiter = new MockRateLimiter();
@@ -304,14 +303,14 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
 
         _dbContext.Dids.Add(issuerDid);
         _dbContext.Dids.Add(holderDid);
-        await _dbContext.SaveChangesAsync();
+        await _dbContext.SaveChangesAsync().ConfigureAwait(true);
 
         return (issuerDid.Id, holderDid.Id);
     }
 
     // T011: Constructor tests
     [Fact]
-    public void Constructor_AllDependenciesProvided_Succeeds()
+    public void ConstructorAllDependenciesProvidedSucceeds()
     {
         // Arrange - all dependencies provided
         var mockKeyEncryption = new MockKeyEncryptionService();
@@ -326,7 +325,7 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
     }
 
     [Fact]
-    public void Constructor_MissingDbContext_ThrowsArgumentNullException()
+    public void ConstructorMissingDbContextThrowsArgumentNullException()
     {
         // Arrange
         var mockKeyEncryption = new MockKeyEncryptionService();
@@ -341,7 +340,7 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
     }
 
     [Fact]
-    public void Constructor_MissingKeyEncryption_ThrowsArgumentNullException()
+    public void ConstructorMissingKeyEncryptionThrowsArgumentNullException()
     {
         // Arrange
         var mockRateLimiter = new MockRateLimiter();
@@ -355,7 +354,7 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
     }
 
     [Fact]
-    public void Constructor_MissingRateLimiter_ThrowsArgumentNullException()
+    public void ConstructorMissingRateLimiterThrowsArgumentNullException()
     {
         // Arrange
         var mockKeyEncryption = new MockKeyEncryptionService();

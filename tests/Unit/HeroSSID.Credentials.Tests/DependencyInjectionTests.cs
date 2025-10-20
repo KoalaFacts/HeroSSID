@@ -17,7 +17,7 @@ namespace HeroSSID.Credentials.Tests;
 public sealed class DependencyInjectionTests
 {
     [Fact]
-    public void AddCredentialsServices_RegistersICredentialIssuanceService()
+    public void AddCredentialsServicesRegistersICredentialIssuanceService()
     {
         // Arrange
         var services = new ServiceCollection();
@@ -43,7 +43,7 @@ public sealed class DependencyInjectionTests
     }
 
     [Fact]
-    public void AddCredentialsServices_WithNullServices_ThrowsArgumentNullException()
+    public void AddCredentialsServicesWithNullServicesThrowsArgumentNullException()
     {
         // Arrange
         ServiceCollection? services = null;
@@ -56,7 +56,7 @@ public sealed class DependencyInjectionTests
     }
 
     [Fact]
-    public void AddCredentialsServices_ReturnsSameServiceCollection()
+    public void AddCredentialsServicesReturnsSameServiceCollection()
     {
         // Arrange
         var services = new ServiceCollection();

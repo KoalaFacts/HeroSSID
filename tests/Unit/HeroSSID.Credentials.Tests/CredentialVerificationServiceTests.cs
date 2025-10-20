@@ -50,14 +50,14 @@ public sealed class CredentialVerificationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task VerifyCredentialAsync_ValidJwtVc_ReturnsVerificationResult()
+    public async Task VerifyCredentialAsyncValidJwtVcReturnsVerificationResult()
     {
         // Arrange
         var service = CreateService();
         var validJwtVc = "eyJhbGciOiJFZERTQSIsInR5cCI6InZjK2p3dCJ9.eyJpc3MiOiJkaWQ6d2ViOmV4YW1wbGUuY29tOmlzc3VlciIsInN1YiI6ImRpZDp3ZWI6ZXhhbXBsZS5jb206aG9sZGVyIn0.signature";
 
         // Act
-        var result = await service.VerifyCredentialAsync(_tenantContext, validJwtVc);
+        var result = await service.VerifyCredentialAsync(_tenantContext, validJwtVc).ConfigureAwait(true);
 
         // Assert
         Assert.NotNull(result);
@@ -65,10 +65,10 @@ public sealed class CredentialVerificationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task VerifyCredentialAsync_InvalidSignature_ReturnsFailedResult()
+    public async Task VerifyCredentialAsyncInvalidSignatureReturnsFailedResult()
     {
         // Arrange
-        await SeedTestIssuerDidAsync();
+        await SeedTestIssuerDidAsync().ConfigureAwait(true);
         var service = CreateService();
 
         // Create a valid JWT and tamper with it
@@ -77,7 +77,7 @@ public sealed class CredentialVerificationServiceTests : IDisposable
         var tamperedJwt = $"{parts[0]}.{parts[1]}.TAMPERED_SIGNATURE_XXX";
 
         // Act
-        var result = await service.VerifyCredentialAsync(_tenantContext,tamperedJwt);
+        var result = await service.VerifyCredentialAsync(_tenantContext,tamperedJwt).ConfigureAwait(true);
 
         // Assert
         Assert.False(result.IsValid);
@@ -86,16 +86,16 @@ public sealed class CredentialVerificationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task VerifyCredentialAsync_ExpiredCredential_ReturnsFailedResult()
+    public async Task VerifyCredentialAsyncExpiredCredentialReturnsFailedResult()
     {
         // Arrange
-        await SeedTestIssuerDidAsync();
+        await SeedTestIssuerDidAsync().ConfigureAwait(true);
         var service = CreateService();
         // Create JWT with expiration date in the past
         var expiredJwt = CreateTestJwtWithExpiration(DateTimeOffset.UtcNow.AddYears(-1));
 
         // Act
-        var result = await service.VerifyCredentialAsync(_tenantContext,expiredJwt);
+        var result = await service.VerifyCredentialAsync(_tenantContext,expiredJwt).ConfigureAwait(true);
 
         // Assert
         Assert.False(result.IsValid);
@@ -104,14 +104,14 @@ public sealed class CredentialVerificationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task VerifyCredentialAsync_MalformedJwt_ReturnsFailedResult()
+    public async Task VerifyCredentialAsyncMalformedJwtReturnsFailedResult()
     {
         // Arrange
         var service = CreateService();
         var malformedJwt = "not.a.valid.jwt.format";
 
         // Act
-        var result = await service.VerifyCredentialAsync(_tenantContext,malformedJwt);
+        var result = await service.VerifyCredentialAsync(_tenantContext,malformedJwt).ConfigureAwait(true);
 
         // Assert
         Assert.False(result.IsValid);
@@ -120,29 +120,29 @@ public sealed class CredentialVerificationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task VerifyCredentialAsync_NullCredentialJwt_ThrowsArgumentException()
+    public async Task VerifyCredentialAsyncNullCredentialJwtThrowsArgumentException()
     {
         // Arrange
         var service = CreateService();
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(async () =>
-            await service.VerifyCredentialAsync(_tenantContext,null!));
+            await service.VerifyCredentialAsync(_tenantContext,null!).ConfigureAwait(true)).ConfigureAwait(true);
     }
 
     [Fact]
-    public async Task VerifyCredentialAsync_EmptyCredentialJwt_ThrowsArgumentException()
+    public async Task VerifyCredentialAsyncEmptyCredentialJwtThrowsArgumentException()
     {
         // Arrange
         var service = CreateService();
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(async () =>
-            await service.VerifyCredentialAsync(_tenantContext,string.Empty));
+            await service.VerifyCredentialAsync(_tenantContext,string.Empty).ConfigureAwait(true)).ConfigureAwait(true);
     }
 
     [Fact]
-    public async Task VerifyCredentialAsync_IssuerNotFound_ReturnsFailedResult()
+    public async Task VerifyCredentialAsyncIssuerNotFoundReturnsFailedResult()
     {
         // Arrange
         var service = CreateService();
@@ -150,7 +150,7 @@ public sealed class CredentialVerificationServiceTests : IDisposable
         var jwtWithUnknownIssuer = "eyJhbGciOiJFZERTQSIsInR5cCI6InZjK2p3dCJ9.eyJpc3MiOiJkaWQ6d2ViOmV4YW1wbGUuY29tOnVua25vd24ifQ.signature";
 
         // Act
-        var result = await service.VerifyCredentialAsync(_tenantContext,jwtWithUnknownIssuer);
+        var result = await service.VerifyCredentialAsync(_tenantContext,jwtWithUnknownIssuer).ConfigureAwait(true);
 
         // Assert
         Assert.False(result.IsValid);
@@ -159,15 +159,15 @@ public sealed class CredentialVerificationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task VerifyCredentialAsync_ValidCredential_ParsesCredentialSubject()
+    public async Task VerifyCredentialAsyncValidCredentialParsesCredentialSubject()
     {
         // Arrange
-        await SeedTestIssuerDidAsync();
+        await SeedTestIssuerDidAsync().ConfigureAwait(true);
         var service = CreateService();
         var validJwt = CreateValidTestJwt();
 
         // Act
-        var result = await service.VerifyCredentialAsync(_tenantContext,validJwt);
+        var result = await service.VerifyCredentialAsync(_tenantContext,validJwt).ConfigureAwait(true);
 
         // Assert
         if (result.CredentialSubject != null)
@@ -178,15 +178,15 @@ public sealed class CredentialVerificationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task VerifyCredentialAsync_ValidCredential_ExtractsIssuerDid()
+    public async Task VerifyCredentialAsyncValidCredentialExtractsIssuerDid()
     {
         // Arrange
-        await SeedTestIssuerDidAsync();
+        await SeedTestIssuerDidAsync().ConfigureAwait(true);
         var service = CreateService();
         var validJwt = CreateValidTestJwt();
 
         // Act
-        var result = await service.VerifyCredentialAsync(_tenantContext,validJwt);
+        var result = await service.VerifyCredentialAsync(_tenantContext,validJwt).ConfigureAwait(true);
 
         // Assert
         Assert.NotNull(result.IssuerDid);
@@ -194,15 +194,15 @@ public sealed class CredentialVerificationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task VerifyCredentialAsync_ValidCredential_ExtractsExpirationDate()
+    public async Task VerifyCredentialAsyncValidCredentialExtractsExpirationDate()
     {
         // Arrange
-        await SeedTestIssuerDidAsync();
+        await SeedTestIssuerDidAsync().ConfigureAwait(true);
         var service = CreateService();
         var jwtWithExpiration = CreateTestJwtWithExpiration(DateTimeOffset.UtcNow.AddYears(1));
 
         // Act
-        var result = await service.VerifyCredentialAsync(_tenantContext,jwtWithExpiration);
+        var result = await service.VerifyCredentialAsync(_tenantContext,jwtWithExpiration).ConfigureAwait(true);
 
         // Assert
         if (result.Status == VerificationStatus.Valid && result.ExpiresAt.HasValue)
@@ -213,15 +213,15 @@ public sealed class CredentialVerificationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task VerifyCredentialAsync_NoExpiration_ReturnsNullExpiresAt()
+    public async Task VerifyCredentialAsyncNoExpirationReturnsNullExpiresAt()
     {
         // Arrange
-        await SeedTestIssuerDidAsync();
+        await SeedTestIssuerDidAsync().ConfigureAwait(true);
         var service = CreateService();
         var jwtWithoutExpiration = CreateValidTestJwt();
 
         // Act
-        var result = await service.VerifyCredentialAsync(_tenantContext,jwtWithoutExpiration);
+        var result = await service.VerifyCredentialAsync(_tenantContext,jwtWithoutExpiration).ConfigureAwait(true);
 
         // Assert
         // ExpiresAt should be null if no expiration date in JWT
@@ -229,15 +229,15 @@ public sealed class CredentialVerificationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task VerifyCredentialAsync_ValidSignatureAndNotExpired_ReturnsIsValidTrue()
+    public async Task VerifyCredentialAsyncValidSignatureAndNotExpiredReturnsIsValidTrue()
     {
         // Arrange
-        await SeedTestIssuerDidAsync();
+        await SeedTestIssuerDidAsync().ConfigureAwait(true);
         var service = CreateService();
         var validJwt = CreateValidTestJwt();
 
         // Act
-        var result = await service.VerifyCredentialAsync(_tenantContext,validJwt);
+        var result = await service.VerifyCredentialAsync(_tenantContext,validJwt).ConfigureAwait(true);
 
         // Assert
         if (result.Status == VerificationStatus.Valid)
@@ -247,8 +247,7 @@ public sealed class CredentialVerificationServiceTests : IDisposable
         }
     }
 
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1859:Use concrete types when possible for improved performance", Justification = "Test helper method - interface return type is intentional for flexibility")]
-    private ICredentialVerificationService CreateService()
+    private CredentialVerificationService CreateService()
     {
         // Create rate limiter for testing (100 ops per 60 seconds)
         var rateLimiter = new InMemoryRateLimiter(windowSize: TimeSpan.FromSeconds(60), maxOperations: 100);
@@ -312,7 +311,7 @@ public sealed class CredentialVerificationServiceTests : IDisposable
         };
 
         _dbContext.Dids.Add(issuerDid);
-        await _dbContext.SaveChangesAsync();
+        await _dbContext.SaveChangesAsync().ConfigureAwait(true);
     }
 
     public void Dispose()

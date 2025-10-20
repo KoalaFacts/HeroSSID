@@ -24,6 +24,13 @@ public static class ServiceCollectionExtensions
         // Register credential verification service
         services.AddScoped<ICredentialVerificationService, CredentialVerificationService>();
 
+        // Register verifiable presentation service with selective disclosure (SD-JWT)
+        services.AddScoped<IVerifiablePresentationService, VerifiablePresentationService>();
+
+        // Register mock SD-JWT services (temporary for MVP - will be replaced by HeroSD-JWT NuGet package)
+        services.AddScoped<ISdJwtGenerator, MockSdJwtGenerator>();
+        services.AddScoped<ISdJwtVerifier, MockSdJwtVerifier>();
+
         return services;
     }
 }
