@@ -22,126 +22,6 @@ namespace HeroSSID.Data.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("HeroSSID.Data.Entities.CredentialDefinitionEntity", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamptz")
-                        .HasColumnName("created_at")
-                        .HasDefaultValueSql("NOW()");
-
-                    b.Property<string>("CredentialDefinitionId")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)")
-                        .HasColumnName("ledger_cred_def_id");
-
-                    b.Property<Guid>("IssuerDidId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("issuer_did_id");
-
-                    b.Property<Guid>("SchemaId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("schema_id");
-
-                    b.Property<bool>("SupportsRevocation")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(false)
-                        .HasColumnName("supports_revocation");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("tenant_id");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CredentialDefinitionId")
-                        .IsUnique()
-                        .HasDatabaseName("idx_cred_defs_ledger_id");
-
-                    b.HasIndex("IssuerDidId")
-                        .HasDatabaseName("idx_cred_defs_issuer");
-
-                    b.HasIndex("SchemaId")
-                        .HasDatabaseName("idx_cred_defs_schema");
-
-                    b.HasIndex("TenantId")
-                        .HasDatabaseName("idx_cred_defs_tenant");
-
-                    b.ToTable("credential_definitions", (string)null);
-                });
-
-            modelBuilder.Entity("HeroSSID.Data.Entities.CredentialSchemaEntity", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.PrimitiveCollection<string[]>("Attributes")
-                        .IsRequired()
-                        .HasColumnType("text[]")
-                        .HasColumnName("attributes");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamptz")
-                        .HasColumnName("created_at")
-                        .HasDefaultValueSql("NOW()");
-
-                    b.Property<Guid>("PublisherDidId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("publisher_did_id");
-
-                    b.Property<string>("SchemaId")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)")
-                        .HasColumnName("ledger_schema_id");
-
-                    b.Property<string>("SchemaName")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("schema_name");
-
-                    b.Property<string>("SchemaVersion")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)")
-                        .HasColumnName("schema_version");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("tenant_id");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PublisherDidId")
-                        .HasDatabaseName("idx_schemas_publisher");
-
-                    b.HasIndex("SchemaId")
-                        .IsUnique()
-                        .HasDatabaseName("idx_schemas_ledger_id");
-
-                    b.HasIndex("TenantId")
-                        .HasDatabaseName("idx_schemas_tenant");
-
-                    b.HasIndex("SchemaName", "SchemaVersion")
-                        .HasDatabaseName("idx_schemas_name_version");
-
-                    b.ToTable("credential_schemas", null, t =>
-                        {
-                            t.HasCheckConstraint("chk_schema_version_format", "schema_version ~ '^\\d+\\.\\d+(\\.\\d+)?$'");
-                        });
-                });
-
             modelBuilder.Entity("HeroSSID.Data.Entities.DidEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -165,6 +45,12 @@ namespace HeroSSID.Data.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")
                         .HasColumnName("did_identifier");
+
+                    b.Property<byte[]>("KeyFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("bytea")
+                        .HasColumnName("key_fingerprint");
 
                     b.Property<byte[]>("PrivateKeyEd25519Encrypted")
                         .IsRequired()
@@ -200,6 +86,9 @@ namespace HeroSSID.Data.Migrations
                     b.HasIndex("TenantId")
                         .HasDatabaseName("idx_dids_tenant");
 
+                    b.HasIndex("TenantId", "KeyFingerprint")
+                        .HasDatabaseName("idx_dids_tenant_key_fingerprint");
+
                     b.ToTable("dids", null, t =>
                         {
                             t.HasCheckConstraint("chk_did_status", "status IN ('active', 'deactivated')");
@@ -219,16 +108,10 @@ namespace HeroSSID.Data.Migrations
                         .HasColumnName("created_at")
                         .HasDefaultValueSql("NOW()");
 
-                    b.Property<Guid?>("CredentialDefinitionEntityId")
-                        .HasColumnType("uuid");
-
                     b.Property<string>("CredentialJwt")
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("credential_jwt");
-
-                    b.Property<Guid?>("CredentialSchemaEntityId")
-                        .HasColumnType("uuid");
 
                     b.Property<string>("CredentialType")
                         .IsRequired()
@@ -254,6 +137,9 @@ namespace HeroSSID.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("issuer_did_id");
 
+                    b.Property<DateTimeOffset?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -273,10 +159,6 @@ namespace HeroSSID.Data.Migrations
                         .HasDefaultValueSql("NOW()");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("CredentialDefinitionEntityId");
-
-                    b.HasIndex("CredentialSchemaEntityId");
 
                     b.HasIndex("CredentialType")
                         .HasDatabaseName("idx_credentials_type");
@@ -308,49 +190,8 @@ namespace HeroSSID.Data.Migrations
                         });
                 });
 
-            modelBuilder.Entity("HeroSSID.Data.Entities.CredentialDefinitionEntity", b =>
-                {
-                    b.HasOne("HeroSSID.Data.Entities.DidEntity", "IssuerDid")
-                        .WithMany("CredentialDefinitions")
-                        .HasForeignKey("IssuerDidId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_cred_defs_issuer");
-
-                    b.HasOne("HeroSSID.Data.Entities.CredentialSchemaEntity", "Schema")
-                        .WithMany("CredentialDefinitions")
-                        .HasForeignKey("SchemaId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_cred_defs_schema");
-
-                    b.Navigation("IssuerDid");
-
-                    b.Navigation("Schema");
-                });
-
-            modelBuilder.Entity("HeroSSID.Data.Entities.CredentialSchemaEntity", b =>
-                {
-                    b.HasOne("HeroSSID.Data.Entities.DidEntity", "PublisherDid")
-                        .WithMany("PublishedSchemas")
-                        .HasForeignKey("PublisherDidId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_schemas_publisher");
-
-                    b.Navigation("PublisherDid");
-                });
-
             modelBuilder.Entity("HeroSSID.Data.Entities.VerifiableCredentialEntity", b =>
                 {
-                    b.HasOne("HeroSSID.Data.Entities.CredentialDefinitionEntity", null)
-                        .WithMany("Credentials")
-                        .HasForeignKey("CredentialDefinitionEntityId");
-
-                    b.HasOne("HeroSSID.Data.Entities.CredentialSchemaEntity", null)
-                        .WithMany("Credentials")
-                        .HasForeignKey("CredentialSchemaEntityId");
-
                     b.HasOne("HeroSSID.Data.Entities.DidEntity", "HolderDid")
                         .WithMany("HeldCredentials")
                         .HasForeignKey("HolderDidId")
@@ -370,27 +211,11 @@ namespace HeroSSID.Data.Migrations
                     b.Navigation("IssuerDid");
                 });
 
-            modelBuilder.Entity("HeroSSID.Data.Entities.CredentialDefinitionEntity", b =>
-                {
-                    b.Navigation("Credentials");
-                });
-
-            modelBuilder.Entity("HeroSSID.Data.Entities.CredentialSchemaEntity", b =>
-                {
-                    b.Navigation("CredentialDefinitions");
-
-                    b.Navigation("Credentials");
-                });
-
             modelBuilder.Entity("HeroSSID.Data.Entities.DidEntity", b =>
                 {
-                    b.Navigation("CredentialDefinitions");
-
                     b.Navigation("HeldCredentials");
 
                     b.Navigation("IssuedCredentials");
-
-                    b.Navigation("PublishedSchemas");
                 });
 #pragma warning restore 612, 618
         }

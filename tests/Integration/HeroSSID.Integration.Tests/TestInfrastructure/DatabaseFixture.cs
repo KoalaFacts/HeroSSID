@@ -7,9 +7,7 @@ namespace HeroSSID.Integration.Tests.TestInfrastructure;
 /// Database fixture for integration tests using Testcontainers
 /// Provides a disposable PostgreSQL container for isolated test execution
 /// </summary>
-#pragma warning disable CA1812 // Avoid uninstantiated internal classes - Instantiated by xUnit IClassFixture
-internal sealed class DatabaseFixture : IAsyncLifetime
-#pragma warning restore CA1812
+public sealed class DatabaseFixture : IAsyncLifetime
 {
     private PostgreSqlContainer? _postgresContainer;
 

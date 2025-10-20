@@ -51,6 +51,15 @@ public sealed class VerifiableCredentialEntity
     public required string Status { get; set; } = "active";
 
     /// <summary>
+    /// When the credential was revoked (null if not revoked)
+    /// </summary>
+    /// <remarks>
+    /// This field supports future revocation functionality.
+    /// Set when Status changes to "revoked".
+    /// </remarks>
+    public DateTimeOffset? RevokedAt { get; set; }
+
+    /// <summary>
     /// When the credential was issued
     /// </summary>
     public DateTimeOffset IssuedAt { get; set; }

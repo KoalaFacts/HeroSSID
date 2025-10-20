@@ -12,7 +12,7 @@ namespace HeroSSID.DidOperations.DidMethods;
 /// </summary>
 public sealed class DidKeyMethod : IDidMethod
 {
-    private static readonly JsonSerializerOptions s_jsonOptions = new()
+    private static readonly JsonSerializerOptions _jsonOptions = new()
     {
         WriteIndented = true
     };
@@ -75,7 +75,7 @@ public sealed class DidKeyMethod : IDidMethod
             Authentication = new[] { verificationMethodId }
         };
 
-        return JsonSerializer.Serialize(didDocument, s_jsonOptions);
+        return JsonSerializer.Serialize(didDocument, _jsonOptions);
     }
 
     /// <inheritdoc />

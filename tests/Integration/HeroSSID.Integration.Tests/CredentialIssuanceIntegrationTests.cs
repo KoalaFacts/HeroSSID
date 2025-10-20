@@ -348,6 +348,109 @@ public sealed class CredentialIssuanceIntegrationTests : IAsyncLifetime
         // Clear sensitive data
         System.Security.Cryptography.CryptographicOperations.ZeroMemory(issuerPrivateKey);
     }
+
+    [Fact]
+    public async Task IssueCredential_MarkAsRevoked_VerificationReturnsRevoked()
+    {
+        // Arrange
+        Assert.NotNull(_dbContext);
+        Assert.NotNull(_issuanceService);
+        Assert.NotNull(_verificationService);
+        Assert.NotNull(_keyEncryptionService);
+
+        // Create issuer DID
+        using Key issuerKey = Key.Create(SignatureAlgorithm.Ed25519, new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
+        byte[] issuerPublicKey = issuerKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+        byte[] issuerPrivateKey = issuerKey.Export(KeyBlobFormat.RawPrivateKey);
+        byte[] issuerEncryptedPrivateKey = _keyEncryptionService.Encrypt(issuerPrivateKey);
+
+        string issuerDidIdentifier = $"did:key:z{Convert.ToBase64String(issuerPublicKey).Replace("+", "").Replace("/", "").Replace("=", "")}";
+
+        DidEntity issuerDid = new DidEntity
+        {
+            Id = Guid.NewGuid(),
+            TenantId = HeroDbContext.DefaultTenantId,
+            DidIdentifier = issuerDidIdentifier,
+            PublicKeyEd25519 = issuerPublicKey,
+            KeyFingerprint = System.Security.Cryptography.SHA256.HashData(issuerPublicKey),
+            PrivateKeyEd25519Encrypted = issuerEncryptedPrivateKey,
+            DidDocumentJson = $@"{{""id"":""{issuerDidIdentifier}""}}",
+            Status = "active",
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+
+        // Create holder DID
+        using Key holderKey = Key.Create(SignatureAlgorithm.Ed25519);
+        byte[] holderPublicKey = holderKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+        string holderDidIdentifier = $"did:key:z{Convert.ToBase64String(holderPublicKey).Replace("+", "").Replace("/", "").Replace("=", "")}";
+
+        DidEntity holderDid = new DidEntity
+        {
+            Id = Guid.NewGuid(),
+            TenantId = HeroDbContext.DefaultTenantId,
+            DidIdentifier = holderDidIdentifier,
+            PublicKeyEd25519 = holderPublicKey,
+            KeyFingerprint = System.Security.Cryptography.SHA256.HashData(holderPublicKey),
+            PrivateKeyEd25519Encrypted = new byte[64],
+            DidDocumentJson = $@"{{""id"":""{holderDidIdentifier}""}}",
+            Status = "active",
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+
+        _dbContext.Dids.AddRange(issuerDid, holderDid);
+        await _dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var tenantContext = new DefaultTenantContext();
+        var credentialSubject = new Dictionary<string, object>
+        {
+            { "certificateId", "CERT-12345" },
+            { "certificateName", "Security Clearance" }
+        };
+
+        // Act - Issue credential
+        string jwtVc = await _issuanceService.IssueCredentialAsync(
+            tenantContext,
+            issuerDid.Id,
+            holderDid.Id,
+            "SecurityClearanceCredential",
+            credentialSubject,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        // Verify credential is initially valid
+        var initialVerificationResult = await _verificationService.VerifyCredentialAsync(
+            tenantContext,
+            jwtVc,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(initialVerificationResult.IsValid);
+        Assert.Equal(Credentials.Models.VerificationStatus.Valid, initialVerificationResult.Status);
+
+        // Act - Mark credential as revoked in database
+        VerifiableCredentialEntity? storedCredential = await _dbContext.VerifiableCredentials
+            .FirstOrDefaultAsync(c => c.CredentialJwt == jwtVc, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(storedCredential);
+        storedCredential.Status = "revoked";
+        storedCredential.RevokedAt = DateTimeOffset.UtcNow;
+        await _dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        // Act - Verify credential after revocation
+        var revokedVerificationResult = await _verificationService.VerifyCredentialAsync(
+            tenantContext,
+            jwtVc,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        // Assert - Verification should detect revocation
+        Assert.False(revokedVerificationResult.IsValid);
+        Assert.Equal(Credentials.Models.VerificationStatus.Revoked, revokedVerificationResult.Status);
+        Assert.NotEmpty(revokedVerificationResult.ValidationErrors);
+        bool hasRevokedError = revokedVerificationResult.ValidationErrors.Any(e =>
+            e.Contains("revoked", StringComparison.OrdinalIgnoreCase));
+        Assert.True(hasRevokedError, $"Expected 'revoked' in validation errors but got: {string.Join(", ", revokedVerificationResult.ValidationErrors)}");
+
+        // Clear sensitive data
+        System.Security.Cryptography.CryptographicOperations.ZeroMemory(issuerPrivateKey);
+    }
 }
 #pragma warning restore CA5394
 #pragma warning restore CA1001

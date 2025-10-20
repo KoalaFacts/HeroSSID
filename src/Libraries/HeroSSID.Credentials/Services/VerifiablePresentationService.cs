@@ -21,6 +21,7 @@ public sealed class VerifiablePresentationService : IVerifiablePresentationServi
     private readonly ISdJwtGenerator _sdJwtGenerator;
     private readonly ISdJwtVerifier _sdJwtVerifier;
     private readonly IRateLimiter _rateLimiter;
+    private readonly IKeyEncryptionService _keyEncryptionService;
     private readonly ILogger<VerifiablePresentationService>? _logger;
 
     /// <summary>
@@ -31,17 +32,20 @@ public sealed class VerifiablePresentationService : IVerifiablePresentationServi
         ISdJwtGenerator sdJwtGenerator,
         ISdJwtVerifier sdJwtVerifier,
         IRateLimiter rateLimiter,
+        IKeyEncryptionService keyEncryptionService,
         ILogger<VerifiablePresentationService>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(sdJwtGenerator);
         ArgumentNullException.ThrowIfNull(sdJwtVerifier);
         ArgumentNullException.ThrowIfNull(rateLimiter);
+        ArgumentNullException.ThrowIfNull(keyEncryptionService);
 
         _dbContext = dbContext;
         _sdJwtGenerator = sdJwtGenerator;
         _sdJwtVerifier = sdJwtVerifier;
         _rateLimiter = rateLimiter;
+        _keyEncryptionService = keyEncryptionService;
         _logger = logger;
     }
 
@@ -108,28 +112,44 @@ public sealed class VerifiablePresentationService : IVerifiablePresentationServi
             .Where(kv => selectedClaimNames.Contains(kv.Key))
             .ToDictionary(kv => kv.Key, kv => kv.Value);
 
-        // Create VP-JWT with selective disclosure using SD-JWT
-        // MOCK: For MVP, this uses MockSdJwtGenerator which creates standard JWT
-        // Real HeroSD-JWT library will create proper SD-JWT with hash-based disclosures
-        var sdJwtResult = _sdJwtGenerator.GenerateSdJwt(
-            claims: claimsToInclude,
-            selectiveDisclosureClaims: selectedClaimNames,
-            signingKey: holderDid.PrivateKeyEd25519Encrypted, // MOCK: Real impl will decrypt first
-            issuerDid: holderDid.DidIdentifier,
-            holderDid: holderDid.DidIdentifier);
-
-        // Record operation for rate limiting
-        await _rateLimiter.RecordOperationAsync(
-            tenantId,
-            RateLimitOperationType,
-            cancellationToken).ConfigureAwait(false);
-
-        return new PresentationResult
+        // SECURITY: Decrypt private key and ensure it's cleared from memory after use
+        byte[]? decryptedPrivateKey = null;
+        try
         {
-            PresentationJwt = sdJwtResult.CompactSdJwt,
-            SelectedDisclosures = sdJwtResult.DisclosureTokens,
-            DisclosedClaimNames = selectedClaimNames
-        };
+            // Decrypt the holder's private key
+            decryptedPrivateKey = _keyEncryptionService.Decrypt(holderDid.PrivateKeyEd25519Encrypted);
+
+            // Create VP-JWT with selective disclosure using SD-JWT
+            // MOCK: For MVP, this uses MockSdJwtGenerator which creates standard JWT
+            // Real HeroSD-JWT library will create proper SD-JWT with hash-based disclosures
+            var sdJwtResult = _sdJwtGenerator.GenerateSdJwt(
+                claims: claimsToInclude,
+                selectiveDisclosureClaims: selectedClaimNames,
+                signingKey: decryptedPrivateKey,
+                issuerDid: holderDid.DidIdentifier,
+                holderDid: holderDid.DidIdentifier);
+
+            // Record operation for rate limiting
+            await _rateLimiter.RecordOperationAsync(
+                tenantId,
+                RateLimitOperationType,
+                cancellationToken).ConfigureAwait(false);
+
+            return new PresentationResult
+            {
+                PresentationJwt = sdJwtResult.CompactSdJwt,
+                SelectedDisclosures = sdJwtResult.DisclosureTokens,
+                DisclosedClaimNames = selectedClaimNames
+            };
+        }
+        finally
+        {
+            // SECURITY: Clear decrypted private key from memory (even if exception occurred)
+            if (decryptedPrivateKey != null)
+            {
+                System.Security.Cryptography.CryptographicOperations.ZeroMemory(decryptedPrivateKey);
+            }
+        }
     }
 
     /// <summary>

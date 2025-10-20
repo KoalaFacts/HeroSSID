@@ -31,6 +31,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ISdJwtGenerator, MockSdJwtGenerator>();
         services.AddScoped<ISdJwtVerifier, MockSdJwtVerifier>();
 
+        // Register credential revocation service (placeholder - throws NotImplementedException)
+        services.AddScoped<ICredentialRevocationService, CredentialRevocationService>();
+
         return services;
     }
 }

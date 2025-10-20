@@ -56,12 +56,14 @@ public sealed class VerifiablePresentationServiceTests : IDisposable
         var sdJwtGenerator = new MockSdJwtGenerator();
         var sdJwtVerifier = new MockSdJwtVerifier();
         var rateLimiter = new InMemoryRateLimiter();
+        var keyEncryptionService = new MockKeyEncryptionService();
 
         var service = new VerifiablePresentationService(
             _dbContext,
             sdJwtGenerator,
             sdJwtVerifier,
-            rateLimiter);
+            rateLimiter,
+            keyEncryptionService);
 
         Assert.NotNull(service);
     }
@@ -72,9 +74,10 @@ public sealed class VerifiablePresentationServiceTests : IDisposable
         var sdJwtGenerator = new MockSdJwtGenerator();
         var sdJwtVerifier = new MockSdJwtVerifier();
         var rateLimiter = new InMemoryRateLimiter();
+        var keyEncryptionService = new MockKeyEncryptionService();
 
         Assert.Throws<ArgumentNullException>(() =>
-            new VerifiablePresentationService(null!, sdJwtGenerator, sdJwtVerifier, rateLimiter));
+            new VerifiablePresentationService(null!, sdJwtGenerator, sdJwtVerifier, rateLimiter, keyEncryptionService));
     }
 
     // T036-T037: CreatePresentationAsync tests
@@ -178,12 +181,14 @@ public sealed class VerifiablePresentationServiceTests : IDisposable
         var rateLimiter = new InMemoryRateLimiter(
             windowSize: TimeSpan.FromSeconds(60),
             maxOperations: 100);
+        var keyEncryptionService = new MockKeyEncryptionService();
 
         return new VerifiablePresentationService(
             _dbContext,
             sdJwtGenerator,
             sdJwtVerifier,
-            rateLimiter);
+            rateLimiter,
+            keyEncryptionService);
     }
 
     private string CreateValidTestCredentialJwt()
@@ -247,5 +252,14 @@ public sealed class VerifiablePresentationServiceTests : IDisposable
         private readonly Guid _tenantId;
         public TestTenantContext(Guid tenantId) => _tenantId = tenantId;
         public Guid GetCurrentTenantId() => _tenantId;
+    }
+
+    private sealed class MockKeyEncryptionService : IKeyEncryptionService
+    {
+        // Mock pass-through encryption (for testing only)
+        public byte[] Encrypt(byte[] plaintext) => plaintext;
+        public byte[] Decrypt(byte[] ciphertext) => ciphertext;
+        public string EncryptString(string plaintext) => plaintext;
+        public string DecryptString(string ciphertext) => ciphertext;
     }
 }

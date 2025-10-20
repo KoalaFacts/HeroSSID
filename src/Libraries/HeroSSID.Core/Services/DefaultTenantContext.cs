@@ -51,13 +51,13 @@ public sealed class DefaultTenantContext : ITenantContext
     // ⚠️ HARDCODED DEFAULT TENANT ID - NOT PRODUCTION-READY ⚠️
     // This matches the value in HeroDbContext.DefaultTenantId
     // Replace with actual tenant resolution before production deployment
-    private static readonly Guid s_defaultTenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    private static readonly Guid _defaultTenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
     /// <inheritdoc />
     public Guid GetCurrentTenantId()
     {
         // For MVP, always return the default tenant
         // v2: Replace with actual tenant resolution logic
-        return s_defaultTenantId;
+        return _defaultTenantId;
     }
 }
