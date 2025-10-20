@@ -12,17 +12,31 @@ namespace HeroSSID.Credentials.Services;
 /// </summary>
 public sealed class CredentialIssuanceService : ICredentialIssuanceService
 {
+    // T050: Structured logging with high-performance LoggerMessage delegates
+    // SECURITY: No sensitive data (credentials, private keys) in logs - only metadata
     private static readonly Action<ILogger, Guid, Guid, string, Exception?> _logCredentialIssued =
         LoggerMessage.Define<Guid, Guid, string>(
             LogLevel.Information,
             new EventId(1, nameof(IssueCredentialAsync)),
-            "Credential issued: TenantId={TenantId}, IssuerDidId={IssuerDidId}, CredentialType={CredentialType}");
+            "Credential issued successfully: TenantId={TenantId}, IssuerDidId={IssuerDidId}, CredentialType={CredentialType}");
 
     private static readonly Action<ILogger, Guid, Guid, Guid, Guid, Exception?> _logCrossTenantIssuance =
         LoggerMessage.Define<Guid, Guid, Guid, Guid>(
             LogLevel.Warning,
             new EventId(2, nameof(IssueCredentialAsync)),
             "Cross-tenant credential issued: IssuerTenant={IssuerTenant}, HolderTenant={HolderTenant}, IssuerDid={IssuerDid}, HolderDid={HolderDid}");
+
+    private static readonly Action<ILogger, Guid, string, Exception?> _logRateLimitExceeded =
+        LoggerMessage.Define<Guid, string>(
+            LogLevel.Warning,
+            new EventId(3, nameof(IssueCredentialAsync)),
+            "Rate limit exceeded: TenantId={TenantId}, OperationType={OperationType}");
+
+    private static readonly Action<ILogger, Guid, Guid, Exception?> _logIssuanceFailed =
+        LoggerMessage.Define<Guid, Guid>(
+            LogLevel.Error,
+            new EventId(4, nameof(IssueCredentialAsync)),
+            "Credential issuance failed: TenantId={TenantId}, IssuerDidId={IssuerDidId}");
 
     private static readonly string[] W3cVcContext = new[] { "https://www.w3.org/2018/credentials/v1" };
 
@@ -84,10 +98,48 @@ public sealed class CredentialIssuanceService : ICredentialIssuanceService
 
         var currentTenantId = tenantContext.GetCurrentTenantId();
 
+        // T050: Wrap in try-catch for comprehensive error logging
+        try
+        {
+            return await IssueCredentialInternalAsync(
+                currentTenantId,
+                issuerDidId,
+                holderDidId,
+                credentialType,
+                credentialSubject,
+                expirationDate,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not ArgumentNullException and not ArgumentException and not InvalidOperationException)
+        {
+            // T050: Log unexpected errors with context
+            if (_logger != null)
+            {
+                _logIssuanceFailed(_logger, currentTenantId, issuerDidId, ex);
+            }
+            throw;
+        }
+    }
+
+    private async Task<string> IssueCredentialInternalAsync(
+        Guid currentTenantId,
+        Guid issuerDidId,
+        Guid holderDidId,
+        string credentialType,
+        Dictionary<string, object> credentialSubject,
+        DateTimeOffset? expirationDate,
+        CancellationToken cancellationToken)
+    {
+
         // Check rate limit
         var isAllowed = await _rateLimiter.IsAllowedAsync(currentTenantId, "CREDENTIAL_ISSUE", cancellationToken).ConfigureAwait(false);
         if (!isAllowed)
         {
+            // T050: Log rate limit exceeded event
+            if (_logger != null)
+            {
+                _logRateLimitExceeded(_logger, currentTenantId, "CREDENTIAL_ISSUE", null);
+            }
             throw new InvalidOperationException("Rate limit exceeded for credential issuance");
         }
 
