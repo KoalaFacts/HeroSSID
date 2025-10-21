@@ -78,7 +78,7 @@ public sealed class CredentialIssuanceIntegrationTests : IAsyncLifetime
             _dbContext = null;
         }
 
-        _rateLimiter?.Dispose();
+        (_rateLimiter as IDisposable)?.Dispose();
         _rateLimiter = null;
 
         _disposed = true;
