@@ -100,7 +100,7 @@ public sealed class SecurityEdgeCaseTests : IDisposable
         Assert.Contains("rate limit", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Fact(Skip = "Payload size validation not yet implemented - planned for future security enhancement")]
+    [Fact]
     public async Task LargeCredentialSubjectPayload_ExceedingSize100KB_ThrowsArgumentException()
     {
         // Arrange
@@ -117,7 +117,6 @@ public sealed class SecurityEdgeCaseTests : IDisposable
         largePayload["largeData"] = largeString;
 
         // Act & Assert
-        // NOTE: This test documents desired behavior for future implementation
         var exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
             await service.IssueCredentialAsync(
                 _tenantContext,
@@ -218,13 +217,9 @@ public sealed class SecurityEdgeCaseTests : IDisposable
         Assert.NotEmpty(result.ValidationErrors);
     }
 
-    [Fact(Skip = "Verification service has null handling issues with credentials without expiration - bug tracked")]
+    [Fact]
     public async Task MalformedJwtAttack_TamperedSignature_VerificationFails()
     {
-        // NOTE: This test reveals a bug in CredentialVerificationService.cs:278
-        // The service crashes with InvalidOperationException when handling credentials without expiration
-        // Bug: "The requested operation requires an element of type 'Number', but the target element has type 'Null'"
-
         // Arrange - Issue a valid credential first
         var (issuerDidId, holderDidId) = await SeedTestDidsAsync().ConfigureAwait(true);
         var rateLimiter = new InMemoryRateLimiter();
@@ -317,10 +312,11 @@ public sealed class SecurityEdgeCaseTests : IDisposable
         Assert.Equal(concurrentCount, storedCredentials.Count);
     }
 
-    [Fact(Skip = "Verification service has null handling issues - same bug as TamperedSignature test")]
+    [Fact(Skip = "DbContext is not thread-safe - concurrent operations require separate context instances")]
     public async Task ConcurrentVerification_MultipleThreads_AllSucceed()
     {
-        // NOTE: This test also reveals the same null handling bug in CredentialVerificationService.cs:278
+        // NOTE: This test documents the limitation that EF Core DbContext is not thread-safe
+        // In production, each request would have its own DbContext via DI scoping
 
         // Arrange - Issue a credential first
         var (issuerDidId, holderDidId) = await SeedTestDidsAsync().ConfigureAwait(true);
@@ -362,11 +358,9 @@ public sealed class SecurityEdgeCaseTests : IDisposable
         });
     }
 
-    [Fact(Skip = "Empty credential subject validation not yet implemented - planned for future enhancement")]
+    [Fact]
     public async Task EmptyCredentialSubject_ThrowsArgumentException()
     {
-        // NOTE: This test documents desired validation behavior for future implementation
-
         // Arrange
         var (issuerDidId, holderDidId) = await SeedTestDidsAsync().ConfigureAwait(true);
         var rateLimiter = new InMemoryRateLimiter();
@@ -389,11 +383,9 @@ public sealed class SecurityEdgeCaseTests : IDisposable
         Assert.Contains("credential subject cannot be empty", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Fact(Skip = "Null credential type validation not yet implemented - ArgumentNullException expected")]
+    [Fact]
     public async Task NullCredentialType_ThrowsArgumentException()
     {
-        // NOTE: Current implementation may allow null - this documents desired behavior
-
         // Arrange
         var (issuerDidId, holderDidId) = await SeedTestDidsAsync().ConfigureAwait(true);
         var rateLimiter = new InMemoryRateLimiter();
@@ -405,7 +397,7 @@ public sealed class SecurityEdgeCaseTests : IDisposable
         var credentialSubject = new Dictionary<string, object> { ["test"] = "value" };
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentException>(async () =>
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
             await service.IssueCredentialAsync(
                 _tenantContext,
                 issuerDidId,
@@ -414,11 +406,9 @@ public sealed class SecurityEdgeCaseTests : IDisposable
                 credentialSubject).ConfigureAwait(true)).ConfigureAwait(true);
     }
 
-    [Fact(Skip = "Empty credential type validation not yet implemented - ArgumentException expected")]
+    [Fact]
     public async Task EmptyCredentialType_ThrowsArgumentException()
     {
-        // NOTE: Current implementation may allow empty string - this documents desired behavior
-
         // Arrange
         var (issuerDidId, holderDidId) = await SeedTestDidsAsync().ConfigureAwait(true);
         var rateLimiter = new InMemoryRateLimiter();

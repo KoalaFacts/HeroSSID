@@ -97,6 +97,27 @@ public sealed class CredentialIssuanceService : ICredentialIssuanceService
         ArgumentNullException.ThrowIfNull(credentialType);
         ArgumentNullException.ThrowIfNull(credentialSubject);
 
+        // SECURITY: Validate credential type is not empty
+        ArgumentException.ThrowIfNullOrWhiteSpace(credentialType, nameof(credentialType));
+
+        // SECURITY: Validate credential subject is not empty
+        if (credentialSubject.Count == 0)
+        {
+            throw new ArgumentException("Credential subject cannot be empty. At least one claim must be provided.", nameof(credentialSubject));
+        }
+
+        // SECURITY: Validate credential subject payload size (prevent DoS attacks)
+        const int MaxPayloadSizeBytes = 100 * 1024; // 100KB limit
+        var payloadJson = System.Text.Json.JsonSerializer.Serialize(credentialSubject);
+        var payloadSizeBytes = System.Text.Encoding.UTF8.GetByteCount(payloadJson);
+
+        if (payloadSizeBytes > MaxPayloadSizeBytes)
+        {
+            throw new ArgumentException(
+                $"Credential subject payload exceeds maximum size of {MaxPayloadSizeBytes / 1024}KB. Current size: {payloadSizeBytes / 1024}KB",
+                nameof(credentialSubject));
+        }
+
         var currentTenantId = tenantContext.GetCurrentTenantId();
 
         // T050: Wrap in try-catch for comprehensive error logging

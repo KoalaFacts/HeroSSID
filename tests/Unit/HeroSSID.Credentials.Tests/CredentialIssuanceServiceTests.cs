@@ -180,6 +180,8 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
         var nonExistentIssuerId = Guid.NewGuid();
         var service = CreateService();
 
+        var credentialSubject = new Dictionary<string, object> { ["test"] = "value" };
+
         // Act & Assert
         var exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
             await service.IssueCredentialAsync(
@@ -187,7 +189,7 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
                 nonExistentIssuerId,
                 holderDidId,
                 "TestCredential",
-                new Dictionary<string, object>()).ConfigureAwait(true)).ConfigureAwait(true);
+                credentialSubject).ConfigureAwait(true)).ConfigureAwait(true);
 
         Assert.Contains("issuer", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -199,6 +201,7 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
         var (issuerDidId, _) = await SeedTestDidsAsync().ConfigureAwait(true);
         var nonExistentHolderId = Guid.NewGuid();
         var service = CreateService();
+        var credentialSubject = new Dictionary<string, object> { ["test"] = "value" };
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
@@ -207,7 +210,7 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
                 issuerDidId,
                 nonExistentHolderId,
                 "TestCredential",
-                new Dictionary<string, object>()).ConfigureAwait(true)).ConfigureAwait(true);
+                credentialSubject).ConfigureAwait(true)).ConfigureAwait(true);
 
         Assert.Contains("holder", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -224,6 +227,7 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
         await _dbContext.SaveChangesAsync().ConfigureAwait(true);
 
         var service = CreateService();
+        var credentialSubject = new Dictionary<string, object> { ["test"] = "value" };
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
@@ -232,7 +236,7 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
                 issuerDidId,
                 holderDidId,
                 "TestCredential",
-                new Dictionary<string, object>()).ConfigureAwait(true)).ConfigureAwait(true);
+                credentialSubject).ConfigureAwait(true)).ConfigureAwait(true);
 
         Assert.Contains("deactivated", exception.Message, StringComparison.OrdinalIgnoreCase);
     }

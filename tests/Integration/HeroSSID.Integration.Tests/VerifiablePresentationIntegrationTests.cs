@@ -30,6 +30,9 @@ namespace HeroSSID.Integration.Tests;
 public sealed class VerifiablePresentationIntegrationTests : IClassFixture<DatabaseFixture>
 {
     private readonly DatabaseFixture _fixture;
+    private static readonly IDidMethod[] s_didMethods = [new DidKeyMethod()];
+    private static readonly string[] s_employeeClaimsToDisclose = ["employeeName", "position"];
+    private static readonly string[] s_degreeClaimsToDisclose = ["name", "degree"];
 
     public VerifiablePresentationIntegrationTests(DatabaseFixture fixture)
     {
@@ -44,11 +47,11 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
             .UseNpgsql(_fixture.ConnectionString)
             .Options;
 
-        var dbContext = new HeroDbContext(dbOptions);
-        await dbContext.Database.EnsureCreatedAsync().ConfigureAwait(true);
+        await using var dbContext = new HeroDbContext(dbOptions);
+        await dbContext.Database.EnsureCreatedAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
 
         // Setup Data Protection for key encryption
-        var services = new ServiceCollection()
+        using var services = new ServiceCollection()
             .AddDataProtection()
             .Services
             .BuildServiceProvider();
@@ -57,11 +60,21 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
         var keyEncryptionService = new LocalKeyEncryptionService(dataProtectionProvider);
         var rateLimiter = new InMemoryRateLimiter();
 
-        var didMethodResolver = new DidMethodResolver();
+        var tenantId = Guid.NewGuid();
+        var tenantContext = new TestTenantContext(tenantId);
+
+        // Create logger factory for services that require it
+        using var loggerFactory = LoggerFactory.Create(builder => { });
+        var didCreationLogger = loggerFactory.CreateLogger<DidCreationService>();
+        var vpLogger = loggerFactory.CreateLogger<VerifiablePresentationService>();
+
+        var didMethodResolver = new DidMethodResolver(s_didMethods);
         var didCreationService = new DidCreationService(
             dbContext,
             keyEncryptionService,
+            tenantContext,
             didMethodResolver,
+            didCreationLogger,
             rateLimiter);
 
         var credentialIssuanceService = new CredentialIssuanceService(
@@ -69,31 +82,32 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
             keyEncryptionService,
             rateLimiter);
 
+        var sdJwtGenerator = new MockSdJwtGenerator();
+        var sdJwtVerifier = new MockSdJwtVerifier();
+
         var vpService = new VerifiablePresentationService(
             dbContext,
+            sdJwtGenerator,
+            sdJwtVerifier,
+            rateLimiter,
             keyEncryptionService,
-            rateLimiter);
-
-        var tenantId = Guid.NewGuid();
-        var tenantContext = new TestTenantContext(tenantId);
+            vpLogger);
 
         // Act - Complete VP Flow
 
         // Step 1: Create issuer DID
         var issuerDidResult = await didCreationService.CreateDidAsync(
-            tenantContext,
-            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+            TestContext.Current.CancellationToken).ConfigureAwait(true);
 
         // Step 2: Create holder DID
         var holderDidResult = await didCreationService.CreateDidAsync(
-            tenantContext,
-            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+            TestContext.Current.CancellationToken).ConfigureAwait(true);
 
         // Step 3: Issue credential
         var credentialJwt = await credentialIssuanceService.IssueCredentialAsync(
             tenantContext,
-            issuerDidResult.DidId,
-            holderDidResult.DidId,
+            issuerDidResult.Id,
+            holderDidResult.Id,
             "UniversityDegreeCredential",
             new System.Collections.Generic.Dictionary<string, object>
             {
@@ -103,23 +117,23 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
                 { "graduationYear", 2024 }
             },
             expirationDate: DateTimeOffset.UtcNow.AddYears(5),
-            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+            TestContext.Current.CancellationToken).ConfigureAwait(true);
 
         // Step 4: Create VP with selective disclosure (only name and degree)
         var presentationResult = await vpService.CreatePresentationAsync(
             tenantContext,
             credentialJwt,
-            claimsToDisclose: new[] { "name", "degree" },
-            holderDidResult.DidId,
+            claimsToDisclose: s_degreeClaimsToDisclose,
+            holderDidResult.Id,
             audience: "did:hero:verifier789",
-            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+            TestContext.Current.CancellationToken).ConfigureAwait(true);
 
         // Step 5: Verify the presentation
         var verificationResult = await vpService.VerifyPresentationAsync(
             tenantContext,
             presentationResult.PresentationJwt,
             presentationResult.SelectedDisclosures,
-            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+            TestContext.Current.CancellationToken).ConfigureAwait(true);
 
         // Assert - Verify all steps succeeded
         Assert.NotNull(issuerDidResult);
@@ -140,7 +154,7 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
         Assert.Equal(2, presentationResult.DisclosedClaimNames.Length);
 
         // Cleanup
-        await dbContext.Database.EnsureDeletedAsync().ConfigureAwait(true);
+        await dbContext.Database.EnsureDeletedAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
     }
 
     [Fact]
@@ -151,10 +165,10 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
             .UseNpgsql(_fixture.ConnectionString)
             .Options;
 
-        var dbContext = new HeroDbContext(dbOptions);
-        await dbContext.Database.EnsureCreatedAsync().ConfigureAwait(true);
+        await using var dbContext = new HeroDbContext(dbOptions);
+        await dbContext.Database.EnsureCreatedAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
 
-        var services = new ServiceCollection()
+        using var services = new ServiceCollection()
             .AddDataProtection()
             .Services
             .BuildServiceProvider();
@@ -163,45 +177,66 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
         var keyEncryptionService = new LocalKeyEncryptionService(dataProtectionProvider);
         var rateLimiter = new InMemoryRateLimiter();
 
-        var didMethodResolver = new DidMethodResolver();
-        var didCreationService = new DidCreationService(
-            dbContext,
-            keyEncryptionService,
-            didMethodResolver,
-            rateLimiter);
+        var issuerTenantId = Guid.NewGuid();
+        var holderTenantId = Guid.NewGuid(); // Different tenant
+        var issuerContext = new TestTenantContext(issuerTenantId);
+        var holderContext = new TestTenantContext(holderTenantId);
+
+        // Create logger factory for services that require it
+        using var loggerFactory = LoggerFactory.Create(builder => { });
+        var didCreationLogger = loggerFactory.CreateLogger<DidCreationService>();
+        var vpLogger = loggerFactory.CreateLogger<VerifiablePresentationService>();
+
+        var didMethodResolver = new DidMethodResolver(s_didMethods);
 
         var credentialIssuanceService = new CredentialIssuanceService(
             dbContext,
             keyEncryptionService,
             rateLimiter);
 
+        var sdJwtGenerator = new MockSdJwtGenerator();
+        var sdJwtVerifier = new MockSdJwtVerifier();
+
         var vpService = new VerifiablePresentationService(
             dbContext,
+            sdJwtGenerator,
+            sdJwtVerifier,
+            rateLimiter,
             keyEncryptionService,
+            vpLogger);
+
+        // Create separate service instances for each tenant context
+        var issuerDidCreationService = new DidCreationService(
+            dbContext,
+            keyEncryptionService,
+            issuerContext,
+            didMethodResolver,
+            didCreationLogger,
             rateLimiter);
 
-        var issuerTenantId = Guid.NewGuid();
-        var holderTenantId = Guid.NewGuid(); // Different tenant
-        var issuerContext = new TestTenantContext(issuerTenantId);
-        var holderContext = new TestTenantContext(holderTenantId);
+        var holderDidCreationService = new DidCreationService(
+            dbContext,
+            keyEncryptionService,
+            holderContext,
+            didMethodResolver,
+            didCreationLogger,
+            rateLimiter);
 
         // Act - Cross-tenant credential issuance
 
         // Issuer creates their DID
-        var issuerDidResult = await didCreationService.CreateDidAsync(
-            issuerContext,
-            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        var issuerDidResult = await issuerDidCreationService.CreateDidAsync(
+            TestContext.Current.CancellationToken).ConfigureAwait(true);
 
         // Holder creates their DID (different tenant)
-        var holderDidResult = await didCreationService.CreateDidAsync(
-            holderContext,
-            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        var holderDidResult = await holderDidCreationService.CreateDidAsync(
+            TestContext.Current.CancellationToken).ConfigureAwait(true);
 
         // Issuer issues credential to holder (cross-tenant)
         var credentialJwt = await credentialIssuanceService.IssueCredentialAsync(
             issuerContext,
-            issuerDidResult.DidId,
-            holderDidResult.DidId,
+            issuerDidResult.Id,
+            holderDidResult.Id,
             "EmploymentCredential",
             new System.Collections.Generic.Dictionary<string, object>
             {
@@ -215,8 +250,8 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
         var presentationResult = await vpService.CreatePresentationAsync(
             holderContext,
             credentialJwt,
-            claimsToDisclose: new[] { "employeeName", "position" },
-            holderDidResult.DidId,
+            claimsToDisclose: s_employeeClaimsToDisclose,
+            holderDidResult.Id,
             cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
 
         // Assert
@@ -227,14 +262,14 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
         // Verify credential was persisted under issuer's tenant
         var issuedCredential = await dbContext.VerifiableCredentials
             .Where(vc => vc.TenantId == issuerTenantId)
-            .FirstOrDefaultAsync().ConfigureAwait(true);
+            .FirstOrDefaultAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
 
         Assert.NotNull(issuedCredential);
-        Assert.Equal(issuerDidResult.DidId, issuedCredential.IssuerDidId);
-        Assert.Equal(holderDidResult.DidId, issuedCredential.HolderDidId);
+        Assert.Equal(issuerDidResult.Id, issuedCredential.IssuerDidId);
+        Assert.Equal(holderDidResult.Id, issuedCredential.HolderDidId);
 
         // Cleanup
-        await dbContext.Database.EnsureDeletedAsync().ConfigureAwait(true);
+        await dbContext.Database.EnsureDeletedAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
     }
 
     [Fact]
@@ -245,10 +280,10 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
             .UseNpgsql(_fixture.ConnectionString)
             .Options;
 
-        var dbContext = new HeroDbContext(dbOptions);
-        await dbContext.Database.EnsureCreatedAsync().ConfigureAwait(true);
+        await using var dbContext = new HeroDbContext(dbOptions);
+        await dbContext.Database.EnsureCreatedAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
 
-        var services = new ServiceCollection()
+        using var services = new ServiceCollection()
             .AddDataProtection()
             .Services
             .BuildServiceProvider();
@@ -257,11 +292,21 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
         var keyEncryptionService = new LocalKeyEncryptionService(dataProtectionProvider);
         var rateLimiter = new InMemoryRateLimiter();
 
-        var didMethodResolver = new DidMethodResolver();
+        var tenantId = Guid.NewGuid();
+        var tenantContext = new TestTenantContext(tenantId);
+
+        // Create logger factory for services that require it
+        using var loggerFactory = LoggerFactory.Create(builder => { });
+        var didCreationLogger = loggerFactory.CreateLogger<DidCreationService>();
+        var vpLogger = loggerFactory.CreateLogger<VerifiablePresentationService>();
+
+        var didMethodResolver = new DidMethodResolver(s_didMethods);
         var didCreationService = new DidCreationService(
             dbContext,
             keyEncryptionService,
+            tenantContext,
             didMethodResolver,
+            didCreationLogger,
             rateLimiter);
 
         var credentialIssuanceService = new CredentialIssuanceService(
@@ -269,21 +314,24 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
             keyEncryptionService,
             rateLimiter);
 
+        var sdJwtGenerator = new MockSdJwtGenerator();
+        var sdJwtVerifier = new MockSdJwtVerifier();
+
         var vpService = new VerifiablePresentationService(
             dbContext,
+            sdJwtGenerator,
+            sdJwtVerifier,
+            rateLimiter,
             keyEncryptionService,
-            rateLimiter);
+            vpLogger);
 
-        var tenantId = Guid.NewGuid();
-        var tenantContext = new TestTenantContext(tenantId);
-
-        var issuerDidResult = await didCreationService.CreateDidAsync(tenantContext, cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
-        var holderDidResult = await didCreationService.CreateDidAsync(tenantContext, cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        var issuerDidResult = await didCreationService.CreateDidAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
+        var holderDidResult = await didCreationService.CreateDidAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
 
         var credentialJwt = await credentialIssuanceService.IssueCredentialAsync(
             tenantContext,
-            issuerDidResult.DidId,
-            holderDidResult.DidId,
+            issuerDidResult.Id,
+            holderDidResult.Id,
             "TestCredential",
             new System.Collections.Generic.Dictionary<string, object>
             {
@@ -298,7 +346,7 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
             tenantContext,
             credentialJwt,
             claimsToDisclose: null, // null = disclose all
-            holderDidResult.DidId,
+            holderDidResult.Id,
             cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
 
         // Assert
@@ -309,7 +357,7 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
         Assert.Contains("field3", presentationResult.DisclosedClaimNames);
 
         // Cleanup
-        await dbContext.Database.EnsureDeletedAsync().ConfigureAwait(true);
+        await dbContext.Database.EnsureDeletedAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
     }
 
     private sealed class TestTenantContext : ITenantContext

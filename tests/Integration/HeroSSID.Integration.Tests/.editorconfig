@@ -1,0 +1,14 @@
+# EditorConfig for Integration Tests
+# Integration tests have different requirements than production code
+
+root = false
+
+[*.cs]
+# CA1515: Consider making public types internal
+# xUnit requires test classes and fixtures to be public
+dotnet_diagnostic.CA1515.severity = none
+
+# CA2007: Consider calling ConfigureAwait
+# Test code runs in test context where synchronization context is controlled
+# await using statements don't support ConfigureAwait
+dotnet_diagnostic.CA2007.severity = none

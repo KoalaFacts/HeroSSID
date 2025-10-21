@@ -274,7 +274,13 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
             expiresAt = null;
             if (payloadDocument.RootElement.TryGetProperty(ExpirationClaim, out var expElement))
             {
-                if (expElement.TryGetInt64(out var expUnix) &&
+                // SECURITY: Handle null exp claim gracefully (credentials without expiration are valid)
+                if (expElement.ValueKind == JsonValueKind.Null)
+                {
+                    // Null expiration means credential doesn't expire - this is valid
+                    expiresAt = null;
+                }
+                else if (expElement.TryGetInt64(out var expUnix) &&
                     expUnix >= MinValidTimestamp &&
                     expUnix <= MaxValidTimestamp)
                 {
