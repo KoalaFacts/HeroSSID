@@ -2,7 +2,27 @@
 
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
+
+    <!-- NuGet Package Metadata -->
+    <PackageId>HeroSSID.Observability</PackageId>
+    <Authors>BeingCiteable</Authors>
+    <Company>BeingCiteable</Company>
+    <Product>HeroSSID</Product>
+    <Description>Observability and logging infrastructure for HeroSSID using Serilog. Provides structured logging, console and file sinks, and integration with Microsoft.Extensions.Logging.</Description>
+    <PackageTags>serilog;logging;observability;structured-logging;monitoring</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/BeingCiteable/HeroSSID</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/BeingCiteable/HeroSSID</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../../README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Serilog" Version="4.1.0" />
