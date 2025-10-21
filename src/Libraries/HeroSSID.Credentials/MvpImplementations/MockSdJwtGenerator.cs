@@ -12,7 +12,7 @@ namespace HeroSSID.Credentials.MvpImplementations;
 /// ⚠️ TEMPORARY MVP IMPLEMENTATION - DO NOT USE IN PRODUCTION ⚠️
 ///
 /// This will be replaced by the actual HeroSD-JWT NuGet package
-/// (https://github.com/BeingCiteable/HeroSD-JWT) which implements
+/// (https://github.com/KoalaFacts/HeroSD-JWT) which implements
 /// proper hash-based selective disclosure per IETF draft-22.
 ///
 /// Current behavior: Returns a standard JWT-VC with all claims visible.

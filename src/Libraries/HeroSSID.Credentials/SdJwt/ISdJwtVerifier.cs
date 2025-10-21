@@ -6,7 +6,7 @@ namespace HeroSSID.Credentials.SdJwt;
 /// </summary>
 /// <remarks>
 /// This is a MOCK interface for MVP development. The actual implementation will come from
-/// the HeroSD-JWT NuGet package (https://github.com/BeingCiteable/HeroSD-JWT) when available.
+/// the HeroSD-JWT NuGet package (https://github.com/KoalaFacts/HeroSD-JWT) when available.
 ///
 /// Verifiers use this to validate SD-JWT credentials and reconstruct disclosed claims.
 /// </remarks>

@@ -420,9 +420,10 @@ public sealed class DidCreationService : IDidCreationService
             throw new CryptographicException("CRITICAL: System RNG returned all 0xFF - insufficient entropy. Key generation aborted.");
         }
 
-        // 4. Check for sufficient unique values (require at least 50% unique bytes)
+        // 4. Check for sufficient unique values (require at least 75% unique bytes for strong entropy)
+        // SECURITY HARDENING: Increased from 50% to 75% threshold based on security audit recommendation
         int uniqueBytes = entropyTest.Distinct().Count();
-        int minUniqueBytes = sampleSize / 2; // 128 of 256
+        int minUniqueBytes = (sampleSize * 3) / 4; // 192 of 256 (75%)
         if (uniqueBytes < minUniqueBytes)
         {
             throw new CryptographicException($"CRITICAL: System RNG has insufficient entropy - only {uniqueBytes} unique values in {sampleSize} bytes (minimum: {minUniqueBytes}). Key generation aborted.");
