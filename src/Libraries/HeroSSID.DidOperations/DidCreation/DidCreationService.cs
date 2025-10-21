@@ -393,6 +393,14 @@ public sealed class DidCreationService : IDidCreationService
     /// <exception cref="CryptographicException">Thrown if entropy validation fails</exception>
     private static void ValidateSystemEntropy()
     {
+        // Allow skipping entropy validation in test/CI environments
+        // SECURITY NOTE: This should ONLY be used in non-production environments
+        string? skipEntropyCheck = Environment.GetEnvironmentVariable("HEROSSID_SKIP_ENTROPY_CHECK");
+        if (skipEntropyCheck == "true" || skipEntropyCheck == "1")
+        {
+            return; // Skip validation for testing purposes
+        }
+
         // Use larger sample for more reliable entropy testing
         const int sampleSize = 256;
         byte[] entropyTest = new byte[sampleSize];

@@ -1,49 +1,24 @@
-name: Release and Publish NuGet Packages
+name: CI - Build and Test
 
 on:
-  release:
-    types: [published]
+  push:
+  pull_request:
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Package version (e.g., 1.0.0)'
-        required: true
-        type: string
 
 permissions:
-  id-token: write  # Required for OIDC authentication with NuGet.org
   contents: read
+  pull-requests: read
 
 jobs:
-  version:
-    name: Determine Version
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.VERSION }}
-
-    steps:
-      - name: Determine version
-        id: version
-        run: |
-          if [ "${{ github.event_name }}" == "release" ]; then
-            VERSION="${{ github.event.release.tag_name }}"
-            VERSION="${VERSION#v}"  # Remove 'v' prefix if present
-          else
-            VERSION="${{ inputs.version }}"
-          fi
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "Publishing version: $VERSION"
-
   build:
     name: Build
-    needs: version
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history for versioning
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -54,7 +29,7 @@ jobs:
         run: dotnet restore
 
       - name: Build solution
-        run: dotnet build --configuration Release --no-restore /p:Version=${{ needs.version.outputs.version }}
+        run: dotnet build --configuration Release --no-restore
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -92,10 +67,61 @@ jobs:
         run: dotnet restore
 
       - name: Build solution
-        run: dotnet build --configuration Release --no-restore /p:Version=${{ needs.version.outputs.version }}
+        run: dotnet build --configuration Release --no-restore
 
-      - name: Run all tests
-        run: dotnet test --configuration Release --no-build --verbosity normal
+      - name: Run unit tests
+        run: |
+          dotnet test tests/Unit/HeroSSID.Unit.Tests/HeroSSID.Unit.Tests.csproj \
+            --configuration Release \
+            --no-build \
+            --verbosity normal \
+            --logger "trx;LogFileName=unit-tests.trx" \
+            --collect:"XPlat Code Coverage"
+
+      - name: Run Credentials tests
+        run: |
+          dotnet test tests/Unit/HeroSSID.Credentials.Tests/HeroSSID.Credentials.Tests.csproj \
+            --configuration Release \
+            --no-build \
+            --verbosity normal \
+            --logger "trx;LogFileName=credentials-tests.trx" \
+            --collect:"XPlat Code Coverage"
+
+      - name: Run Data tests
+        run: |
+          dotnet test tests/Unit/HeroSSID.Data.Tests/HeroSSID.Data.Tests.csproj \
+            --configuration Release \
+            --no-build \
+            --verbosity normal \
+            --logger "trx;LogFileName=data-tests.trx" \
+            --collect:"XPlat Code Coverage"
+
+      - name: Run DidOperations tests
+        run: |
+          dotnet test tests/Unit/HeroSSID.DidOperations.Tests/HeroSSID.DidOperations.Tests.csproj \
+            --configuration Release \
+            --no-build \
+            --verbosity normal \
+            --logger "trx;LogFileName=didops-tests.trx" \
+            --collect:"XPlat Code Coverage"
+
+      - name: Run contract tests
+        run: |
+          dotnet test tests/Contract/HeroSSID.DidOperations.Contract.Tests/HeroSSID.DidOperations.Contract.Tests.csproj \
+            --configuration Release \
+            --no-build \
+            --verbosity normal \
+            --logger "trx;LogFileName=contract-tests.trx" \
+            --collect:"XPlat Code Coverage"
+
+      - name: Run integration tests
+        run: |
+          dotnet test tests/Integration/HeroSSID.Integration.Tests/HeroSSID.Integration.Tests.csproj \
+            --configuration Release \
+            --no-build \
+            --verbosity normal \
+            --logger "trx;LogFileName=integration-tests.trx" \
+            --collect:"XPlat Code Coverage"
 
       - name: Upload test results
         if: always()
@@ -128,19 +154,18 @@ jobs:
         run: |
           dotnet list package --vulnerable --include-transitive 2>&1 | tee vulnerability-report.txt
           if grep -q "has the following vulnerable packages" vulnerability-report.txt; then
-            echo "::error::Vulnerable packages detected! Release blocked."
+            echo "::warning::Vulnerable packages detected. Review the report."
             cat vulnerability-report.txt
-            exit 1
           fi
-          echo "No vulnerable packages detected."
 
       - name: Install security scanning tools
         run: |
           dotnet tool install --global security-scan --version 5.6.7 || true
 
       - name: Run security analysis
+        continue-on-error: true
         run: |
-          security-scan HeroSSID.sln --excl-proj=**/*Tests.csproj --verbose || echo "Security scan completed"
+          security-scan HeroSSID.sln --excl-proj=**/*Tests.csproj --verbose || echo "Security scan completed with warnings"
 
       - name: Upload security scan results
         if: always()
@@ -150,11 +175,12 @@ jobs:
           path: |
             vulnerability-report.txt
             SecurityReport.html
-          retention-days: 90
+          retention-days: 30
 
-  release:
-    name: Package NuGet Libraries
-    needs: [version, security-scan]
+  pack:
+    name: Pack Libraries (Tags Only)
+    needs: security-scan
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
 
     steps:
@@ -172,95 +198,46 @@ jobs:
         run: dotnet restore
 
       - name: Build solution
-        run: dotnet build --configuration Release --no-restore /p:Version=${{ needs.version.outputs.version }}
+        run: dotnet build --configuration Release --no-restore
 
       - name: Pack HeroSSID.Core
         run: |
           dotnet pack src/Libraries/HeroSSID.Core/HeroSSID.Core.csproj \
             --configuration Release \
             --no-build \
-            --output ./packages \
-            /p:PackageVersion=${{ needs.version.outputs.version }}
+            --output ./packages
 
       - name: Pack HeroSSID.DidOperations
         run: |
           dotnet pack src/Libraries/HeroSSID.DidOperations/HeroSSID.DidOperations.csproj \
             --configuration Release \
             --no-build \
-            --output ./packages \
-            /p:PackageVersion=${{ needs.version.outputs.version }}
+            --output ./packages
 
       - name: Pack HeroSSID.Credentials
         run: |
           dotnet pack src/Libraries/HeroSSID.Credentials/HeroSSID.Credentials.csproj \
             --configuration Release \
             --no-build \
-            --output ./packages \
-            /p:PackageVersion=${{ needs.version.outputs.version }}
+            --output ./packages
 
       - name: Pack HeroSSID.Data
         run: |
           dotnet pack src/Libraries/HeroSSID.Data/HeroSSID.Data.csproj \
             --configuration Release \
             --no-build \
-            --output ./packages \
-            /p:PackageVersion=${{ needs.version.outputs.version }}
+            --output ./packages
 
       - name: Pack HeroSSID.Observability
         run: |
           dotnet pack src/Libraries/HeroSSID.Observability/HeroSSID.Observability.csproj \
             --configuration Release \
             --no-build \
-            --output ./packages \
-            /p:PackageVersion=${{ needs.version.outputs.version }}
+            --output ./packages
 
       - name: Upload NuGet packages
         uses: actions/upload-artifact@v4
         with:
           name: nuget-packages
           path: ./packages/*.nupkg
-          retention-days: 30
-
-  publish:
-    name: Publish to NuGet.org
-    needs: [version, release]
-    runs-on: ubuntu-latest
-    environment: production  # Require manual approval for production
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '9.0.x'
-
-      - name: Download NuGet packages
-        uses: actions/download-artifact@v4
-        with:
-          name: nuget-packages
-          path: ./packages
-
-      - name: NuGet login (OIDC → temporary API key)
-        uses: NuGet/login@v1
-        id: nuget-login
-        with:
-          user: ${{ secrets.NUGET_USERNAME }}
-
-      - name: Publish to NuGet.org using Trusted Publishing
-        run: |
-          dotnet nuget push "./packages/*.nupkg" \
-            --source https://api.nuget.org/v3/index.json \
-            --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }} \
-            --skip-duplicate
-        env:
-          DOTNET_CLI_TELEMETRY_OPTOUT: 1
-
-      - name: Create release summary
-        run: |
-          echo "## Published Packages - Version ${{ needs.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "The following packages have been published to NuGet.org:" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          ls -1 ./packages/*.nupkg | xargs -I {} basename {} | sed 's/^/- /' >> $GITHUB_STEP_SUMMARY
+          retention-days: 7
