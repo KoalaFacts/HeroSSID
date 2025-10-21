@@ -1,5 +1,5 @@
 using System.CommandLine;
-using HeroSSID.DidOperations.Interfaces;
+using HeroSSID.DidOperations.DidCreation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console;

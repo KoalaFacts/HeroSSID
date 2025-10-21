@@ -1,8 +1,11 @@
 using System.Text.Json;
-using HeroSSID.Core.Interfaces;
+using HeroSSID.Core.DidMethod;
+using HeroSSID.Core.KeyEncryption;
+using HeroSSID.Core.TenantManagement;
 using HeroSSID.Data;
+using HeroSSID.DidOperations.DidCreation;
 using HeroSSID.DidOperations.DidMethods;
-using HeroSSID.DidOperations.Services;
+using HeroSSID.DidOperations.DidResolution;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
