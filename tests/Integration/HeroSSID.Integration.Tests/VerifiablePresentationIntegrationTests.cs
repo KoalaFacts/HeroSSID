@@ -58,7 +58,7 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
 
         var dataProtectionProvider = services.GetRequiredService<IDataProtectionProvider>();
         var keyEncryptionService = new LocalKeyEncryptionService(dataProtectionProvider);
-        var rateLimiter = new InMemoryRateLimiter();
+        using var rateLimiter = new InMemoryRateLimiter();
 
         var tenantId = Guid.NewGuid();
         var tenantContext = new TestTenantContext(tenantId);
@@ -175,7 +175,7 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
 
         var dataProtectionProvider = services.GetRequiredService<IDataProtectionProvider>();
         var keyEncryptionService = new LocalKeyEncryptionService(dataProtectionProvider);
-        var rateLimiter = new InMemoryRateLimiter();
+        using var rateLimiter = new InMemoryRateLimiter();
 
         var issuerTenantId = Guid.NewGuid();
         var holderTenantId = Guid.NewGuid(); // Different tenant
@@ -290,7 +290,7 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
 
         var dataProtectionProvider = services.GetRequiredService<IDataProtectionProvider>();
         var keyEncryptionService = new LocalKeyEncryptionService(dataProtectionProvider);
-        var rateLimiter = new InMemoryRateLimiter();
+        using var rateLimiter = new InMemoryRateLimiter();
 
         var tenantId = Guid.NewGuid();
         var tenantContext = new TestTenantContext(tenantId);

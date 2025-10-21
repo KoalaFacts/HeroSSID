@@ -54,7 +54,7 @@ public sealed class SecurityEdgeCaseTests : IDisposable
     public async Task RateLimitExhaustion_ExceedingMaxOperations_ThrowsInvalidOperationException()
     {
         // Arrange - Create rate limiter with strict limits for testing
-        var rateLimiter = new InMemoryRateLimiter(
+        using var rateLimiter = new InMemoryRateLimiter(
             windowSize: TimeSpan.FromSeconds(60),
             maxOperations: 3); // Very low limit for testing
 
@@ -105,7 +105,7 @@ public sealed class SecurityEdgeCaseTests : IDisposable
     {
         // Arrange
         var (issuerDidId, holderDidId) = await SeedTestDidsAsync().ConfigureAwait(true);
-        var rateLimiter = new InMemoryRateLimiter();
+        using var rateLimiter = new InMemoryRateLimiter();
         var service = new CredentialIssuanceService(
             _dbContext,
             _keyEncryptionService,
@@ -133,7 +133,7 @@ public sealed class SecurityEdgeCaseTests : IDisposable
     {
         // Arrange
         var (issuerDidId, holderDidId) = await SeedTestDidsAsync().ConfigureAwait(true);
-        var rateLimiter = new InMemoryRateLimiter();
+        using var rateLimiter = new InMemoryRateLimiter();
         var service = new CredentialIssuanceService(
             _dbContext,
             _keyEncryptionService,
@@ -161,7 +161,7 @@ public sealed class SecurityEdgeCaseTests : IDisposable
     public async Task MalformedJwtAttack_InvalidFormat_VerificationFails()
     {
         // Arrange
-        var rateLimiter = new InMemoryRateLimiter();
+        using var rateLimiter = new InMemoryRateLimiter();
         var verificationService = new CredentialVerificationService(
             _dbContext,
             rateLimiter);
@@ -181,7 +181,7 @@ public sealed class SecurityEdgeCaseTests : IDisposable
     public async Task MalformedJwtAttack_TwoPartJwt_VerificationFails()
     {
         // Arrange
-        var rateLimiter = new InMemoryRateLimiter();
+        using var rateLimiter = new InMemoryRateLimiter();
         var verificationService = new CredentialVerificationService(
             _dbContext,
             rateLimiter);
@@ -201,7 +201,7 @@ public sealed class SecurityEdgeCaseTests : IDisposable
     public async Task MalformedJwtAttack_InvalidBase64_VerificationFails()
     {
         // Arrange
-        var rateLimiter = new InMemoryRateLimiter();
+        using var rateLimiter = new InMemoryRateLimiter();
         var verificationService = new CredentialVerificationService(
             _dbContext,
             rateLimiter);
@@ -222,7 +222,7 @@ public sealed class SecurityEdgeCaseTests : IDisposable
     {
         // Arrange - Issue a valid credential first
         var (issuerDidId, holderDidId) = await SeedTestDidsAsync().ConfigureAwait(true);
-        var rateLimiter = new InMemoryRateLimiter();
+        using var rateLimiter = new InMemoryRateLimiter();
         var issuanceService = new CredentialIssuanceService(
             _dbContext,
             _keyEncryptionService,
@@ -263,7 +263,7 @@ public sealed class SecurityEdgeCaseTests : IDisposable
 
         // Arrange
         var (issuerDidId, holderDidId) = await SeedTestDidsAsync().ConfigureAwait(true);
-        var rateLimiter = new InMemoryRateLimiter(maxOperations: 50); // High enough for concurrent operations
+        using var rateLimiter = new InMemoryRateLimiter(maxOperations: 50); // High enough for concurrent operations
         var service = new CredentialIssuanceService(
             _dbContext,
             _keyEncryptionService,
@@ -320,7 +320,7 @@ public sealed class SecurityEdgeCaseTests : IDisposable
 
         // Arrange - Issue a credential first
         var (issuerDidId, holderDidId) = await SeedTestDidsAsync().ConfigureAwait(true);
-        var rateLimiter = new InMemoryRateLimiter(maxOperations: 100);
+        using var rateLimiter = new InMemoryRateLimiter(maxOperations: 100);
         var issuanceService = new CredentialIssuanceService(
             _dbContext,
             _keyEncryptionService,
@@ -363,7 +363,7 @@ public sealed class SecurityEdgeCaseTests : IDisposable
     {
         // Arrange
         var (issuerDidId, holderDidId) = await SeedTestDidsAsync().ConfigureAwait(true);
-        var rateLimiter = new InMemoryRateLimiter();
+        using var rateLimiter = new InMemoryRateLimiter();
         var service = new CredentialIssuanceService(
             _dbContext,
             _keyEncryptionService,
@@ -388,7 +388,7 @@ public sealed class SecurityEdgeCaseTests : IDisposable
     {
         // Arrange
         var (issuerDidId, holderDidId) = await SeedTestDidsAsync().ConfigureAwait(true);
-        var rateLimiter = new InMemoryRateLimiter();
+        using var rateLimiter = new InMemoryRateLimiter();
         var service = new CredentialIssuanceService(
             _dbContext,
             _keyEncryptionService,
@@ -411,7 +411,7 @@ public sealed class SecurityEdgeCaseTests : IDisposable
     {
         // Arrange
         var (issuerDidId, holderDidId) = await SeedTestDidsAsync().ConfigureAwait(true);
-        var rateLimiter = new InMemoryRateLimiter();
+        using var rateLimiter = new InMemoryRateLimiter();
         var service = new CredentialIssuanceService(
             _dbContext,
             _keyEncryptionService,

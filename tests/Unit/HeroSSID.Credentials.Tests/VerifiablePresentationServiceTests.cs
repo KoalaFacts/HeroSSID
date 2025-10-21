@@ -31,6 +31,7 @@ public sealed class VerifiablePresentationServiceTests : IDisposable
     private readonly Guid _tenantId = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private readonly byte[] _testPrivateKey;
     private readonly byte[] _testPublicKey;
+    private readonly InMemoryRateLimiter _rateLimiter;
 
     public VerifiablePresentationServiceTests()
     {
@@ -40,6 +41,9 @@ public sealed class VerifiablePresentationServiceTests : IDisposable
 
         _dbContext = new HeroDbContext(options);
         _tenantContext = new TestTenantContext(_tenantId);
+        _rateLimiter = new InMemoryRateLimiter(
+            windowSize: TimeSpan.FromSeconds(60),
+            maxOperations: 100);
 
         // Generate test Ed25519 key pair
         var algorithm = SignatureAlgorithm.Ed25519;
@@ -56,7 +60,7 @@ public sealed class VerifiablePresentationServiceTests : IDisposable
     {
         var sdJwtGenerator = new MockSdJwtGenerator();
         var sdJwtVerifier = new MockSdJwtVerifier();
-        var rateLimiter = new InMemoryRateLimiter();
+        using var rateLimiter = new InMemoryRateLimiter();
         var keyEncryptionService = new MockKeyEncryptionService();
 
         var service = new VerifiablePresentationService(
@@ -74,7 +78,7 @@ public sealed class VerifiablePresentationServiceTests : IDisposable
     {
         var sdJwtGenerator = new MockSdJwtGenerator();
         var sdJwtVerifier = new MockSdJwtVerifier();
-        var rateLimiter = new InMemoryRateLimiter();
+        using var rateLimiter = new InMemoryRateLimiter();
         var keyEncryptionService = new MockKeyEncryptionService();
 
         Assert.Throws<ArgumentNullException>(() =>
@@ -179,16 +183,13 @@ public sealed class VerifiablePresentationServiceTests : IDisposable
     {
         var sdJwtGenerator = new MockSdJwtGenerator();
         var sdJwtVerifier = new MockSdJwtVerifier();
-        var rateLimiter = new InMemoryRateLimiter(
-            windowSize: TimeSpan.FromSeconds(60),
-            maxOperations: 100);
         var keyEncryptionService = new MockKeyEncryptionService();
 
         return new VerifiablePresentationService(
             _dbContext,
             sdJwtGenerator,
             sdJwtVerifier,
-            rateLimiter,
+            _rateLimiter,
             keyEncryptionService);
     }
 
@@ -246,6 +247,7 @@ public sealed class VerifiablePresentationServiceTests : IDisposable
     public void Dispose()
     {
         _dbContext.Dispose();
+        _rateLimiter.Dispose();
     }
 
     private sealed class TestTenantContext : ITenantContext
