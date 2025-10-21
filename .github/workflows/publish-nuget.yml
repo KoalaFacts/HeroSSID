@@ -103,9 +103,56 @@ jobs:
           path: '**/TestResults/**'
           retention-days: 7
 
+  security-scan:
+    name: Security Scan
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Run dependency vulnerability scan
+        run: |
+          dotnet list package --vulnerable --include-transitive 2>&1 | tee vulnerability-report.txt
+          if grep -q "has the following vulnerable packages" vulnerability-report.txt; then
+            echo "::error::Vulnerable packages detected! Release blocked."
+            cat vulnerability-report.txt
+            exit 1
+          fi
+          echo "No vulnerable packages detected."
+
+      - name: Install security scanning tools
+        run: |
+          dotnet tool install --global security-scan --version 5.6.7 || true
+
+      - name: Run security analysis
+        run: |
+          security-scan HeroSSID.sln --excl-proj=**/*Tests.csproj --verbose || echo "Security scan completed"
+
+      - name: Upload security scan results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-scan-results
+          path: |
+            vulnerability-report.txt
+            SecurityReport.html
+          retention-days: 90
+
   release:
     name: Package NuGet Libraries
-    needs: [version, test]
+    needs: [version, security-scan]
     runs-on: ubuntu-latest
 
     steps:

@@ -129,9 +129,56 @@ jobs:
           path: '**/TestResults/**'
           retention-days: 7
 
-  pack:
-    name: Pack Libraries
+  security-scan:
+    name: Security Scan
     needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Run dependency vulnerability scan
+        run: |
+          dotnet list package --vulnerable --include-transitive 2>&1 | tee vulnerability-report.txt
+          if grep -q "has the following vulnerable packages" vulnerability-report.txt; then
+            echo "::warning::Vulnerable packages detected. Review the report."
+            cat vulnerability-report.txt
+          fi
+
+      - name: Install security scanning tools
+        run: |
+          dotnet tool install --global security-scan --version 5.6.7 || true
+
+      - name: Run security analysis
+        continue-on-error: true
+        run: |
+          security-scan HeroSSID.sln --excl-proj=**/*Tests.csproj --verbose || echo "Security scan completed with warnings"
+
+      - name: Upload security scan results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-scan-results
+          path: |
+            vulnerability-report.txt
+            SecurityReport.html
+          retention-days: 30
+
+  pack:
+    name: Pack Libraries (Tags Only)
+    needs: security-scan
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
 
     steps:
