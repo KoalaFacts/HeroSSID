@@ -1,5 +1,5 @@
-using HeroSSID.Credentials.Models;
-using HeroSSID.Credentials.Services;
+using HeroSSID.Credentials.SdJwt;
+using HeroSSID.Credentials.MvpImplementations;
 using System;
 using System.Collections.Generic;
 using Xunit;

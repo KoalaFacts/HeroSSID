@@ -1,14 +1,21 @@
-using HeroSSID.Core.Interfaces;
-using HeroSSID.Core.Services;
-using HeroSSID.Credentials.Interfaces;
-using HeroSSID.Credentials.Services;
+using HeroSSID.Core.DidMethod;
+using HeroSSID.Core.KeyEncryption;
+using HeroSSID.Core.RateLimiting;
+using HeroSSID.Core.TenantManagement;
+using HeroSSID.Credentials.CredentialIssuance;
+using HeroSSID.Credentials.MvpImplementations;
+using HeroSSID.Credentials.SdJwt;
+using HeroSSID.Credentials.VerifiablePresentations;
 using HeroSSID.Data;
-using HeroSSID.DidOperations.Interfaces;
-using HeroSSID.DidOperations.Services;
+using HeroSSID.DidOperations.DidCreation;
+using HeroSSID.DidOperations.DidMethods;
+using HeroSSID.DidOperations.DidResolution;
+using HeroSSID.DidOperations.DidSigning;
 using HeroSSID.Integration.Tests.TestInfrastructure;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
@@ -38,7 +45,7 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
             .Options;
 
         var dbContext = new HeroDbContext(dbOptions);
-        await dbContext.Database.EnsureCreatedAsync().ConfigureAwait(false);
+        await dbContext.Database.EnsureCreatedAsync().ConfigureAwait(true);
 
         // Setup Data Protection for key encryption
         var services = new ServiceCollection()
@@ -75,12 +82,12 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
         // Step 1: Create issuer DID
         var issuerDidResult = await didCreationService.CreateDidAsync(
             tenantContext,
-            cancellationToken: default).ConfigureAwait(false);
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
 
         // Step 2: Create holder DID
         var holderDidResult = await didCreationService.CreateDidAsync(
             tenantContext,
-            cancellationToken: default).ConfigureAwait(false);
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
 
         // Step 3: Issue credential
         var credentialJwt = await credentialIssuanceService.IssueCredentialAsync(
@@ -96,7 +103,7 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
                 { "graduationYear", 2024 }
             },
             expirationDate: DateTimeOffset.UtcNow.AddYears(5),
-            cancellationToken: default).ConfigureAwait(false);
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
 
         // Step 4: Create VP with selective disclosure (only name and degree)
         var presentationResult = await vpService.CreatePresentationAsync(
@@ -105,14 +112,14 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
             claimsToDisclose: new[] { "name", "degree" },
             holderDidResult.DidId,
             audience: "did:hero:verifier789",
-            cancellationToken: default).ConfigureAwait(false);
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
 
         // Step 5: Verify the presentation
         var verificationResult = await vpService.VerifyPresentationAsync(
             tenantContext,
             presentationResult.PresentationJwt,
             presentationResult.SelectedDisclosures,
-            cancellationToken: default).ConfigureAwait(false);
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
 
         // Assert - Verify all steps succeeded
         Assert.NotNull(issuerDidResult);
@@ -124,7 +131,7 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
 
         // Verify presentation is valid
         Assert.True(verificationResult.IsValid);
-        Assert.Equal(HeroSSID.Credentials.Models.PresentationVerificationStatus.Valid, verificationResult.Status);
+        Assert.Equal(PresentationVerificationStatus.Valid, verificationResult.Status);
         Assert.Empty(verificationResult.ValidationErrors);
 
         // Verify disclosed claims match selection
@@ -133,7 +140,7 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
         Assert.Equal(2, presentationResult.DisclosedClaimNames.Length);
 
         // Cleanup
-        await dbContext.Database.EnsureDeletedAsync().ConfigureAwait(false);
+        await dbContext.Database.EnsureDeletedAsync().ConfigureAwait(true);
     }
 
     [Fact]
@@ -145,7 +152,7 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
             .Options;
 
         var dbContext = new HeroDbContext(dbOptions);
-        await dbContext.Database.EnsureCreatedAsync().ConfigureAwait(false);
+        await dbContext.Database.EnsureCreatedAsync().ConfigureAwait(true);
 
         var services = new ServiceCollection()
             .AddDataProtection()
@@ -183,12 +190,12 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
         // Issuer creates their DID
         var issuerDidResult = await didCreationService.CreateDidAsync(
             issuerContext,
-            cancellationToken: default).ConfigureAwait(false);
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
 
         // Holder creates their DID (different tenant)
         var holderDidResult = await didCreationService.CreateDidAsync(
             holderContext,
-            cancellationToken: default).ConfigureAwait(false);
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
 
         // Issuer issues credential to holder (cross-tenant)
         var credentialJwt = await credentialIssuanceService.IssueCredentialAsync(
@@ -202,7 +209,7 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
                 { "position", "Senior Developer" },
                 { "department", "Engineering" }
             },
-            cancellationToken: default).ConfigureAwait(false);
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
 
         // Holder creates presentation with their tenant context
         var presentationResult = await vpService.CreatePresentationAsync(
@@ -210,7 +217,7 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
             credentialJwt,
             claimsToDisclose: new[] { "employeeName", "position" },
             holderDidResult.DidId,
-            cancellationToken: default).ConfigureAwait(false);
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
 
         // Assert
         Assert.NotEmpty(credentialJwt);
@@ -220,14 +227,14 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
         // Verify credential was persisted under issuer's tenant
         var issuedCredential = await dbContext.VerifiableCredentials
             .Where(vc => vc.TenantId == issuerTenantId)
-            .FirstOrDefaultAsync().ConfigureAwait(false);
+            .FirstOrDefaultAsync().ConfigureAwait(true);
 
         Assert.NotNull(issuedCredential);
         Assert.Equal(issuerDidResult.DidId, issuedCredential.IssuerDidId);
         Assert.Equal(holderDidResult.DidId, issuedCredential.HolderDidId);
 
         // Cleanup
-        await dbContext.Database.EnsureDeletedAsync().ConfigureAwait(false);
+        await dbContext.Database.EnsureDeletedAsync().ConfigureAwait(true);
     }
 
     [Fact]
@@ -239,7 +246,7 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
             .Options;
 
         var dbContext = new HeroDbContext(dbOptions);
-        await dbContext.Database.EnsureCreatedAsync().ConfigureAwait(false);
+        await dbContext.Database.EnsureCreatedAsync().ConfigureAwait(true);
 
         var services = new ServiceCollection()
             .AddDataProtection()
@@ -270,8 +277,8 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
         var tenantId = Guid.NewGuid();
         var tenantContext = new TestTenantContext(tenantId);
 
-        var issuerDidResult = await didCreationService.CreateDidAsync(tenantContext, cancellationToken: default).ConfigureAwait(false);
-        var holderDidResult = await didCreationService.CreateDidAsync(tenantContext, cancellationToken: default).ConfigureAwait(false);
+        var issuerDidResult = await didCreationService.CreateDidAsync(tenantContext, cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        var holderDidResult = await didCreationService.CreateDidAsync(tenantContext, cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
 
         var credentialJwt = await credentialIssuanceService.IssueCredentialAsync(
             tenantContext,
@@ -284,7 +291,7 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
                 { "field2", "value2" },
                 { "field3", "value3" }
             },
-            cancellationToken: default).ConfigureAwait(false);
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
 
         // Act - Disclose all claims (null means all)
         var presentationResult = await vpService.CreatePresentationAsync(
@@ -292,7 +299,7 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
             credentialJwt,
             claimsToDisclose: null, // null = disclose all
             holderDidResult.DidId,
-            cancellationToken: default).ConfigureAwait(false);
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
 
         // Assert
         Assert.NotNull(presentationResult);
@@ -302,7 +309,7 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
         Assert.Contains("field3", presentationResult.DisclosedClaimNames);
 
         // Cleanup
-        await dbContext.Database.EnsureDeletedAsync().ConfigureAwait(false);
+        await dbContext.Database.EnsureDeletedAsync().ConfigureAwait(true);
     }
 
     private sealed class TestTenantContext : ITenantContext

@@ -1,5 +1,5 @@
 using System.Text.Json;
-using HeroSSID.Core.Interfaces;
+using HeroSSID.Core.DidMethod;
 using HeroSSID.Core.Models;
 using HeroSSID.DidOperations.Helpers;
 

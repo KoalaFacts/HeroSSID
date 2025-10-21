@@ -1,5 +1,4 @@
-using HeroSSID.Credentials.Interfaces;
-using HeroSSID.Credentials.Services;
+using HeroSSID.Credentials.CredentialRevocation;
 using System;
 using System.Threading.Tasks;
 using Xunit;

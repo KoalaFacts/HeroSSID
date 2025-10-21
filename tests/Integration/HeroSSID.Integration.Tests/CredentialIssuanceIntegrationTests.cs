@@ -1,7 +1,9 @@
-using HeroSSID.Core.Interfaces;
-using HeroSSID.Core.Services;
-using HeroSSID.Credentials.Interfaces;
-using HeroSSID.Credentials.Services;
+using HeroSSID.Core.KeyEncryption;
+using HeroSSID.Core.RateLimiting;
+using HeroSSID.Core.TenantManagement;
+using HeroSSID.Credentials.CredentialIssuance;
+using HeroSSID.Credentials.CredentialVerification;
+using HeroSSID.Credentials.MvpImplementations;
 using HeroSSID.Data;
 using HeroSSID.Data.Entities;
 using Microsoft.AspNetCore.DataProtection;
@@ -178,7 +180,7 @@ public sealed class CredentialIssuanceIntegrationTests : IAsyncLifetime
         // Assert - Verification successful
         Assert.NotNull(verificationResult);
         Assert.True(verificationResult.IsValid, $"Verification failed: {string.Join(", ", verificationResult.ValidationErrors)}");
-        Assert.Equal(Credentials.Models.VerificationStatus.Valid, verificationResult.Status);
+        Assert.Equal(VerificationStatus.Valid, verificationResult.Status);
         Assert.Empty(verificationResult.ValidationErrors);
         Assert.Equal(issuerDidIdentifier, verificationResult.IssuerDid);
         Assert.NotNull(verificationResult.CredentialSubject);
@@ -265,7 +267,7 @@ public sealed class CredentialIssuanceIntegrationTests : IAsyncLifetime
         // Assert - Verification detects expiration
         Assert.NotNull(verificationResult);
         Assert.False(verificationResult.IsValid);
-        Assert.Equal(Credentials.Models.VerificationStatus.Expired, verificationResult.Status);
+        Assert.Equal(VerificationStatus.Expired, verificationResult.Status);
         Assert.NotEmpty(verificationResult.ValidationErrors);
         // Check that the validation error mentions "expired" in some form
         bool hasExpiredError = verificationResult.ValidationErrors.Any(e => e.Contains("expired", StringComparison.OrdinalIgnoreCase) || e.Contains("Expired", StringComparison.Ordinal));
@@ -423,7 +425,7 @@ public sealed class CredentialIssuanceIntegrationTests : IAsyncLifetime
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(initialVerificationResult.IsValid);
-        Assert.Equal(Credentials.Models.VerificationStatus.Valid, initialVerificationResult.Status);
+        Assert.Equal(VerificationStatus.Valid, initialVerificationResult.Status);
 
         // Act - Mark credential as revoked in database
         VerifiableCredentialEntity? storedCredential = await _dbContext.VerifiableCredentials
@@ -442,7 +444,7 @@ public sealed class CredentialIssuanceIntegrationTests : IAsyncLifetime
 
         // Assert - Verification should detect revocation
         Assert.False(revokedVerificationResult.IsValid);
-        Assert.Equal(Credentials.Models.VerificationStatus.Revoked, revokedVerificationResult.Status);
+        Assert.Equal(VerificationStatus.Revoked, revokedVerificationResult.Status);
         Assert.NotEmpty(revokedVerificationResult.ValidationErrors);
         bool hasRevokedError = revokedVerificationResult.ValidationErrors.Any(e =>
             e.Contains("revoked", StringComparison.OrdinalIgnoreCase));

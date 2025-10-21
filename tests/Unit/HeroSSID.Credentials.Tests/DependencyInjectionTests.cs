@@ -1,8 +1,12 @@
+using HeroSSID.Credentials.CredentialIssuance;
+using HeroSSID.Credentials.CredentialRevocation;
+using HeroSSID.Credentials.CredentialVerification;
 using HeroSSID.Credentials.DependencyInjection;
-using HeroSSID.Credentials.Interfaces;
-using HeroSSID.Credentials.Services;
-using HeroSSID.Core.Interfaces;
-using HeroSSID.Core.Services;
+using HeroSSID.Credentials.SdJwt;
+using HeroSSID.Credentials.VerifiablePresentations;
+using HeroSSID.Core.KeyEncryption;
+using HeroSSID.Core.RateLimiting;
+using HeroSSID.Core.TenantManagement;
 using HeroSSID.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;

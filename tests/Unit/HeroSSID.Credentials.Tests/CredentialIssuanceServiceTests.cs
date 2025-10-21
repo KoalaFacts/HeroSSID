@@ -1,5 +1,7 @@
-using HeroSSID.Credentials.Interfaces;
-using HeroSSID.Core.Interfaces;
+using HeroSSID.Credentials.CredentialIssuance;
+using HeroSSID.Core.KeyEncryption;
+using HeroSSID.Core.RateLimiting;
+using HeroSSID.Core.TenantManagement;
 using HeroSSID.Data;
 using HeroSSID.Data.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -258,12 +260,12 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
                 new Dictionary<string, object>()).ConfigureAwait(true)).ConfigureAwait(true);
     }
 
-    private HeroSSID.Credentials.Services.CredentialIssuanceService CreateService()
+    private CredentialIssuanceService CreateService()
     {
         var mockKeyEncryption = new MockKeyEncryptionService();
         var mockRateLimiter = new MockRateLimiter();
 
-        return new HeroSSID.Credentials.Services.CredentialIssuanceService(
+        return new CredentialIssuanceService(
             _dbContext,
             mockKeyEncryption,
             mockRateLimiter,

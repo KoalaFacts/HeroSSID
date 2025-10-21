@@ -1,6 +1,9 @@
-using HeroSSID.Credentials.Services;
-using HeroSSID.Core.Interfaces;
-using HeroSSID.Core.Services;
+using HeroSSID.Credentials.CredentialIssuance;
+using HeroSSID.Credentials.CredentialVerification;
+using HeroSSID.Credentials.MvpImplementations;
+using HeroSSID.Core.KeyEncryption;
+using HeroSSID.Core.RateLimiting;
+using HeroSSID.Core.TenantManagement;
 using HeroSSID.Data;
 using HeroSSID.Data.Entities;
 using Microsoft.AspNetCore.DataProtection;
@@ -253,7 +256,7 @@ public sealed class SecurityEdgeCaseTests : IDisposable
             tamperedJwt).ConfigureAwait(true);
 
         Assert.False(result.IsValid);
-        Assert.Equal(Credentials.Models.VerificationStatus.SignatureInvalid, result.Status);
+        Assert.Equal(VerificationStatus.SignatureInvalid, result.Status);
         Assert.NotEmpty(result.ValidationErrors);
     }
 
@@ -355,7 +358,7 @@ public sealed class SecurityEdgeCaseTests : IDisposable
         Assert.All(results, result =>
         {
             Assert.True(result.IsValid);
-            Assert.Equal(Credentials.Models.VerificationStatus.Valid, result.Status);
+            Assert.Equal(VerificationStatus.Valid, result.Status);
         });
     }
 

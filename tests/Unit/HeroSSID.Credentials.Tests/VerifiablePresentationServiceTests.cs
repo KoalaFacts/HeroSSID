@@ -1,8 +1,9 @@
-using HeroSSID.Core.Interfaces;
-using HeroSSID.Core.Services;
-using HeroSSID.Credentials.Interfaces;
-using HeroSSID.Credentials.Models;
-using HeroSSID.Credentials.Services;
+using HeroSSID.Core.KeyEncryption;
+using HeroSSID.Core.RateLimiting;
+using HeroSSID.Core.TenantManagement;
+using HeroSSID.Credentials.MvpImplementations;
+using HeroSSID.Credentials.SdJwt;
+using HeroSSID.Credentials.VerifiablePresentations;
 using HeroSSID.Data;
 using HeroSSID.Data.Entities;
 using Microsoft.EntityFrameworkCore;

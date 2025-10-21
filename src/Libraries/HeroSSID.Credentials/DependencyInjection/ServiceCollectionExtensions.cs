@@ -1,5 +1,9 @@
-using HeroSSID.Credentials.Interfaces;
-using HeroSSID.Credentials.Services;
+using HeroSSID.Credentials.CredentialIssuance;
+using HeroSSID.Credentials.CredentialRevocation;
+using HeroSSID.Credentials.CredentialVerification;
+using HeroSSID.Credentials.MvpImplementations;
+using HeroSSID.Credentials.SdJwt;
+using HeroSSID.Credentials.VerifiablePresentations;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace HeroSSID.Credentials.DependencyInjection;
