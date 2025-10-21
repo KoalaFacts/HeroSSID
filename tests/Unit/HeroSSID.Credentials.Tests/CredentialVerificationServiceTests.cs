@@ -30,6 +30,7 @@ public sealed class CredentialVerificationServiceTests : IDisposable
     private readonly Guid _tenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private readonly byte[] _testPrivateKey;
     private readonly byte[] _testPublicKey;
+    private readonly InMemoryRateLimiter _rateLimiter;
 
     public CredentialVerificationServiceTests()
     {
@@ -40,6 +41,9 @@ public sealed class CredentialVerificationServiceTests : IDisposable
 
         _dbContext = new HeroDbContext(options);
         _tenantContext = new TestTenantContext(_tenantId);
+        _rateLimiter = new InMemoryRateLimiter(
+            windowSize: TimeSpan.FromSeconds(60),
+            maxOperations: 100);
 
         // Generate test Ed25519 key pair
         var algorithm = SignatureAlgorithm.Ed25519;
@@ -249,9 +253,7 @@ public sealed class CredentialVerificationServiceTests : IDisposable
 
     private CredentialVerificationService CreateService()
     {
-        // Create rate limiter for testing (100 ops per 60 seconds)
-        var rateLimiter = new InMemoryRateLimiter(windowSize: TimeSpan.FromSeconds(60), maxOperations: 100);
-        return new CredentialVerificationService(_dbContext, rateLimiter, null);
+        return new CredentialVerificationService(_dbContext, _rateLimiter, null);
     }
 
     private string CreateValidTestJwt()
@@ -317,6 +319,7 @@ public sealed class CredentialVerificationServiceTests : IDisposable
     public void Dispose()
     {
         _dbContext.Dispose();
+        _rateLimiter.Dispose();
     }
 
     private sealed class TestTenantContext : ITenantContext
