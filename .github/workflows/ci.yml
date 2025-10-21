@@ -1,0 +1,200 @@
+name: CI - Build and Test
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+  push:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build solution
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+            **/bin/Release/**
+            **/obj/Release/**
+          retention-days: 1
+
+  test:
+    name: Test
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build solution
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Run unit tests
+        run: |
+          dotnet test tests/Unit/HeroSSID.Unit.Tests/HeroSSID.Unit.Tests.csproj \
+            --configuration Release \
+            --no-build \
+            --verbosity normal \
+            --logger "trx;LogFileName=unit-tests.trx" \
+            --collect:"XPlat Code Coverage"
+
+      - name: Run Credentials tests
+        run: |
+          dotnet test tests/Unit/HeroSSID.Credentials.Tests/HeroSSID.Credentials.Tests.csproj \
+            --configuration Release \
+            --no-build \
+            --verbosity normal \
+            --logger "trx;LogFileName=credentials-tests.trx" \
+            --collect:"XPlat Code Coverage"
+
+      - name: Run Data tests
+        run: |
+          dotnet test tests/Unit/HeroSSID.Data.Tests/HeroSSID.Data.Tests.csproj \
+            --configuration Release \
+            --no-build \
+            --verbosity normal \
+            --logger "trx;LogFileName=data-tests.trx" \
+            --collect:"XPlat Code Coverage"
+
+      - name: Run DidOperations tests
+        run: |
+          dotnet test tests/Unit/HeroSSID.DidOperations.Tests/HeroSSID.DidOperations.Tests.csproj \
+            --configuration Release \
+            --no-build \
+            --verbosity normal \
+            --logger "trx;LogFileName=didops-tests.trx" \
+            --collect:"XPlat Code Coverage"
+
+      - name: Run contract tests
+        run: |
+          dotnet test tests/Contract/HeroSSID.DidOperations.Contract.Tests/HeroSSID.DidOperations.Contract.Tests.csproj \
+            --configuration Release \
+            --no-build \
+            --verbosity normal \
+            --logger "trx;LogFileName=contract-tests.trx" \
+            --collect:"XPlat Code Coverage"
+
+      - name: Run integration tests
+        run: |
+          dotnet test tests/Integration/HeroSSID.Integration.Tests/HeroSSID.Integration.Tests.csproj \
+            --configuration Release \
+            --no-build \
+            --verbosity normal \
+            --logger "trx;LogFileName=integration-tests.trx" \
+            --collect:"XPlat Code Coverage"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/TestResults/**'
+          retention-days: 7
+
+  pack:
+    name: Pack Libraries
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build solution
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Pack HeroSSID.Core
+        run: |
+          dotnet pack src/Libraries/HeroSSID.Core/HeroSSID.Core.csproj \
+            --configuration Release \
+            --no-build \
+            --output ./packages
+
+      - name: Pack HeroSSID.DidOperations
+        run: |
+          dotnet pack src/Libraries/HeroSSID.DidOperations/HeroSSID.DidOperations.csproj \
+            --configuration Release \
+            --no-build \
+            --output ./packages
+
+      - name: Pack HeroSSID.Credentials
+        run: |
+          dotnet pack src/Libraries/HeroSSID.Credentials/HeroSSID.Credentials.csproj \
+            --configuration Release \
+            --no-build \
+            --output ./packages
+
+      - name: Pack HeroSSID.Data
+        run: |
+          dotnet pack src/Libraries/HeroSSID.Data/HeroSSID.Data.csproj \
+            --configuration Release \
+            --no-build \
+            --output ./packages
+
+      - name: Pack HeroSSID.Observability
+        run: |
+          dotnet pack src/Libraries/HeroSSID.Observability/HeroSSID.Observability.csproj \
+            --configuration Release \
+            --no-build \
+            --output ./packages
+
+      - name: Upload NuGet packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: ./packages/*.nupkg
+          retention-days: 7
