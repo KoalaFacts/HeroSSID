@@ -84,6 +84,7 @@ public sealed class DidLifecycleIntegrationTests : IAsyncLifetime
             TenantId = HeroDbContext.DefaultTenantId,
             DidIdentifier = expectedDidIdentifier,
             PublicKeyEd25519 = expectedPublicKey,
+            KeyFingerprint = System.Security.Cryptography.SHA256.HashData(expectedPublicKey),
             PrivateKeyEd25519Encrypted = expectedEncryptedPrivateKey,
             DidDocumentJson = didDocumentJson,
             Status = "active",

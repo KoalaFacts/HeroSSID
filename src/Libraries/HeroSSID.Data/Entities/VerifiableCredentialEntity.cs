@@ -36,29 +36,28 @@ public sealed class VerifiableCredentialEntity
     public DidEntity? HolderDid { get; set; }
 
     /// <summary>
-    /// Schema used for this credential (foreign key)
+    /// Credential type (e.g., "UniversityDegreeCredential")
     /// </summary>
-    public Guid SchemaId { get; set; }
+    public required string CredentialType { get; set; }
 
     /// <summary>
-    /// Navigation property: Schema
+    /// Full JWT-VC string (signed, base64-encoded W3C Verifiable Credential)
     /// </summary>
-    public CredentialSchemaEntity? Schema { get; set; }
+    public required string CredentialJwt { get; set; }
 
     /// <summary>
-    /// Credential definition used (foreign key)
+    /// Credential status: "active", "revoked"
     /// </summary>
-    public Guid CredentialDefinitionId { get; set; }
+    public required string Status { get; set; } = "active";
 
     /// <summary>
-    /// Navigation property: Credential Definition
+    /// When the credential was revoked (null if not revoked)
     /// </summary>
-    public CredentialDefinitionEntity? CredentialDefinition { get; set; }
-
-    /// <summary>
-    /// Full W3C Verifiable Credential as JSON (includes proof)
-    /// </summary>
-    public required string CredentialJson { get; set; }
+    /// <remarks>
+    /// This field supports future revocation functionality.
+    /// Set when Status changes to "revoked".
+    /// </remarks>
+    public DateTimeOffset? RevokedAt { get; set; }
 
     /// <summary>
     /// When the credential was issued
@@ -69,4 +68,14 @@ public sealed class VerifiableCredentialEntity
     /// Optional expiration date (null = no expiration)
     /// </summary>
     public DateTimeOffset? ExpiresAt { get; set; }
+
+    /// <summary>
+    /// Entity creation timestamp (auto-set)
+    /// </summary>
+    public DateTimeOffset CreatedAt { get; set; }
+
+    /// <summary>
+    /// Entity last update timestamp (auto-set)
+    /// </summary>
+    public DateTimeOffset UpdatedAt { get; set; }
 }

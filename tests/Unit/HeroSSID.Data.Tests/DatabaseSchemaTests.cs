@@ -52,12 +52,15 @@ public sealed class DatabaseSchemaTests : IDisposable
         }
         """;
 
+        var pubKey = new byte[32];
+
         DidEntity didEntity = new DidEntity
         {
             Id = Guid.NewGuid(),
             TenantId = HeroDbContext.DefaultTenantId,
             DidIdentifier = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
-            PublicKeyEd25519 = new byte[32],
+            PublicKeyEd25519 = pubKey,
+            KeyFingerprint = System.Security.Cryptography.SHA256.HashData(pubKey),
             PrivateKeyEd25519Encrypted = new byte[32],
             DidDocumentJson = didDocumentJson,
             Status = "active",
@@ -125,12 +128,15 @@ public sealed class DatabaseSchemaTests : IDisposable
         }
         """;
 
+        var pubKey2 = new byte[32];
+
         DidEntity didEntity = new DidEntity
         {
             Id = Guid.NewGuid(),
             TenantId = HeroDbContext.DefaultTenantId,
             DidIdentifier = "did:key:z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8xRoAnwWsdvktH",
-            PublicKeyEd25519 = new byte[32],
+            PublicKeyEd25519 = pubKey2,
+            KeyFingerprint = System.Security.Cryptography.SHA256.HashData(pubKey2),
             PrivateKeyEd25519Encrypted = new byte[32],
             DidDocumentJson = complexDidDocJson,
             Status = "active",

@@ -1,9 +1,11 @@
-using HeroSSID.Core.Interfaces;
+using HeroSSID.Core.DidMethod;
+using HeroSSID.Core.KeyEncryption;
+using HeroSSID.Core.TenantManagement;
 using HeroSSID.Data;
 using HeroSSID.Data.Entities;
+using HeroSSID.DidOperations.DidCreation;
 using HeroSSID.DidOperations.DidMethods;
-using HeroSSID.DidOperations.Interfaces;
-using HeroSSID.DidOperations.Services;
+using HeroSSID.DidOperations.DidResolution;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
