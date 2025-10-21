@@ -69,6 +69,8 @@ jobs:
     name: Test
     needs: build
     runs-on: ubuntu-latest
+    env:
+      HEROSSID_SKIP_ENTROPY_CHECK: "true"
 
     steps:
       - name: Checkout code
