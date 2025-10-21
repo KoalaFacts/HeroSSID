@@ -5,7 +5,27 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- NuGet Package Metadata -->
+    <PackageId>HeroSSID.DidOperations</PackageId>
+    <Authors>BeingCiteable</Authors>
+    <Company>BeingCiteable</Company>
+    <Product>HeroSSID</Product>
+    <Description>W3C DID (Decentralized Identifiers) operations for HeroSSID. Includes did:key method implementation, DID creation, resolution, signing, and verification services following W3C DID Core 1.0 specification.</Description>
+    <PackageTags>did;w3c;decentralized-identifiers;did-key;identity;ssi;cryptography;ed25519</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/BeingCiteable/HeroSSID</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/BeingCiteable/HeroSSID</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../../README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.10" />

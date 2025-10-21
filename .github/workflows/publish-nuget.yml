@@ -1,0 +1,106 @@
+name: Publish NuGet Packages
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version (e.g., 1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  id-token: write  # Required for OIDC authentication with NuGet.org
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for versioning
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "release" ]; then
+            VERSION="${{ github.event.release.tag_name }}"
+            VERSION="${VERSION#v}"  # Remove 'v' prefix if present
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Publishing version: $VERSION"
+
+      - name: Build solution
+        run: dotnet build --configuration Release --no-restore /p:Version=${{ steps.version.outputs.VERSION }}
+
+      - name: Run tests
+        run: dotnet test --configuration Release --no-build --verbosity normal
+
+      - name: Pack HeroSSID.Core
+        run: |
+          dotnet pack src/Libraries/HeroSSID.Core/HeroSSID.Core.csproj \
+            --configuration Release \
+            --no-build \
+            --output ./packages \
+            /p:PackageVersion=${{ steps.version.outputs.VERSION }}
+
+      - name: Pack HeroSSID.DidOperations
+        run: |
+          dotnet pack src/Libraries/HeroSSID.DidOperations/HeroSSID.DidOperations.csproj \
+            --configuration Release \
+            --no-build \
+            --output ./packages \
+            /p:PackageVersion=${{ steps.version.outputs.VERSION }}
+
+      - name: Pack HeroSSID.Credentials
+        run: |
+          dotnet pack src/Libraries/HeroSSID.Credentials/HeroSSID.Credentials.csproj \
+            --configuration Release \
+            --no-build \
+            --output ./packages \
+            /p:PackageVersion=${{ steps.version.outputs.VERSION }}
+
+      - name: Pack HeroSSID.Data
+        run: |
+          dotnet pack src/Libraries/HeroSSID.Data/HeroSSID.Data.csproj \
+            --configuration Release \
+            --no-build \
+            --output ./packages \
+            /p:PackageVersion=${{ steps.version.outputs.VERSION }}
+
+      - name: Pack HeroSSID.Observability
+        run: |
+          dotnet pack src/Libraries/HeroSSID.Observability/HeroSSID.Observability.csproj \
+            --configuration Release \
+            --no-build \
+            --output ./packages \
+            /p:PackageVersion=${{ steps.version.outputs.VERSION }}
+
+      - name: NuGet login (OIDC → temporary API key)
+        uses: NuGet/login@v1
+        id: nuget-login
+        with:
+          user: ${{ secrets.NUGET_USERNAME }}
+
+      - name: Publish to NuGet.org using Trusted Publishing
+        run: |
+          dotnet nuget push "./packages/*.nupkg" \
+            --source https://api.nuget.org/v3/index.json \
+            --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }} \
+            --skip-duplicate
+        env:
+          DOTNET_CLI_TELEMETRY_OPTOUT: 1

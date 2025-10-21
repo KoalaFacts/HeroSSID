@@ -2,7 +2,27 @@
 
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
+
+    <!-- NuGet Package Metadata -->
+    <PackageId>HeroSSID.Data</PackageId>
+    <Authors>BeingCiteable</Authors>
+    <Company>BeingCiteable</Company>
+    <Product>HeroSSID</Product>
+    <Description>Entity Framework Core data layer for HeroSSID. Includes database models, DbContext, and migrations for DID and Verifiable Credentials storage with multi-tenant support using PostgreSQL.</Description>
+    <PackageTags>entity-framework;efcore;postgresql;database;did;verifiable-credentials;multi-tenant</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/BeingCiteable/HeroSSID</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/BeingCiteable/HeroSSID</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../../README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.10" />
