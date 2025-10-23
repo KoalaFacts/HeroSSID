@@ -1,0 +1,19 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="OpenIddict.AspNetCore" Version="5.*" />
+    <PackageReference Include="OpenIddict.EntityFrameworkCore" Version="5.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HeroSSID.Core\HeroSSID.Core.csproj" />
+    <ProjectReference Include="..\HeroSSID.Data\HeroSSID.Data.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -388,19 +388,11 @@ public sealed class DidCreationService : IDidCreationService
     /// <summary>
     /// Validates that the system has sufficient entropy for secure key generation.
     /// SECURITY: This is a critical defense against weak key generation on systems with poor entropy sources.
-    /// Uses larger sample size and statistical tests for robust validation.
+    /// Uses statistical tests with mathematically realistic thresholds to avoid false positives.
     /// </summary>
     /// <exception cref="CryptographicException">Thrown if entropy validation fails</exception>
     private static void ValidateSystemEntropy()
     {
-        // Allow skipping entropy validation in test/CI environments
-        // SECURITY NOTE: This should ONLY be used in non-production environments
-        string? skipEntropyCheck = Environment.GetEnvironmentVariable("HEROSSID_SKIP_ENTROPY_CHECK");
-        if (skipEntropyCheck == "true" || skipEntropyCheck == "1")
-        {
-            return; // Skip validation for testing purposes
-        }
-
         // Use larger sample for more reliable entropy testing
         const int sampleSize = 256;
         byte[] entropyTest = new byte[sampleSize];
@@ -428,10 +420,12 @@ public sealed class DidCreationService : IDidCreationService
             throw new CryptographicException("CRITICAL: System RNG returned all 0xFF - insufficient entropy. Key generation aborted.");
         }
 
-        // 4. Check for sufficient unique values (require at least 75% unique bytes for strong entropy)
-        // SECURITY HARDENING: Increased from 50% to 75% threshold based on security audit recommendation
+        // 4. Check for sufficient unique values
+        // MATH: With 256 possible byte values and 256 samples, expected unique ≈ 160-165 due to birthday paradox
+        // A good RNG should have at least 128 unique values (50% is a realistic minimum)
+        // 75% unique (192/256) was mathematically unrealistic and caused false positives
         int uniqueBytes = entropyTest.Distinct().Count();
-        int minUniqueBytes = (sampleSize * 3) / 4; // 192 of 256 (75%)
+        int minUniqueBytes = sampleSize / 2; // 128 of 256 (50% - realistic for random data)
         if (uniqueBytes < minUniqueBytes)
         {
             throw new CryptographicException($"CRITICAL: System RNG has insufficient entropy - only {uniqueBytes} unique values in {sampleSize} bytes (minimum: {minUniqueBytes}). Key generation aborted.");
@@ -449,9 +443,11 @@ public sealed class DidCreationService : IDidCreationService
         double expectedCount = sampleSize / 16.0; // 256 / 16 = 16 samples per bucket expected
         double chiSquare = buckets.Sum(count => Math.Pow(count - expectedCount, 2) / expectedCount);
 
-        // Chi-square critical value for 15 degrees of freedom at 99% confidence is ~30.58
-        // If chi-square exceeds this, the distribution is non-uniform (potential entropy issue)
-        const double chiSquareCriticalValue = 30.58;
+        // Chi-square critical value for 15 degrees of freedom
+        // Using 40.0 (between 99.9% confidence at 37.7 and 99.99% at 40.6)
+        // This allows normal statistical variation while still catching severely non-uniform distributions
+        // A good RNG can occasionally produce values up to ~37, so we use 40 as a practical threshold
+        const double chiSquareCriticalValue = 40.0;
         if (chiSquare > chiSquareCriticalValue)
         {
             throw new CryptographicException($"CRITICAL: System RNG failed distribution test (chi-square: {chiSquare:F2} > {chiSquareCriticalValue}). Key generation aborted.");

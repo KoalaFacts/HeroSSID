@@ -22,6 +22,63 @@ namespace HeroSSID.Data.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("HeroSSID.Data.Entities.CredentialOffer", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("AccessedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("accessed_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<string>("CredentialIssuer")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("credential_issuer");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("OfferUri")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)")
+                        .HasColumnName("offer_uri");
+
+                    b.Property<Guid>("PreAuthorizedCodeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("pre_authorized_code_id");
+
+                    b.Property<byte[]>("QrCodeImage")
+                        .HasColumnType("bytea")
+                        .HasColumnName("qr_code_image");
+
+                    b.Property<string>("TenantId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("tenant_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PreAuthorizedCodeId")
+                        .HasDatabaseName("idx_offer_preauth_code");
+
+                    b.HasIndex("TenantId")
+                        .HasDatabaseName("idx_offer_tenant");
+
+                    b.ToTable("credential_offers", (string)null);
+                });
+
             modelBuilder.Entity("HeroSSID.Data.Entities.DidEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -93,6 +150,169 @@ namespace HeroSSID.Data.Migrations
                         {
                             t.HasCheckConstraint("chk_did_status", "status IN ('active', 'deactivated')");
                         });
+                });
+
+            modelBuilder.Entity("HeroSSID.Data.Entities.PreAuthorizedCode", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<Guid>("CredentialOfferId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("credential_offer_id");
+
+                    b.Property<string>("CredentialSubject")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("credential_subject");
+
+                    b.Property<string>("CredentialTypes")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("credential_types");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("expires_at");
+
+                    b.Property<Guid?>("HolderDidId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("holder_did_id");
+
+                    b.Property<bool>("IsRevoked")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_revoked");
+
+                    b.Property<Guid>("IssuerDidId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("issuer_did_id");
+
+                    b.Property<DateTimeOffset?>("RedeemedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("redeemed_at");
+
+                    b.Property<string>("TenantId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("TransactionCode")
+                        .HasMaxLength(6)
+                        .HasColumnType("character varying(6)")
+                        .HasColumnName("transaction_code");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("idx_preauth_code");
+
+                    b.HasIndex("CredentialOfferId")
+                        .IsUnique();
+
+                    b.HasIndex("ExpiresAt")
+                        .HasDatabaseName("idx_preauth_expires");
+
+                    b.HasIndex("HolderDidId");
+
+                    b.HasIndex("IssuerDidId");
+
+                    b.HasIndex("TenantId")
+                        .HasDatabaseName("idx_preauth_tenant");
+
+                    b.ToTable("pre_authorized_codes", (string)null);
+                });
+
+            modelBuilder.Entity("HeroSSID.Data.Entities.PresentationRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("Nonce")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("nonce");
+
+                    b.Property<string>("PresentationDefinitionJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("presentation_definition_json");
+
+                    b.Property<string>("RequestUri")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)")
+                        .HasColumnName("request_uri");
+
+                    b.Property<DateTimeOffset?>("RespondedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("responded_at");
+
+                    b.Property<string>("ResponseUri")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)")
+                        .HasColumnName("response_uri");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("state");
+
+                    b.Property<string>("TenantId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid?>("VerifierDidId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("verifier_did_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt")
+                        .HasDatabaseName("idx_presentation_expires");
+
+                    b.HasIndex("Nonce")
+                        .IsUnique()
+                        .HasDatabaseName("idx_presentation_nonce");
+
+                    b.HasIndex("TenantId")
+                        .HasDatabaseName("idx_presentation_tenant");
+
+                    b.HasIndex("VerifierDidId");
+
+                    b.ToTable("presentation_requests", (string)null);
                 });
 
             modelBuilder.Entity("HeroSSID.Data.Entities.VerifiableCredentialEntity", b =>
@@ -190,6 +410,315 @@ namespace HeroSSID.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("HeroSSID.Data.Entities.VpTokenSubmission", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("DisclosedClaims")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("disclosed_claims");
+
+                    b.Property<Guid?>("HolderDidId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("holder_did_id");
+
+                    b.Property<Guid>("PresentationRequestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("presentation_request_id");
+
+                    b.Property<DateTimeOffset>("SubmittedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("submitted_at")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<string>("TenantId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("VerificationErrors")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("verification_errors");
+
+                    b.Property<string>("VerificationStatus")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("verification_status");
+
+                    b.Property<DateTimeOffset?>("VerifiedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("verified_at");
+
+                    b.Property<string>("VpToken")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("vp_token");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HolderDidId");
+
+                    b.HasIndex("PresentationRequestId")
+                        .HasDatabaseName("idx_vptoken_presentation");
+
+                    b.HasIndex("TenantId")
+                        .HasDatabaseName("idx_vptoken_tenant");
+
+                    b.HasIndex("VerificationStatus")
+                        .HasDatabaseName("idx_vptoken_status");
+
+                    b.ToTable("vp_token_submissions", (string)null);
+                });
+
+            modelBuilder.Entity("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreApplication", b =>
+                {
+                    b.Property<string>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ApplicationType")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("ClientId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("ClientSecret")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ClientType")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("ConsentType")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("DisplayName")
+                        .HasColumnType("text");
+
+                    b.Property<string>("DisplayNames")
+                        .HasColumnType("text");
+
+                    b.Property<string>("JsonWebKeySet")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Permissions")
+                        .HasColumnType("text");
+
+                    b.Property<string>("PostLogoutRedirectUris")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Properties")
+                        .HasColumnType("text");
+
+                    b.Property<string>("RedirectUris")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Requirements")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Settings")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId")
+                        .IsUnique();
+
+                    b.ToTable("OpenIddictApplications", (string)null);
+                });
+
+            modelBuilder.Entity("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreAuthorization", b =>
+                {
+                    b.Property<string>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ApplicationId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime?>("CreationDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Properties")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Scopes")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Status")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Subject")
+                        .HasMaxLength(400)
+                        .HasColumnType("character varying(400)");
+
+                    b.Property<string>("Type")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApplicationId", "Status", "Subject", "Type");
+
+                    b.ToTable("OpenIddictAuthorizations", (string)null);
+                });
+
+            modelBuilder.Entity("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreScope", b =>
+                {
+                    b.Property<string>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Descriptions")
+                        .HasColumnType("text");
+
+                    b.Property<string>("DisplayName")
+                        .HasColumnType("text");
+
+                    b.Property<string>("DisplayNames")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Properties")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Resources")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("OpenIddictScopes", (string)null);
+                });
+
+            modelBuilder.Entity("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreToken", b =>
+                {
+                    b.Property<string>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ApplicationId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("AuthorizationId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime?>("CreationDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ExpirationDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Payload")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Properties")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("RedemptionDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ReferenceId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Status")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Subject")
+                        .HasMaxLength(400)
+                        .HasColumnType("character varying(400)");
+
+                    b.Property<string>("Type")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AuthorizationId");
+
+                    b.HasIndex("ReferenceId")
+                        .IsUnique();
+
+                    b.HasIndex("ApplicationId", "Status", "Subject", "Type");
+
+                    b.ToTable("OpenIddictTokens", (string)null);
+                });
+
+            modelBuilder.Entity("HeroSSID.Data.Entities.PreAuthorizedCode", b =>
+                {
+                    b.HasOne("HeroSSID.Data.Entities.CredentialOffer", "CredentialOffer")
+                        .WithOne("PreAuthorizedCode")
+                        .HasForeignKey("HeroSSID.Data.Entities.PreAuthorizedCode", "CredentialOfferId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("HeroSSID.Data.Entities.DidEntity", "HolderDid")
+                        .WithMany()
+                        .HasForeignKey("HolderDidId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("HeroSSID.Data.Entities.DidEntity", "IssuerDid")
+                        .WithMany()
+                        .HasForeignKey("IssuerDidId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("CredentialOffer");
+
+                    b.Navigation("HolderDid");
+
+                    b.Navigation("IssuerDid");
+                });
+
+            modelBuilder.Entity("HeroSSID.Data.Entities.PresentationRequest", b =>
+                {
+                    b.HasOne("HeroSSID.Data.Entities.DidEntity", "VerifierDid")
+                        .WithMany()
+                        .HasForeignKey("VerifierDidId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("VerifierDid");
+                });
+
             modelBuilder.Entity("HeroSSID.Data.Entities.VerifiableCredentialEntity", b =>
                 {
                     b.HasOne("HeroSSID.Data.Entities.DidEntity", "HolderDid")
@@ -211,11 +740,75 @@ namespace HeroSSID.Data.Migrations
                     b.Navigation("IssuerDid");
                 });
 
+            modelBuilder.Entity("HeroSSID.Data.Entities.VpTokenSubmission", b =>
+                {
+                    b.HasOne("HeroSSID.Data.Entities.DidEntity", "HolderDid")
+                        .WithMany()
+                        .HasForeignKey("HolderDidId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("HeroSSID.Data.Entities.PresentationRequest", "PresentationRequest")
+                        .WithMany("VpTokenSubmissions")
+                        .HasForeignKey("PresentationRequestId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("HolderDid");
+
+                    b.Navigation("PresentationRequest");
+                });
+
+            modelBuilder.Entity("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreAuthorization", b =>
+                {
+                    b.HasOne("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreApplication", "Application")
+                        .WithMany("Authorizations")
+                        .HasForeignKey("ApplicationId");
+
+                    b.Navigation("Application");
+                });
+
+            modelBuilder.Entity("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreToken", b =>
+                {
+                    b.HasOne("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreApplication", "Application")
+                        .WithMany("Tokens")
+                        .HasForeignKey("ApplicationId");
+
+                    b.HasOne("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreAuthorization", "Authorization")
+                        .WithMany("Tokens")
+                        .HasForeignKey("AuthorizationId");
+
+                    b.Navigation("Application");
+
+                    b.Navigation("Authorization");
+                });
+
+            modelBuilder.Entity("HeroSSID.Data.Entities.CredentialOffer", b =>
+                {
+                    b.Navigation("PreAuthorizedCode");
+                });
+
             modelBuilder.Entity("HeroSSID.Data.Entities.DidEntity", b =>
                 {
                     b.Navigation("HeldCredentials");
 
                     b.Navigation("IssuedCredentials");
+                });
+
+            modelBuilder.Entity("HeroSSID.Data.Entities.PresentationRequest", b =>
+                {
+                    b.Navigation("VpTokenSubmissions");
+                });
+
+            modelBuilder.Entity("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreApplication", b =>
+                {
+                    b.Navigation("Authorizations");
+
+                    b.Navigation("Tokens");
+                });
+
+            modelBuilder.Entity("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreAuthorization", b =>
+                {
+                    b.Navigation("Tokens");
                 });
 #pragma warning restore 612, 618
         }
