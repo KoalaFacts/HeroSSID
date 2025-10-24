@@ -8,7 +8,7 @@ namespace HeroSSID.Integration.Tests;
 /// T039: Integration test - Full flow: create issuer DID, holder DID, issue credential, verify credential
 /// Tests end-to-end REST API workflow for User Story 1
 /// </summary>
-public class RestApiIntegrationTests(WebApplicationFactory<Program> factory) : IClassFixture<WebApplicationFactory<Program>>
+public class RestApiIntegrationTests(AspireWebApplicationFactory factory) : IClassFixture<AspireWebApplicationFactory>
 {
     private readonly HttpClient _client = factory.CreateClient();
 
@@ -59,9 +59,11 @@ public class RestApiIntegrationTests(WebApplicationFactory<Program> factory) : I
         var resolveIssuerResponse = await _client.GetAsync($"/api/v1/dids/{Uri.EscapeDataString(issuerDid)}", ct);
         Assert.Equal(HttpStatusCode.OK, resolveIssuerResponse.StatusCode);
 
-        var issuerDidDocument = await resolveIssuerResponse.Content.ReadFromJsonAsync<dynamic>(cancellationToken: ct);
-        Assert.NotNull(issuerDidDocument);
-        Assert.Equal(issuerDid, issuerDidDocument?.GetProperty("id").GetString());
+        var issuerResponseContent = await resolveIssuerResponse.Content.ReadAsStringAsync(ct);
+        var issuerDidDoc = System.Text.Json.JsonDocument.Parse(issuerResponseContent);
+        var issuerRoot = issuerDidDoc.RootElement;
+        Assert.True(issuerRoot.TryGetProperty("id", out var idElement), "DID document must have id property");
+        Assert.Equal(issuerDid, idElement.GetString());
 
         var resolveHolderResponse = await _client.GetAsync($"/api/v1/dids/{Uri.EscapeDataString(holderDid)}", ct);
         Assert.Equal(HttpStatusCode.OK, resolveHolderResponse.StatusCode);

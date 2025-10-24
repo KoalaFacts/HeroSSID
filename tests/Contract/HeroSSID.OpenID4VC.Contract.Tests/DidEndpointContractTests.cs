@@ -8,7 +8,7 @@ namespace HeroSSID.OpenID4VC.Contract.Tests;
 /// Contract tests for DID endpoints - User Story 1
 /// Tests the REST API contract for DID creation and resolution
 /// </summary>
-public class DidEndpointContractTests(WebApplicationFactory<Program> factory) : IClassFixture<WebApplicationFactory<Program>>
+public class DidEndpointContractTests(AspireWebApplicationFactory factory) : IClassFixture<AspireWebApplicationFactory>
 {
     private readonly HttpClient _client = factory.CreateClient();
 
@@ -54,11 +54,12 @@ public class DidEndpointContractTests(WebApplicationFactory<Program> factory) : 
             KeyType = "Ed25519"
         };
         var createResponse = await _client.PostAsJsonAsync("/api/v1/dids", createRequest);
-        var createResult = await createResponse.Content.ReadFromJsonAsync<dynamic>();
+        var createResult = await createResponse.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
 
         // Extract DID from response (location or body)
-        string did = createResult?.GetProperty("did").GetString()
-            ?? throw new InvalidOperationException("DID not found in create response");
+        string did = createResult.TryGetProperty("did", out var didElement)
+            ? didElement.GetString() ?? throw new InvalidOperationException("DID value is null")
+            : throw new InvalidOperationException("DID not found in create response");
 
         // Act
         var response = await _client.GetAsync($"/api/v1/dids/{Uri.EscapeDataString(did)}");
@@ -67,12 +68,17 @@ public class DidEndpointContractTests(WebApplicationFactory<Program> factory) : 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         // Verify response is a valid W3C DID Document
-        var didDocument = await response.Content.ReadFromJsonAsync<dynamic>();
-        Assert.NotNull(didDocument);
+        var responseContent = await response.Content.ReadAsStringAsync();
+
+        // Parse the JSON response
+        var didDocument = System.Text.Json.JsonDocument.Parse(responseContent);
+        var root = didDocument.RootElement;
+
         // W3C DID Document MUST have these properties
-        Assert.NotNull(didDocument?.GetProperty("@context"));
-        Assert.NotNull(didDocument?.GetProperty("id"));
-        Assert.NotNull(didDocument?.GetProperty("verificationMethod"));
+        Assert.Equal(System.Text.Json.JsonValueKind.Object, root.ValueKind);  // Ensure root is an object, not a string
+        Assert.True(root.TryGetProperty("@context", out _), "@context property must exist");
+        Assert.True(root.TryGetProperty("id", out _), "id property must exist");
+        Assert.True(root.TryGetProperty("verificationMethod", out _), "verificationMethod property must exist");
     }
 
     /// <summary>

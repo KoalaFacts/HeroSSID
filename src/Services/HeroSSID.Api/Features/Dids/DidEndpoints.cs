@@ -135,10 +135,14 @@ public static class DidEndpoints
                 tenantContext.GetCurrentTenantId()
             );
 
+            // Parse the DID Document JSON string to an object before returning
+            var didDocumentObject = System.Text.Json.JsonSerializer.Deserialize<object>(resolveResult.DidDocument!)
+                ?? throw new InvalidOperationException("Failed to deserialize DID Document");
+
             var response = new CreateDidResponse
             {
                 Did = result.DidIdentifier,
-                DidDocument = resolveResult.DidDocument
+                DidDocument = didDocumentObject
             };
 
             return Results.Created($"/api/v1/dids/{Uri.EscapeDataString(result.DidIdentifier)}", response);
@@ -219,7 +223,11 @@ public static class DidEndpoints
                 tenantContext.GetCurrentTenantId()
             );
 
-            return Results.Ok(result.DidDocument);
+            // Parse the DID Document JSON string to an object before returning
+            // This prevents double-encoding (the string would otherwise be serialized as a JSON string)
+            var didDocumentObject = System.Text.Json.JsonSerializer.Deserialize<object>(result.DidDocument)
+                ?? throw new InvalidOperationException("Failed to deserialize DID Document");
+            return Results.Ok(didDocumentObject);
         }
 #pragma warning disable CA1031 // Catch specific exceptions - endpoints need to handle all exceptions
         catch (Exception ex)

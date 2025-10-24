@@ -250,7 +250,15 @@ app.UseAuthorization();
 app.UseRateLimiter();
 
 // Use exception handling (T029)
-app.UseExceptionHandler();
+// Use DeveloperExceptionPage in development, otherwise use exception handler
+if (app.Environment.IsDevelopment())
+{
+    app.UseDeveloperExceptionPage();
+}
+else
+{
+    app.UseExceptionHandler();
+}
 app.UseStatusCodePages();
 
 // Health check endpoint

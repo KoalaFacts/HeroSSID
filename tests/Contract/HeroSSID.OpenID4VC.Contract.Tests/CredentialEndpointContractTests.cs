@@ -8,7 +8,7 @@ namespace HeroSSID.OpenID4VC.Contract.Tests;
 /// Contract tests for Credential endpoints - User Story 1
 /// Tests the REST API contract for credential issuance and verification
 /// </summary>
-public class CredentialEndpointContractTests(WebApplicationFactory<Program> factory) : IClassFixture<WebApplicationFactory<Program>>
+public class CredentialEndpointContractTests(AspireWebApplicationFactory factory) : IClassFixture<AspireWebApplicationFactory>
 {
     private readonly HttpClient _client = factory.CreateClient();
 
