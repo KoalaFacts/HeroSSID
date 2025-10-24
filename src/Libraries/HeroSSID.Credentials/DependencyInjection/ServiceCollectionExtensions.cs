@@ -1,6 +1,7 @@
 using HeroSSID.Credentials.CredentialIssuance;
 using HeroSSID.Credentials.CredentialRevocation;
 using HeroSSID.Credentials.CredentialVerification;
+using HeroSSID.Credentials.Implementations;
 using HeroSSID.Credentials.MvpImplementations;
 using HeroSSID.Credentials.SdJwt;
 using HeroSSID.Credentials.VerifiablePresentations;
@@ -31,9 +32,9 @@ public static class ServiceCollectionExtensions
         // Register verifiable presentation service with selective disclosure (SD-JWT)
         services.AddScoped<IVerifiablePresentationService, VerifiablePresentationService>();
 
-        // Register mock SD-JWT services (temporary for MVP - will be replaced by HeroSD-JWT NuGet package)
-        services.AddScoped<ISdJwtGenerator, MockSdJwtGenerator>();
-        services.AddScoped<ISdJwtVerifier, MockSdJwtVerifier>();
+        // Register production SD-JWT services using HeroSD-JWT NuGet package
+        services.AddScoped<ISdJwtGenerator, HeroSdJwtGenerator>();
+        services.AddScoped<ISdJwtVerifier, HeroSdJwtVerifier>();
 
         // Register credential revocation service (placeholder - throws NotImplementedException)
         services.AddScoped<ICredentialRevocationService, CredentialRevocationService>();
