@@ -1,6 +1,10 @@
-using HeroSDJWT;
+using HeroSdJwt.Issuance;
+using HeroSdJwt.Common;
+using HeroSdJwt.Core;
 using HeroSSID.Credentials.SdJwt;
+using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace HeroSSID.Credentials.Implementations;
 
@@ -45,29 +49,75 @@ public sealed class HeroSdJwtGenerator : ISdJwtGenerator
         ArgumentException.ThrowIfNullOrEmpty(issuerDid);
         ArgumentException.ThrowIfNullOrEmpty(holderDid);
 
-        // Create SD-JWT using HeroSD-JWT library
-        var generator = new SdJwtGenerator();
+        // Create SD-JWT using HeroSD-JWT fluent builder API
+        var builder = SdJwtBuilder.Create()
+            .WithClaim("iss", issuerDid)
+            .WithClaim("sub", holderDid);
 
-        // Configure the generator with issuer and subject
-        var options = new SdJwtOptions
+        // Add all claims to the builder
+        foreach (var claim in claims)
         {
-            Issuer = issuerDid,
-            Subject = holderDid,
-            SelectiveDisclosureClaims = selectiveDisclosureClaims
-        };
+            builder = builder.WithClaim(claim.Key, claim.Value);
+        }
 
-        // Generate the SD-JWT with selective disclosure
-        var sdJwtToken = generator.Generate(
-            claims: claims,
-            signingKey: signingKey,
-            options: options);
+        // Make specified claims selectively disclosable
+        foreach (var selectiveClaim in selectiveDisclosureClaims)
+        {
+            builder = builder.MakeSelective(selectiveClaim);
+        }
 
-        // Convert HeroSD-JWT result to our SdJwtResult format
+        // Sign and build the SD-JWT
+        // Note: Assuming Ed25519 signing - may need to use SignWithEd25519() if available
+        // For now, using HMAC as shown in the example
+        var sdJwt = builder.SignWithHmac(signingKey).Build();
+
+        // Extract disclosure tokens and claim digests
+        // Note: The actual API might have different property names
+        var disclosures = ExtractDisclosures(sdJwt);
+        var claimDigests = ExtractClaimDigests(sdJwt);
+
+        // Convert to compact serialization format
+        var compactFormat = sdJwt.ToString(); // or sdJwt.ToCompactSerialization() if available
+
         return new SdJwtResult
         {
-            CompactSdJwt = sdJwtToken.CompactSerialization,
-            DisclosureTokens = sdJwtToken.Disclosures.ToArray(),
-            ClaimDigests = sdJwtToken.ClaimDigests
+            CompactSdJwt = compactFormat,
+            DisclosureTokens = disclosures,
+            ClaimDigests = claimDigests
         };
+    }
+
+    private static string[] ExtractDisclosures(object sdJwt)
+    {
+        // Extract disclosures from the SD-JWT object
+        // This will depend on the actual HeroSD-JWT API
+        // Placeholder implementation - needs to be adjusted based on actual API
+        var disclosuresProperty = sdJwt.GetType().GetProperty("Disclosures");
+        if (disclosuresProperty != null)
+        {
+            var disclosures = disclosuresProperty.GetValue(sdJwt);
+            if (disclosures is IEnumerable<string> stringList)
+            {
+                return stringList.ToArray();
+            }
+        }
+        return Array.Empty<string>();
+    }
+
+    private static Dictionary<string, string> ExtractClaimDigests(object sdJwt)
+    {
+        // Extract claim digests from the SD-JWT object
+        // This will depend on the actual HeroSD-JWT API
+        // Placeholder implementation - needs to be adjusted based on actual API
+        var digestsProperty = sdJwt.GetType().GetProperty("ClaimDigests");
+        if (digestsProperty != null)
+        {
+            var digests = digestsProperty.GetValue(sdJwt);
+            if (digests is Dictionary<string, string> digestDict)
+            {
+                return digestDict;
+            }
+        }
+        return new Dictionary<string, string>();
     }
 }

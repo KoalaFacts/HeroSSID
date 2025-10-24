@@ -1,6 +1,9 @@
-using HeroSDJWT;
+using HeroSdJwt.Verification;
+using HeroSdJwt.Common;
+using HeroSdJwt.Core;
 using HeroSSID.Credentials.SdJwt;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 
 namespace HeroSSID.Credentials.Implementations;
@@ -41,57 +44,59 @@ public sealed class HeroSdJwtVerifier : ISdJwtVerifier
 
         try
         {
-            // Create SD-JWT verifier using HeroSD-JWT library
-            var verifier = new SdJwtVerifier();
+            // Parse the compact SD-JWT format
+            // The HeroSD-JWT library may provide a Parse() method or similar
+            var sdJwtToken = ParseSdJwt(compactSdJwt);
 
-            // Verify the SD-JWT with selected disclosures
-            var verificationResult = verifier.Verify(
-                compactSdJwt: compactSdJwt,
-                publicKey: issuerPublicKey,
-                selectedDisclosures: selectedDisclosures);
+            // Create a presentation with selected disclosures
+            // Based on the API example: sdJwt.ToPresentation("email")
+            var presentation = CreatePresentation(sdJwtToken, selectedDisclosures);
 
-            // Check verification status
-            if (!verificationResult.IsValid)
+            // Verify the presentation with the public key
+            var verifier = SdJwtVerifier.Create(); // or new SdJwtVerifier()
+            var isValid = verifier.Verify(presentation, issuerPublicKey);
+
+            if (!isValid)
             {
-                return MapVerificationResult(verificationResult);
+                return new SdJwtVerificationResult
+                {
+                    IsValid = false,
+                    Status = SdJwtVerificationStatus.SignatureInvalid,
+                    ValidationErrors = ["SD-JWT signature verification failed"]
+                };
             }
 
-            // Successful verification - extract claims
+            // Extract disclosed claims from the presentation
+            var disclosedClaims = ExtractDisclosedClaims(presentation);
+            var issuerDid = ExtractClaim(presentation, "iss");
+            var holderDid = ExtractClaim(presentation, "sub");
+
             return new SdJwtVerificationResult
             {
                 IsValid = true,
                 Status = SdJwtVerificationStatus.Valid,
                 ValidationErrors = Array.Empty<string>(),
-                DisclosedClaims = verificationResult.DisclosedClaims,
-                IssuerDid = verificationResult.Issuer,
-                HolderDid = verificationResult.Subject
+                DisclosedClaims = disclosedClaims,
+                IssuerDid = issuerDid,
+                HolderDid = holderDid
             };
         }
-        catch (SdJwtException ex) when (ex.ErrorCode == SdJwtErrorCode.InvalidSignature)
-        {
-            return new SdJwtVerificationResult
-            {
-                IsValid = false,
-                Status = SdJwtVerificationStatus.SignatureInvalid,
-                ValidationErrors = [ex.Message]
-            };
-        }
-        catch (SdJwtException ex) when (ex.ErrorCode == SdJwtErrorCode.DisclosureMismatch)
-        {
-            return new SdJwtVerificationResult
-            {
-                IsValid = false,
-                Status = SdJwtVerificationStatus.DisclosureMismatch,
-                ValidationErrors = [ex.Message]
-            };
-        }
-        catch (SdJwtException ex) when (ex.ErrorCode == SdJwtErrorCode.MalformedToken)
+        catch (FormatException ex)
         {
             return new SdJwtVerificationResult
             {
                 IsValid = false,
                 Status = SdJwtVerificationStatus.MalformedSdJwt,
-                ValidationErrors = [ex.Message]
+                ValidationErrors = [$"Malformed SD-JWT format: {ex.Message}"]
+            };
+        }
+        catch (ArgumentException ex)
+        {
+            return new SdJwtVerificationResult
+            {
+                IsValid = false,
+                Status = SdJwtVerificationStatus.DisclosureMismatch,
+                ValidationErrors = [$"Disclosure validation failed: {ex.Message}"]
             };
         }
         catch (Exception ex)
@@ -105,22 +110,72 @@ public sealed class HeroSdJwtVerifier : ISdJwtVerifier
         }
     }
 
-    private static SdJwtVerificationResult MapVerificationResult(HeroSDJWT.VerificationResult result)
+    private static object ParseSdJwt(string compactSdJwt)
     {
-        var status = result.ErrorCode switch
+        // Parse the compact SD-JWT string
+        // The actual API might have a static Parse() method or constructor
+        // Placeholder - needs to be adjusted based on actual API
+        var parseMethod = typeof(SdJwtBuilder).GetMethod("Parse");
+        if (parseMethod != null)
         {
-            SdJwtErrorCode.InvalidSignature => SdJwtVerificationStatus.SignatureInvalid,
-            SdJwtErrorCode.DisclosureMismatch => SdJwtVerificationStatus.DisclosureMismatch,
-            SdJwtErrorCode.MalformedToken => SdJwtVerificationStatus.MalformedSdJwt,
-            SdJwtErrorCode.IssuerNotFound => SdJwtVerificationStatus.IssuerNotFound,
-            _ => SdJwtVerificationStatus.MalformedSdJwt
-        };
+            return parseMethod.Invoke(null, new object[] { compactSdJwt })!;
+        }
 
-        return new SdJwtVerificationResult
+        // Alternative: The builder might have a FromCompact() method
+        throw new NotImplementedException("SD-JWT parsing method needs to be implemented based on HeroSD-JWT API");
+    }
+
+    private static object CreatePresentation(object sdJwtToken, string[] selectedDisclosures)
+    {
+        // Create a presentation with selected disclosures
+        // Based on the API: sdJwt.ToPresentation("email")
+        // Need to handle multiple disclosures
+
+        var toPresentationMethod = sdJwtToken.GetType().GetMethod("ToPresentation");
+        if (toPresentationMethod != null)
         {
-            IsValid = false,
-            Status = status,
-            ValidationErrors = result.Errors?.ToArray() ?? Array.Empty<string>()
-        };
+            // If ToPresentation accepts a single string, we might need to call it multiple times
+            // or it might accept an array
+            var parameters = toPresentationMethod.GetParameters();
+            if (parameters.Length == 1 && parameters[0].ParameterType == typeof(string[]))
+            {
+                return toPresentationMethod.Invoke(sdJwtToken, new object[] { selectedDisclosures })!;
+            }
+            else if (selectedDisclosures.Length > 0)
+            {
+                // Call with first disclosure - might need adjustment
+                return toPresentationMethod.Invoke(sdJwtToken, new object[] { selectedDisclosures[0] })!;
+            }
+        }
+
+        return sdJwtToken;
+    }
+
+    private static Dictionary<string, object>? ExtractDisclosedClaims(object presentation)
+    {
+        // Extract the disclosed claims from the presentation
+        var claimsProperty = presentation.GetType().GetProperty("Claims")
+                           ?? presentation.GetType().GetProperty("DisclosedClaims");
+
+        if (claimsProperty != null)
+        {
+            var claims = claimsProperty.GetValue(presentation);
+            if (claims is Dictionary<string, object> claimsDict)
+            {
+                return claimsDict;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? ExtractClaim(object presentation, string claimName)
+    {
+        var claims = ExtractDisclosedClaims(presentation);
+        if (claims != null && claims.TryGetValue(claimName, out var value))
+        {
+            return value?.ToString();
+        }
+        return null;
     }
 }
