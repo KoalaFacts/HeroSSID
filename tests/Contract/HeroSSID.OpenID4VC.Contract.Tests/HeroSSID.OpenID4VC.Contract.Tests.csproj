@@ -5,6 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- Test projects: Allow underscores in test names and string URIs for readability -->
+    <NoWarn>$(NoWarn);CA1707;CA2234;CA1062</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -16,6 +18,14 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="9.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Services\HeroSSID.Api\HeroSSID.Api.csproj" />
   </ItemGroup>
 
 </Project>

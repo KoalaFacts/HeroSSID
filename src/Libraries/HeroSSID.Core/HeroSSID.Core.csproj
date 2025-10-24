@@ -8,7 +8,7 @@
     <Authors>BeingCiteable</Authors>
     <Company>BeingCiteable</Company>
     <Product>HeroSSID</Product>
-    <Description>Core functionality for HeroSSID - W3C DID (Decentralized Identifiers) and Verifiable Credentials implementation. Includes multi-tenant support, key encryption, and rate limiting.</Description>
+    <Description>Minimal shared kernel for HeroSSID. Contains only core abstractions (ITenantContext) with zero dependencies.</Description>
     <PackageTags>did;verifiable-credentials;w3c;identity;ssi;self-sovereign-identity;decentralized-identity</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/BeingCiteable/HeroSSID</PackageProjectUrl>
@@ -22,16 +22,6 @@
 
   <ItemGroup>
     <None Include="../../../README.md" Pack="true" PackagePath="\" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="9.0.0" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.10" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.10">
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-      <PrivateAssets>all</PrivateAssets>
-    </PackageReference>
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.4" />
   </ItemGroup>
 
 </Project>

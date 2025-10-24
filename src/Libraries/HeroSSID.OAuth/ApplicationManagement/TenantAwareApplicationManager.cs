@@ -11,20 +11,14 @@ namespace HeroSSID.OAuth.ApplicationManagement;
 /// Tenant-aware OpenIddict application manager that filters applications by tenant.
 /// Feature: Application Management
 /// </summary>
-public class TenantAwareApplicationManager : OpenIddictApplicationManager<TenantAwareOpenIddictApplication>
+public class TenantAwareApplicationManager(
+    IOpenIddictApplicationCache<TenantAwareOpenIddictApplication> cache,
+    ILogger<TenantAwareApplicationManager> logger,
+    IOptionsMonitor<OpenIddictCoreOptions> options,
+    IOpenIddictApplicationStoreResolver resolver,
+    ITenantContext tenantContext) : OpenIddictApplicationManager<TenantAwareOpenIddictApplication>(cache, logger, options, resolver)
 {
-    private readonly ITenantContext _tenantContext;
-
-    public TenantAwareApplicationManager(
-        IOpenIddictApplicationCache<TenantAwareOpenIddictApplication> cache,
-        ILogger<TenantAwareApplicationManager> logger,
-        IOptionsMonitor<OpenIddictCoreOptions> options,
-        IOpenIddictApplicationStoreResolver resolver,
-        ITenantContext tenantContext)
-        : base(cache, logger, options, resolver)
-    {
-        _tenantContext = tenantContext ?? throw new ArgumentNullException(nameof(tenantContext));
-    }
+    private readonly ITenantContext _tenantContext = tenantContext ?? throw new ArgumentNullException(nameof(tenantContext));
 
     /// <summary>
     /// Finds an application by client ID, filtered by current tenant (CRITICAL-5).

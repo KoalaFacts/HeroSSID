@@ -1,6 +1,6 @@
-using HeroSSID.Core.DidMethod;
-using HeroSSID.Core.KeyEncryption;
-using HeroSSID.Core.RateLimiting;
+using HeroSSID.DidOperations.DidMethod;
+using HeroSSID.Infrastructure.KeyEncryption;
+using HeroSSID.Infrastructure.RateLimiting;
 using HeroSSID.Core.TenantManagement;
 using HeroSSID.Credentials.CredentialIssuance;
 using HeroSSID.Credentials.MvpImplementations;
@@ -27,17 +27,12 @@ namespace HeroSSID.Integration.Tests;
 /// Integration tests for Verifiable Presentation end-to-end flow
 /// Tests the complete workflow: DID creation → Credential issuance → Presentation creation → Verification
 /// </summary>
-public sealed class VerifiablePresentationIntegrationTests : IClassFixture<DatabaseFixture>
+public sealed class VerifiablePresentationIntegrationTests(DatabaseFixture fixture) : IClassFixture<DatabaseFixture>
 {
-    private readonly DatabaseFixture _fixture;
+    private readonly DatabaseFixture _fixture = fixture;
     private static readonly IDidMethod[] s_didMethods = [new DidKeyMethod()];
     private static readonly string[] s_employeeClaimsToDisclose = ["employeeName", "position"];
     private static readonly string[] s_degreeClaimsToDisclose = ["name", "degree"];
-
-    public VerifiablePresentationIntegrationTests(DatabaseFixture fixture)
-    {
-        _fixture = fixture;
-    }
 
     [Fact]
     public async Task CompleteVpFlowIssueCredentialCreatePresentationVerifySucceeds()
@@ -362,10 +357,10 @@ public sealed class VerifiablePresentationIntegrationTests : IClassFixture<Datab
         await dbContext.Database.EnsureDeletedAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
     }
 
-    private sealed class TestTenantContext : ITenantContext
+    private sealed class TestTenantContext(Guid tenantId) : ITenantContext
     {
-        private readonly Guid _tenantId;
-        public TestTenantContext(Guid tenantId) => _tenantId = tenantId;
+        private readonly Guid _tenantId = tenantId;
+
         public Guid GetCurrentTenantId() => _tenantId;
     }
 }

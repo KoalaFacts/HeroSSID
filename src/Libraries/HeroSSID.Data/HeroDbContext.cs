@@ -7,17 +7,12 @@ namespace HeroSSID.Data;
 /// <summary>
 /// Entity Framework DbContext for HeroSSID with W3C SSI data model
 /// </summary>
-public sealed class HeroDbContext : DbContext
+public sealed class HeroDbContext(DbContextOptions<HeroDbContext> options) : DbContext(options)
 {
     /// <summary>
     /// Hardcoded tenant ID for MVP (will be replaced with multi-tenancy in v2)
     /// </summary>
     public static readonly Guid DefaultTenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
-
-    public HeroDbContext(DbContextOptions<HeroDbContext> options)
-        : base(options)
-    {
-    }
 
     /// <summary>
     /// Decentralized Identifiers (DIDs)

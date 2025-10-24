@@ -1,5 +1,5 @@
-using HeroSSID.Core.KeyEncryption;
-using HeroSSID.Core.RateLimiting;
+using HeroSSID.Infrastructure.KeyEncryption;
+using HeroSSID.Infrastructure.RateLimiting;
 using HeroSSID.Core.TenantManagement;
 using HeroSSID.Data;
 using Microsoft.EntityFrameworkCore;

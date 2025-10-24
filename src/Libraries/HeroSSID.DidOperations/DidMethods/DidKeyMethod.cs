@@ -1,6 +1,6 @@
 using System.Text.Json;
-using HeroSSID.Core.DidMethod;
-using HeroSSID.Core.Models;
+using HeroSSID.DidOperations.DidMethod;
+using HeroSSID.DidOperations.Models;
 using HeroSSID.DidOperations.Helpers;
 
 namespace HeroSSID.DidOperations.DidMethods;

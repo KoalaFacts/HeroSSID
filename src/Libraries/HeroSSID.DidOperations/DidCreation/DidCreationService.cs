@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
-using HeroSSID.Core.DidMethod;
-using HeroSSID.Core.KeyEncryption;
-using HeroSSID.Core.RateLimiting;
+using HeroSSID.DidOperations.DidMethod;
+using HeroSSID.Infrastructure.KeyEncryption;
+using HeroSSID.Infrastructure.RateLimiting;
 using HeroSSID.Core.TenantManagement;
 using HeroSSID.Data;
 using HeroSSID.Data.Entities;
@@ -18,14 +18,20 @@ namespace HeroSSID.DidOperations.DidCreation;
 /// Generates did:key identifiers using Ed25519 signatures via NSec library (libsodium-based)
 /// Implements W3C DID Core 1.0 specification with secure key storage and memory handling
 /// </summary>
-public sealed class DidCreationService : IDidCreationService
+public sealed class DidCreationService(
+    HeroDbContext dbContext,
+    IKeyEncryptionService keyEncryptionService,
+    ITenantContext tenantContext,
+    DidMethodResolver didMethodResolver,
+    ILogger<DidCreationService> logger,
+    IRateLimiter? rateLimiter = null) : IDidCreationService
 {
-    private readonly HeroDbContext _dbContext;
-    private readonly IKeyEncryptionService _keyEncryptionService;
-    private readonly ITenantContext _tenantContext;
-    private readonly DidMethodResolver _didMethodResolver;
-    private readonly IRateLimiter? _rateLimiter; // Optional for backward compatibility
-    private readonly ILogger<DidCreationService> _logger;
+    private readonly HeroDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+    private readonly IKeyEncryptionService _keyEncryptionService = keyEncryptionService ?? throw new ArgumentNullException(nameof(keyEncryptionService));
+    private readonly ITenantContext _tenantContext = tenantContext ?? throw new ArgumentNullException(nameof(tenantContext));
+    private readonly DidMethodResolver _didMethodResolver = didMethodResolver ?? throw new ArgumentNullException(nameof(didMethodResolver));
+    private readonly IRateLimiter? _rateLimiter = rateLimiter; // Optional for backward compatibility
+    private readonly ILogger<DidCreationService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     // LoggerMessage delegates
     private static readonly Action<ILogger, Exception?> s_logStartingDidCreation =
@@ -87,22 +93,6 @@ public sealed class DidCreationService : IDidCreationService
             LogLevel.Warning,
             new EventId(10, nameof(CreateDidAsync)),
             "Key reuse detected - same public key fingerprint already exists for tenant {TenantId}. Retrying with new key.");
-
-    public DidCreationService(
-        HeroDbContext dbContext,
-        IKeyEncryptionService keyEncryptionService,
-        ITenantContext tenantContext,
-        DidMethodResolver didMethodResolver,
-        ILogger<DidCreationService> logger,
-        IRateLimiter? rateLimiter = null) // Optional for backward compatibility
-    {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
-        _keyEncryptionService = keyEncryptionService ?? throw new ArgumentNullException(nameof(keyEncryptionService));
-        _tenantContext = tenantContext ?? throw new ArgumentNullException(nameof(tenantContext));
-        _didMethodResolver = didMethodResolver ?? throw new ArgumentNullException(nameof(didMethodResolver));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _rateLimiter = rateLimiter; // Optional - will skip rate limiting if null
-    }
 
     /// <inheritdoc />
     public async Task<DidCreationResult> CreateDidAsync(CancellationToken cancellationToken = default)

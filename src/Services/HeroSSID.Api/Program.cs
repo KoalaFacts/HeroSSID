@@ -1,6 +1,19 @@
 using HeroSSID.Data;
 using HeroSSID.Data.Entities;
-using HeroSSID.Core.Services;
+using HeroSSID.Cryptography;
+using HeroSSID.Cryptography.Abstractions;
+using HeroSSID.Core.TenantManagement;
+using HeroSSID.Infrastructure.KeyEncryption;
+using HeroSSID.Infrastructure.RateLimiting;
+using HeroSSID.Infrastructure.TenantManagement;
+using HeroSSID.DidOperations.DidMethod;
+using HeroSSID.DidOperations.DidCreation;
+using HeroSSID.DidOperations.DidResolution;
+using HeroSSID.DidOperations.DidMethods;
+using HeroSSID.Credentials.CredentialIssuance;
+using HeroSSID.Credentials.CredentialVerification;
+using HeroSSID.Api.Features.Dids;
+using HeroSSID.Api.Features.Credentials;
 using Microsoft.EntityFrameworkCore;
 using Asp.Versioning;
 using Microsoft.AspNetCore.RateLimiting;
@@ -10,10 +23,32 @@ using OpenIddict.Validation.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Register core services (CRITICAL-3, CRITICAL-4, CRITICAL-6)
+// Register core services
 builder.Services.AddSingleton<ICryptographicCodeGenerator, CryptographicCodeGenerator>();
-builder.Services.AddSingleton<IJsonValidator, JsonValidator>();
-builder.Services.AddSingleton<ITransactionCodeRateLimiter, TransactionCodeRateLimiter>();
+
+// Register key encryption service (required for DID operations)
+builder.Services.AddScoped<IKeyEncryptionService, LocalKeyEncryptionService>();
+
+// Register rate limiter for credential operations
+builder.Services.AddSingleton<IRateLimiter, InMemoryRateLimiter>();
+
+// Register tenant context (MVP: single tenant, production: replace with JWT-based implementation)
+builder.Services.AddScoped<ITenantContext, DefaultTenantContext>();
+
+// Register DID method implementations (did:key and did:web)
+builder.Services.AddScoped<IDidMethod, DidKeyMethod>();
+builder.Services.AddScoped<IDidMethod, DidWebMethod>();
+
+// Register DID method resolver (required for DID resolution)
+builder.Services.AddScoped<DidMethodResolver>();
+
+// Register DID services
+builder.Services.AddScoped<IDidCreationService, DidCreationService>();
+builder.Services.AddScoped<IDidResolutionService, DidResolutionService>();
+
+// Register Credential services
+builder.Services.AddScoped<ICredentialIssuanceService, CredentialIssuanceService>();
+builder.Services.AddScoped<ICredentialVerificationService, CredentialVerificationService>();
 
 // Add database context
 builder.Services.AddDbContext<HeroDbContext>(options =>
@@ -223,4 +258,13 @@ app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = Dat
     .WithName("HealthCheck")
     .ExcludeFromDescription();
 
+// Map User Story 1 endpoints
+app.MapDidEndpoints();
+app.MapCredentialEndpoints();
+
 app.Run();
+
+// Make Program class accessible to integration/contract tests
+#pragma warning disable CA1515 // Program class must be public for WebApplicationFactory testing
+public partial class Program { }
+#pragma warning restore CA1515

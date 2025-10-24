@@ -11,12 +11,19 @@ namespace HeroSSID.DidOperations.DidResolution;
 /// Implements W3C DID Core Resolution specification with database backing and caching.
 /// Reference: https://www.w3.org/TR/did-core/#did-resolution
 /// </summary>
-public sealed class DidResolutionService : IDidResolutionService
+/// <remarks>
+/// Creates a new DidResolutionService
+/// </remarks>
+public sealed class DidResolutionService(
+    HeroDbContext dbContext,
+    ITenantContext tenantContext,
+    DidMethodResolver didMethodResolver,
+    ILogger<DidResolutionService> logger) : IDidResolutionService
 {
-    private readonly HeroDbContext _dbContext;
-    private readonly ITenantContext _tenantContext;
-    private readonly DidMethodResolver _didMethodResolver;
-    private readonly ILogger<DidResolutionService> _logger;
+    private readonly HeroDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+    private readonly ITenantContext _tenantContext = tenantContext ?? throw new ArgumentNullException(nameof(tenantContext));
+    private readonly DidMethodResolver _didMethodResolver = didMethodResolver ?? throw new ArgumentNullException(nameof(didMethodResolver));
+    private readonly ILogger<DidResolutionService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     // Logging delegates for structured logging
     private static readonly Action<ILogger, string, Exception?> s_logResolvingDid =
@@ -42,21 +49,6 @@ public sealed class DidResolutionService : IDidResolutionService
             LogLevel.Warning,
             new EventId(4, "InvalidDid"),
             "Invalid DID format: {DidIdentifier}");
-
-    /// <summary>
-    /// Creates a new DidResolutionService
-    /// </summary>
-    public DidResolutionService(
-        HeroDbContext dbContext,
-        ITenantContext tenantContext,
-        DidMethodResolver didMethodResolver,
-        ILogger<DidResolutionService> logger)
-    {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
-        _tenantContext = tenantContext ?? throw new ArgumentNullException(nameof(tenantContext));
-        _didMethodResolver = didMethodResolver ?? throw new ArgumentNullException(nameof(didMethodResolver));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
 
     /// <summary>
     /// Resolves a DID to its DID Document.

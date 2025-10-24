@@ -1,4 +1,4 @@
-using HeroSSID.Core.DidMethod;
+using HeroSSID.DidOperations.DidMethod;
 
 namespace HeroSSID.DidOperations.DidMethods;
 
