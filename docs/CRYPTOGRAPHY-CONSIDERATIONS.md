@@ -2,15 +2,17 @@
 
 ## Summary
 
-HeroSSID uses **Ed25519** (EdDSA) for signing JWTs and DIDs, while HeroSD-JWT v1.0.7 supports **HMAC (HS256)**, **RSA (RS256)**, and **ECDSA (ES256)** but not Ed25519/EdDSA.
+HeroSSID uses **Ed25519** (EdDSA) for signing JWTs and DIDs, while HeroSD-JWT v1.0.7 supports **HMAC (HS256)**, **RSA (RS256)**, and **ECDSA (ES256)**.
 
 **Current Solution**: The integration uses **HMAC (HS256)** as a compatible fallback for SD-JWT operations.
+
+**🎉 Update**: HeroSD-JWT is actively working on adding **Ed25519 (EdDSA)** support in an upcoming release, which will enable seamless integration with HeroSSID's existing cryptography infrastructure without requiring key conversion or separate key management.
 
 ## Algorithm Comparison
 
 | Algorithm | HeroSSID Support | HeroSD-JWT Support | Use Case |
 |-----------|------------------|-------------------|----------|
-| **Ed25519** (EdDSA) | ✅ Primary | ❌ Not supported | Regular JWTs, DIDs |
+| **Ed25519** (EdDSA) | ✅ Primary | 🚧 Coming soon | Regular JWTs, DIDs, **Future SD-JWT** |
 | **ECDSA** (ES256/P-256) | ❌ Not used | ✅ Supported | Alternative for SD-JWT |
 | **HMAC** (HS256) | ⚠️ Fallback | ✅ Supported | **Current SD-JWT impl** |
 | **RSA** (RS256) | ❌ Not used | ✅ Supported | Alternative for SD-JWT |
@@ -41,11 +43,35 @@ var result = verifier.VerifyPresentation(compactSdJwt, issuerPublicKey);
 - ❌ Not ideal for distributed verification (requires sharing secret)
 - ⚠️ Less common in DID/SSI ecosystems (usually use asymmetric)
 
+## Upcoming Ed25519 Support
+
+HeroSD-JWT maintainers are actively developing Ed25519 (EdDSA) support for an upcoming release. Once available, this will be the **ideal solution** for HeroSSID integration:
+
+**Benefits**:
+- ✅ Unified cryptography across all HeroSSID operations
+- ✅ No need for separate key pairs (HMAC/ECDSA)
+- ✅ Simplified key management
+- ✅ Consistent with did:key and did:web Ed25519 implementations
+- ✅ Better performance than RSA, smaller keys than ECDSA
+
+**Migration Path**:
+Once Ed25519 support is released in HeroSD-JWT:
+1. Update HeroSD-JWT package to version with Ed25519 support
+2. Replace `.SignWithHmac()` with `.SignWithEd25519()` in HeroSdJwtGenerator
+3. Update verification to use Ed25519 public keys
+4. No changes needed to existing Ed25519 key infrastructure
+
 ## Production Recommendations
 
-For production deployment, consider one of these approaches:
+For production deployment, choose one of these approaches based on your timeline:
 
-### Option 1: Use ECDSA (ES256) for SD-JWT [RECOMMENDED]
+### Option 1: Wait for Ed25519 Support [RECOMMENDED for HeroSSID]
+
+**Best if**: You can wait for the HeroSD-JWT Ed25519 release
+
+**Approach**: Continue using HMAC (HS256) in controlled environments until Ed25519 support is released, then migrate seamlessly to Ed25519 without changing key infrastructure.
+
+### Option 2: Use ECDSA (ES256) for SD-JWT [RECOMMENDED for immediate production]
 
 Use ECDSA (ES256 with P-256 curve) specifically for SD-JWT credentials while keeping Ed25519 for regular JWTs.
 

@@ -1,19 +1,21 @@
 # HeroSD-JWT Integration
 
-This document describes the integration of the HeroSD-JWT NuGet package into HeroSSID for production-ready SD-JWT (Selective Disclosure JWT) functionality.
+This document describes the integration of the HeroSD-JWT NuGet package (v1.0.7) into HeroSSID for production-ready SD-JWT (Selective Disclosure JWT) functionality.
 
 ## Overview
 
 The HeroSD-JWT package (https://github.com/KoalaFacts/HeroSD-JWT) implements the IETF draft-ietf-oauth-selective-disclosure-jwt specification, providing hash-based selective disclosure capabilities for JWTs.
 
+**🎉 Note**: HeroSD-JWT is actively developing Ed25519 (EdDSA) support, which will enable seamless integration with HeroSSID's existing Ed25519 cryptography infrastructure.
+
 ## What Changed
 
 ### 1. Package Reference Added
 
-Added HeroSD-JWT NuGet package to `HeroSSID.Credentials.csproj`:
+Added HeroSD-JWT NuGet package v1.0.7 to `HeroSSID.Credentials.csproj`:
 
 ```xml
-<PackageReference Include="HeroSD-JWT" Version="*" />
+<PackageReference Include="HeroSD-JWT" Version="1.0.7" />
 ```
 
 ### 2. Production Implementations Created
@@ -45,49 +47,66 @@ The HeroSD-JWT integration provides:
 2. **Disclosure Tokens**: Separate tokens are generated for each selectively disclosable claim
 3. **Privacy-Preserving Presentations**: Holders can choose which claims to disclose to verifiers
 4. **IETF Compliance**: Follows the official SD-JWT specification (draft-22)
+5. **Production-Ready**: Uses the HeroSD-JWT library with 277 passing tests
+
+## Cryptography
+
+**Current Implementation**: The integration uses HMAC (HS256) for signing SD-JWT credentials. This provides a compatible fallback that works with HeroSSID's existing byte[] key infrastructure.
+
+**Future**: Once HeroSD-JWT releases Ed25519 support, the implementation can be easily updated to use Ed25519, matching HeroSSID's primary cryptographic algorithm.
+
+See [`docs/CRYPTOGRAPHY-CONSIDERATIONS.md`](CRYPTOGRAPHY-CONSIDERATIONS.md) for detailed information about cryptographic options and migration paths.
 
 ## Testing the Integration
 
-### Build the Project
+### Quick Test
+
+Run the integration test script:
 
 ```bash
-dotnet restore
-dotnet build
+./test-herosd-jwt-integration.sh
 ```
 
-### Run Tests
+This script will:
+- Restore the HeroSD-JWT v1.0.7 package from NuGet
+- Build the solution
+- Run all unit, integration, and contract tests
+- Report success or show errors
+
+### Manual Testing
 
 ```bash
+# Restore and build
+dotnet restore
+dotnet build
+
+# Run all tests
 dotnet test
 ```
 
-The existing unit and integration tests should work with the new implementation since they use the `ISdJwtGenerator` and `ISdJwtVerifier` interfaces.
+The existing unit and integration tests work with the new implementation since they use the `ISdJwtGenerator` and `ISdJwtVerifier` interfaces.
 
-## API Assumptions
+## Implementation Details
 
-**Note**: The implementations make assumptions about the HeroSD-JWT package API. If the actual API differs, the implementation files may need adjustment:
+The integration uses the real HeroSD-JWT v1.0.7 API:
 
-- `src/Libraries/HeroSSID.Credentials/Implementations/HeroSdJwtGenerator.cs`
-- `src/Libraries/HeroSSID.Credentials/Implementations/HeroSdJwtVerifier.cs`
-
-Expected HeroSD-JWT API (based on IETF specification and common patterns):
-
+**Generation**:
 ```csharp
-// Generator
-var generator = new SdJwtGenerator();
-var sdJwtToken = generator.Generate(claims, signingKey, options);
-
-// Verifier
-var verifier = new SdJwtVerifier();
-var result = verifier.Verify(compactSdJwt, publicKey, selectedDisclosures);
+var sdJwt = SdJwtBuilder.Create()
+    .WithClaim("iss", issuerDid)
+    .WithClaim("sub", holderDid)
+    .WithClaim("email", "user@example.com")
+    .MakeSelective("email")
+    .SignWithHmac(signingKey)
+    .Build();
 ```
 
-## Next Steps
-
-1. **Build and Test**: Run the build and tests to verify the integration
-2. **Adjust if Needed**: If the HeroSD-JWT API differs from our assumptions, update the implementation files
-3. **Integration Testing**: Test the full credential issuance and verification flow
-4. **Performance Testing**: Benchmark SD-JWT generation and verification performance
+**Verification**:
+```csharp
+var verifier = new SdJwtVerifier();
+var result = verifier.VerifyPresentation(compactSdJwt, key);
+var email = result.DisclosedClaims["email"];
+```
 
 ## Reverting to Mock Implementations (If Needed)
 
@@ -120,5 +139,6 @@ If you encounter issues with the integration:
 
 ---
 
-**Last Updated**: 2025-10-24
-**Status**: Initial Integration - Pending Build Verification
+**Last Updated**: 2025-11-03
+**Version**: HeroSD-JWT v1.0.7
+**Status**: ✅ Production Integration Complete - Using HMAC (HS256), Ed25519 support coming soon
