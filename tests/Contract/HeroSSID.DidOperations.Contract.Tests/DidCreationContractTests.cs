@@ -1,6 +1,6 @@
 using System.Text.Json;
-using HeroSSID.Core.DidMethod;
-using HeroSSID.Core.KeyEncryption;
+using HeroSSID.DidOperations.DidMethod;
+using HeroSSID.Infrastructure.KeyEncryption;
 using HeroSSID.Core.TenantManagement;
 using HeroSSID.Data;
 using HeroSSID.DidOperations.DidCreation;
@@ -226,7 +226,7 @@ public sealed class DidCreationContractTests : IDisposable
         // Base58 alphabet check (no 0, O, I, l to avoid confusion)
         foreach (char c in encodedPortion)
         {
-            Assert.False(c == '0' || c == 'O' || c == 'I' || c == 'l',
+            Assert.False(c is '0' or 'O' or 'I' or 'l',
                 $"Base58 should not contain confusing characters: {c}");
         }
     }

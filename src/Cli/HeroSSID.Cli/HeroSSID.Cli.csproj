@@ -21,7 +21,7 @@
     <ProjectReference Include="..\..\Libraries\HeroSSID.Data\HeroSSID.Data.csproj" />
     <ProjectReference Include="..\..\Libraries\HeroSSID.DidOperations\HeroSSID.DidOperations.csproj" />
     <ProjectReference Include="..\..\Libraries\HeroSSID.Observability\HeroSSID.Observability.csproj" />
-    <ProjectReference Include="..\..\Shared\HeroSSID.Contracts\HeroSSID.Contracts.csproj" />
+    <ProjectReference Include="..\..\Libraries\HeroSSID.Infrastructure\HeroSSID.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>

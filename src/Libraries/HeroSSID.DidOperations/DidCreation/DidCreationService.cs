@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
-using HeroSSID.Core.DidMethod;
-using HeroSSID.Core.KeyEncryption;
-using HeroSSID.Core.RateLimiting;
+using HeroSSID.DidOperations.DidMethod;
+using HeroSSID.Infrastructure.KeyEncryption;
+using HeroSSID.Infrastructure.RateLimiting;
 using HeroSSID.Core.TenantManagement;
 using HeroSSID.Data;
 using HeroSSID.Data.Entities;
@@ -18,14 +18,20 @@ namespace HeroSSID.DidOperations.DidCreation;
 /// Generates did:key identifiers using Ed25519 signatures via NSec library (libsodium-based)
 /// Implements W3C DID Core 1.0 specification with secure key storage and memory handling
 /// </summary>
-public sealed class DidCreationService : IDidCreationService
+public sealed class DidCreationService(
+    HeroDbContext dbContext,
+    IKeyEncryptionService keyEncryptionService,
+    ITenantContext tenantContext,
+    DidMethodResolver didMethodResolver,
+    ILogger<DidCreationService> logger,
+    IRateLimiter? rateLimiter = null) : IDidCreationService
 {
-    private readonly HeroDbContext _dbContext;
-    private readonly IKeyEncryptionService _keyEncryptionService;
-    private readonly ITenantContext _tenantContext;
-    private readonly DidMethodResolver _didMethodResolver;
-    private readonly IRateLimiter? _rateLimiter; // Optional for backward compatibility
-    private readonly ILogger<DidCreationService> _logger;
+    private readonly HeroDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+    private readonly IKeyEncryptionService _keyEncryptionService = keyEncryptionService ?? throw new ArgumentNullException(nameof(keyEncryptionService));
+    private readonly ITenantContext _tenantContext = tenantContext ?? throw new ArgumentNullException(nameof(tenantContext));
+    private readonly DidMethodResolver _didMethodResolver = didMethodResolver ?? throw new ArgumentNullException(nameof(didMethodResolver));
+    private readonly IRateLimiter? _rateLimiter = rateLimiter; // Optional for backward compatibility
+    private readonly ILogger<DidCreationService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     // LoggerMessage delegates
     private static readonly Action<ILogger, Exception?> s_logStartingDidCreation =
@@ -87,22 +93,6 @@ public sealed class DidCreationService : IDidCreationService
             LogLevel.Warning,
             new EventId(10, nameof(CreateDidAsync)),
             "Key reuse detected - same public key fingerprint already exists for tenant {TenantId}. Retrying with new key.");
-
-    public DidCreationService(
-        HeroDbContext dbContext,
-        IKeyEncryptionService keyEncryptionService,
-        ITenantContext tenantContext,
-        DidMethodResolver didMethodResolver,
-        ILogger<DidCreationService> logger,
-        IRateLimiter? rateLimiter = null) // Optional for backward compatibility
-    {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
-        _keyEncryptionService = keyEncryptionService ?? throw new ArgumentNullException(nameof(keyEncryptionService));
-        _tenantContext = tenantContext ?? throw new ArgumentNullException(nameof(tenantContext));
-        _didMethodResolver = didMethodResolver ?? throw new ArgumentNullException(nameof(didMethodResolver));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _rateLimiter = rateLimiter; // Optional - will skip rate limiting if null
-    }
 
     /// <inheritdoc />
     public async Task<DidCreationResult> CreateDidAsync(CancellationToken cancellationToken = default)
@@ -388,19 +378,11 @@ public sealed class DidCreationService : IDidCreationService
     /// <summary>
     /// Validates that the system has sufficient entropy for secure key generation.
     /// SECURITY: This is a critical defense against weak key generation on systems with poor entropy sources.
-    /// Uses larger sample size and statistical tests for robust validation.
+    /// Uses statistical tests with mathematically realistic thresholds to avoid false positives.
     /// </summary>
     /// <exception cref="CryptographicException">Thrown if entropy validation fails</exception>
     private static void ValidateSystemEntropy()
     {
-        // Allow skipping entropy validation in test/CI environments
-        // SECURITY NOTE: This should ONLY be used in non-production environments
-        string? skipEntropyCheck = Environment.GetEnvironmentVariable("HEROSSID_SKIP_ENTROPY_CHECK");
-        if (skipEntropyCheck == "true" || skipEntropyCheck == "1")
-        {
-            return; // Skip validation for testing purposes
-        }
-
         // Use larger sample for more reliable entropy testing
         const int sampleSize = 256;
         byte[] entropyTest = new byte[sampleSize];
@@ -428,10 +410,12 @@ public sealed class DidCreationService : IDidCreationService
             throw new CryptographicException("CRITICAL: System RNG returned all 0xFF - insufficient entropy. Key generation aborted.");
         }
 
-        // 4. Check for sufficient unique values (require at least 75% unique bytes for strong entropy)
-        // SECURITY HARDENING: Increased from 50% to 75% threshold based on security audit recommendation
+        // 4. Check for sufficient unique values
+        // MATH: With 256 possible byte values and 256 samples, expected unique ≈ 160-165 due to birthday paradox
+        // A good RNG should have at least 128 unique values (50% is a realistic minimum)
+        // 75% unique (192/256) was mathematically unrealistic and caused false positives
         int uniqueBytes = entropyTest.Distinct().Count();
-        int minUniqueBytes = (sampleSize * 3) / 4; // 192 of 256 (75%)
+        int minUniqueBytes = sampleSize / 2; // 128 of 256 (50% - realistic for random data)
         if (uniqueBytes < minUniqueBytes)
         {
             throw new CryptographicException($"CRITICAL: System RNG has insufficient entropy - only {uniqueBytes} unique values in {sampleSize} bytes (minimum: {minUniqueBytes}). Key generation aborted.");
@@ -449,9 +433,11 @@ public sealed class DidCreationService : IDidCreationService
         double expectedCount = sampleSize / 16.0; // 256 / 16 = 16 samples per bucket expected
         double chiSquare = buckets.Sum(count => Math.Pow(count - expectedCount, 2) / expectedCount);
 
-        // Chi-square critical value for 15 degrees of freedom at 99% confidence is ~30.58
-        // If chi-square exceeds this, the distribution is non-uniform (potential entropy issue)
-        const double chiSquareCriticalValue = 30.58;
+        // Chi-square critical value for 15 degrees of freedom
+        // Using 40.0 (between 99.9% confidence at 37.7 and 99.99% at 40.6)
+        // This allows normal statistical variation while still catching severely non-uniform distributions
+        // A good RNG can occasionally produce values up to ~37, so we use 40 as a practical threshold
+        const double chiSquareCriticalValue = 40.0;
         if (chiSquare > chiSquareCriticalValue)
         {
             throw new CryptographicException($"CRITICAL: System RNG failed distribution test (chi-square: {chiSquare:F2} > {chiSquareCriticalValue}). Key generation aborted.");

@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
-using HeroSSID.Core.KeyEncryption;
-using HeroSSID.Core.RateLimiting;
+using HeroSSID.Infrastructure.KeyEncryption;
+using HeroSSID.Infrastructure.RateLimiting;
 using HeroSSID.Core.TenantManagement;
 using HeroSSID.Data;
 using Microsoft.EntityFrameworkCore;
@@ -14,27 +14,18 @@ namespace HeroSSID.DidOperations.DidSigning;
 /// Uses NSec.Cryptography (libsodium wrapper) for cryptographic operations.
 /// </summary>
 #pragma warning disable CA1848 // Use LoggerMessage delegates - not needed for MVP
-public sealed class DidSigningService : IDidSigningService
+public sealed class DidSigningService(
+    HeroDbContext dbContext,
+    IKeyEncryptionService keyEncryptionService,
+    ITenantContext tenantContext,
+    ILogger<DidSigningService> logger,
+    IRateLimiter? rateLimiter = null) : IDidSigningService
 {
-    private readonly HeroDbContext _dbContext;
-    private readonly IKeyEncryptionService _keyEncryptionService;
-    private readonly ITenantContext _tenantContext;
-    private readonly IRateLimiter? _rateLimiter; // Optional for backward compatibility
-    private readonly ILogger<DidSigningService> _logger;
-
-    public DidSigningService(
-        HeroDbContext dbContext,
-        IKeyEncryptionService keyEncryptionService,
-        ITenantContext tenantContext,
-        ILogger<DidSigningService> logger,
-        IRateLimiter? rateLimiter = null) // Optional for backward compatibility
-    {
-        _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
-        _keyEncryptionService = keyEncryptionService ?? throw new ArgumentNullException(nameof(keyEncryptionService));
-        _tenantContext = tenantContext ?? throw new ArgumentNullException(nameof(tenantContext));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _rateLimiter = rateLimiter; // Optional - will skip rate limiting if null
-    }
+    private readonly HeroDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+    private readonly IKeyEncryptionService _keyEncryptionService = keyEncryptionService ?? throw new ArgumentNullException(nameof(keyEncryptionService));
+    private readonly ITenantContext _tenantContext = tenantContext ?? throw new ArgumentNullException(nameof(tenantContext));
+    private readonly IRateLimiter? _rateLimiter = rateLimiter; // Optional for backward compatibility
+    private readonly ILogger<DidSigningService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <inheritdoc />
     public async Task<byte[]> SignAsync(string didIdentifier, byte[] message, CancellationToken cancellationToken = default)

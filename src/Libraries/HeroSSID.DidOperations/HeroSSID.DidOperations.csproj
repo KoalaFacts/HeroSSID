@@ -36,6 +36,7 @@
   <ItemGroup>
     <ProjectReference Include="..\HeroSSID.Core\HeroSSID.Core.csproj" />
     <ProjectReference Include="..\HeroSSID.Data\HeroSSID.Data.csproj" />
+    <ProjectReference Include="..\HeroSSID.Infrastructure\HeroSSID.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

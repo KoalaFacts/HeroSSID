@@ -1,4 +1,4 @@
-using HeroSSID.Core.RateLimiting;
+using HeroSSID.Infrastructure.RateLimiting;
 using HeroSSID.Core.TenantManagement;
 using HeroSSID.Credentials.Utilities;
 using HeroSSID.Data;

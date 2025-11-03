@@ -1,8 +1,8 @@
 using HeroSSID.Credentials.CredentialIssuance;
 using HeroSSID.Credentials.CredentialVerification;
 using HeroSSID.Credentials.MvpImplementations;
-using HeroSSID.Core.KeyEncryption;
-using HeroSSID.Core.RateLimiting;
+using HeroSSID.Infrastructure.KeyEncryption;
+using HeroSSID.Infrastructure.RateLimiting;
 using HeroSSID.Core.TenantManagement;
 using HeroSSID.Data;
 using HeroSSID.Data.Entities;
@@ -482,10 +482,10 @@ public sealed class SecurityEdgeCaseTests : IDisposable
         _dbContext.Dispose();
     }
 
-    private sealed class TestTenantContext : ITenantContext
+    private sealed class TestTenantContext(Guid tenantId) : ITenantContext
     {
-        private readonly Guid _tenantId;
-        public TestTenantContext(Guid tenantId) => _tenantId = tenantId;
+        private readonly Guid _tenantId = tenantId;
+
         public Guid GetCurrentTenantId() => _tenantId;
     }
 }

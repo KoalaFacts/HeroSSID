@@ -1,5 +1,6 @@
-using HeroSSID.Core.DidMethod;
-using HeroSSID.Core.KeyEncryption;
+using HeroSSID.DidOperations.DidMethod;
+using HeroSSID.Infrastructure.KeyEncryption;
+using HeroSSID.Infrastructure.TenantManagement;
 using HeroSSID.Core.TenantManagement;
 using HeroSSID.Data;
 using HeroSSID.DidOperations.DidCreation;
