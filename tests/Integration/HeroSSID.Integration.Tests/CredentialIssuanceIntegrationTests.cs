@@ -1,5 +1,6 @@
-using HeroSSID.Core.KeyEncryption;
-using HeroSSID.Core.RateLimiting;
+using HeroSSID.Infrastructure.KeyEncryption;
+using HeroSSID.Infrastructure.RateLimiting;
+using HeroSSID.Infrastructure.TenantManagement;
 using HeroSSID.Core.TenantManagement;
 using HeroSSID.Credentials.CredentialIssuance;
 using HeroSSID.Credentials.CredentialVerification;

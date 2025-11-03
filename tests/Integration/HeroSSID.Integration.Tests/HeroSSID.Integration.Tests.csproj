@@ -4,15 +4,18 @@
     <TargetFramework>net9.0</TargetFramework>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!-- Test projects: Allow underscores, string URIs, and test patterns for readability -->
+    <NoWarn>$(NoWarn);CA1707;CA2234;CA1062;CA1307;CA1001</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.Testing" Version="9.5.2" />
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="9.0.10" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="xunit.v3" Version="3.1.0" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
-    <PackageReference Include="Testcontainers.PostgreSql" Version="4.4.0" />
+    <PackageReference Include="Testcontainers.PostgreSql" Version="4.8.1" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.10" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.4" />
   </ItemGroup>
@@ -25,6 +28,13 @@
     <ProjectReference Include="..\..\..\src\Libraries\HeroSSID.DidOperations\HeroSSID.DidOperations.csproj" />
     <ProjectReference Include="..\..\..\src\Libraries\HeroSSID.Data\HeroSSID.Data.csproj" />
     <ProjectReference Include="..\..\..\src\Libraries\HeroSSID.Credentials\HeroSSID.Credentials.csproj" />
+    <ProjectReference Include="..\..\..\src\Services\HeroSSID.Api\HeroSSID.Api.csproj" />
+    <ProjectReference Include="..\..\..\src\Libraries\HeroSSID.Infrastructure\HeroSSID.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\..\src\Services\HeroSSID.AppHost\HeroSSID.AppHost.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="9.0.10" />
   </ItemGroup>
 
 </Project>

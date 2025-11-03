@@ -15,4 +15,8 @@
     <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="9.5.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\HeroSSID.Api\HeroSSID.Api.csproj" />
+  </ItemGroup>
+
 </Project>
