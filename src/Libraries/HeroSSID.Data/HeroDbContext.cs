@@ -1,6 +1,5 @@
 using HeroSSID.Data.Entities;
 using Microsoft.EntityFrameworkCore;
-using OpenIddict.EntityFrameworkCore.Models;
 
 namespace HeroSSID.Data;
 
@@ -44,45 +43,35 @@ public sealed class HeroDbContext(DbContextOptions<HeroDbContext> options) : DbC
     /// </summary>
     public DbSet<VpTokenSubmission> VpTokenSubmissions => Set<VpTokenSubmission>();
 
+    /// <summary>
+    /// OAuth 2.0 clients for API authentication
+    /// </summary>
+    public DbSet<OAuthClient> OAuthClients => Set<OAuthClient>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
         base.OnModelCreating(modelBuilder);
 
-        // Configure OpenIddict tables with tenant-aware entities (CRITICAL-5)
-        modelBuilder.UseOpenIddict<TenantAwareOpenIddictApplication, TenantAwareOpenIddictAuthorization, TenantAwareOpenIddictScope, TenantAwareOpenIddictToken, Guid>();
-
-        // Add TenantId to OpenIddict entities
-        modelBuilder.Entity<TenantAwareOpenIddictApplication>(entity =>
+        // Configure OAuthClient
+        modelBuilder.Entity<OAuthClient>(entity =>
         {
-            entity.Property(e => e.TenantId)
-                .HasMaxLength(256)
-                .IsRequired();
-            entity.HasIndex(e => e.TenantId).HasDatabaseName("idx_openiddict_applications_tenant");
-        });
+            entity.ToTable("oauth_clients");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
 
-        modelBuilder.Entity<TenantAwareOpenIddictAuthorization>(entity =>
-        {
-            entity.Property(e => e.TenantId)
-                .HasMaxLength(256)
-                .IsRequired();
-            entity.HasIndex(e => e.TenantId).HasDatabaseName("idx_openiddict_authorizations_tenant");
-        });
+            entity.Property(e => e.ClientId).HasColumnName("client_id").HasMaxLength(255).IsRequired();
+            entity.HasIndex(e => e.ClientId).IsUnique().HasDatabaseName("idx_oauth_clients_client_id");
 
-        modelBuilder.Entity<TenantAwareOpenIddictScope>(entity =>
-        {
-            entity.Property(e => e.TenantId)
-                .HasMaxLength(256)
-                .IsRequired();
-            entity.HasIndex(e => e.TenantId).HasDatabaseName("idx_openiddict_scopes_tenant");
-        });
+            entity.Property(e => e.ClientSecretHash).HasColumnName("client_secret_hash").HasMaxLength(512).IsRequired();
+            entity.Property(e => e.DisplayName).HasColumnName("display_name").HasMaxLength(255).IsRequired();
 
-        modelBuilder.Entity<TenantAwareOpenIddictToken>(entity =>
-        {
-            entity.Property(e => e.TenantId)
-                .HasMaxLength(256)
-                .IsRequired();
-            entity.HasIndex(e => e.TenantId).HasDatabaseName("idx_openiddict_tokens_tenant");
+            entity.Property(e => e.TenantId).HasColumnName("tenant_id").IsRequired();
+            entity.HasIndex(e => e.TenantId).HasDatabaseName("idx_oauth_clients_tenant");
+
+            entity.Property(e => e.Scopes).HasColumnName("scopes").HasMaxLength(1024).IsRequired();
+            entity.Property(e => e.IsEnabled).HasColumnName("is_enabled").HasDefaultValue(true);
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("timestamptz").IsRequired().HasDefaultValueSql("NOW()");
         });
 
         // Configure DidEntity

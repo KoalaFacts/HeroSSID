@@ -12,6 +12,43 @@ public class RestApiIntegrationTests(AspireWebApplicationFactory factory) : ICla
 {
     private readonly HttpClient _client = factory.CreateClient();
 
+    /// <summary>
+    /// Helper method to obtain OAuth access token for testing
+    /// </summary>
+#pragma warning disable CA2007 // ConfigureAwait not needed in test code
+    private async Task<string> GetAccessTokenAsync(string scope = "credential:issue credential:verify")
+    {
+        using var tokenRequest = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = "client_credentials",
+            ["client_id"] = "test_client",
+            ["client_secret"] = "test_secret",
+            ["scope"] = scope
+        });
+
+        var tokenResponse = await _client.PostAsync("/oauth2/token", tokenRequest);
+        var tokenResult = await tokenResponse.Content.ReadFromJsonAsync<dynamic>();
+        return tokenResult?.GetProperty("access_token").GetString()
+            ?? throw new InvalidOperationException("Access token not found");
+    }
+
+    /// <summary>
+    /// Helper method to POST JSON with OAuth authentication
+    /// </summary>
+    private async Task<HttpResponseMessage> PostAsJsonWithAuthAsync<T>(string requestUri, T value, string? accessToken = null)
+    {
+        accessToken ??= await GetAccessTokenAsync();
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, requestUri)
+        {
+            Content = JsonContent.Create(value)
+        };
+        request.Headers.Add("Authorization", $"Bearer {accessToken}");
+
+        return await _client.SendAsync(request);
+    }
+#pragma warning restore CA2007
+
     [Fact]
     public async Task FullCredentialFlow_CreateDids_IssueCredential_VerifyCredential_AllSucceed()
     {
@@ -86,7 +123,7 @@ public class RestApiIntegrationTests(AspireWebApplicationFactory factory) : ICla
             }
         };
 
-        var issueResponse = await _client.PostAsJsonAsync("/api/v1/credentials/issue", issueCredentialRequest, ct);
+        var issueResponse = await PostAsJsonWithAuthAsync("/api/v1/credentials/issue", issueCredentialRequest);
         Assert.Equal(HttpStatusCode.Created, issueResponse.StatusCode);
 
         var issueResult = await issueResponse.Content.ReadFromJsonAsync<dynamic>(cancellationToken: ct);
@@ -107,7 +144,7 @@ public class RestApiIntegrationTests(AspireWebApplicationFactory factory) : ICla
             Credential = credential
         };
 
-        var verifyResponse = await _client.PostAsJsonAsync("/api/v1/credentials/verify", verifyRequest, ct);
+        var verifyResponse = await PostAsJsonWithAuthAsync("/api/v1/credentials/verify", verifyRequest);
         Assert.Equal(HttpStatusCode.OK, verifyResponse.StatusCode);
 
         var verifyResult = await verifyResponse.Content.ReadFromJsonAsync<dynamic>(cancellationToken: ct);
@@ -166,7 +203,7 @@ public class RestApiIntegrationTests(AspireWebApplicationFactory factory) : ICla
                 Claims = new { studentId = $"STU-{i:D3}", degree = "Computer Science" }
             };
 
-            var issueResponse = await _client.PostAsJsonAsync("/api/v1/credentials/issue", issueRequest, ct);
+            var issueResponse = await PostAsJsonWithAuthAsync("/api/v1/credentials/issue", issueRequest);
             Assert.Equal(HttpStatusCode.Created, issueResponse.StatusCode);
 
             var issueResult = await issueResponse.Content.ReadFromJsonAsync<dynamic>(cancellationToken: ct);
@@ -180,7 +217,7 @@ public class RestApiIntegrationTests(AspireWebApplicationFactory factory) : ICla
         foreach (var credential in credentials)
         {
             var verifyRequest = new { Credential = credential };
-            var verifyResponse = await _client.PostAsJsonAsync("/api/v1/credentials/verify", verifyRequest, ct);
+            var verifyResponse = await PostAsJsonWithAuthAsync("/api/v1/credentials/verify", verifyRequest);
 
             Assert.Equal(HttpStatusCode.OK, verifyResponse.StatusCode);
 

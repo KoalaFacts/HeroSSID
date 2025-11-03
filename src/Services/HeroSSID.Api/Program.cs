@@ -14,12 +14,15 @@ using HeroSSID.Credentials.CredentialIssuance;
 using HeroSSID.Credentials.CredentialVerification;
 using HeroSSID.Api.Features.Dids;
 using HeroSSID.Api.Features.Credentials;
+using HeroSSID.Api.Features.OAuth;
+using HeroSSID.Api.Data;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.EntityFrameworkCore;
 using Asp.Versioning;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Threading.RateLimiting;
 using Scalar.AspNetCore;
-using OpenIddict.Validation.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -144,51 +147,29 @@ builder.Services.AddProblemDetails();
 // Add structured logging (T030)
 // Note: AddServiceDefaults() is an Aspire extension - skipping for now as it requires Aspire ServiceDefaults package
 
-// Add OpenIddict for OAuth 2.0 authentication (CRITICAL-2, CRITICAL-5)
-builder.Services.AddOpenIddict()
-    .AddCore(options =>
-    {
-        options.UseEntityFrameworkCore()
-               .UseDbContext<HeroDbContext>()
-               .ReplaceDefaultEntities<TenantAwareOpenIddictApplication, TenantAwareOpenIddictAuthorization, TenantAwareOpenIddictScope, TenantAwareOpenIddictToken, Guid>();
-    })
-    .AddServer(options =>
-    {
-        // Enable token endpoints
-        options.SetTokenEndpointUris("/connect/token");
+// Add JWT Bearer authentication for OAuth 2.0 (T066)
+var jwtSecret = builder.Configuration["Jwt:Secret"] ?? "your-256-bit-secret-key-change-in-production-min-32-chars";
+var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "https://herossid.api";
+var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "https://herossid.api";
 
-        // Enable client credentials flow
-        options.AllowClientCredentialsFlow();
-
-        // Register signing and encryption credentials
-        if (builder.Environment.IsDevelopment())
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
         {
-            options.AddDevelopmentEncryptionCertificate()
-                   .AddDevelopmentSigningCertificate();
-        }
-        else
-        {
-            // TODO: Configure production certificates from Key Vault
-            throw new InvalidOperationException("Production certificates not configured. Configure signing and encryption certificates.");
-        }
-
-        // Register ASP.NET Core host
-        options.UseAspNetCore()
-               .EnableTokenEndpointPassthrough();
-    })
-    .AddValidation(options =>
-    {
-        options.UseLocalServer();
-        options.UseAspNetCore();
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = jwtIssuer,
+            ValidAudience = jwtAudience,
+            IssuerSigningKey = new SymmetricSecurityKey(System.Text.Encoding.UTF8.GetBytes(jwtSecret)),
+            ClockSkew = TimeSpan.FromMinutes(5)
+        };
     });
 
-// Add authentication services
-builder.Services.AddAuthentication(options =>
-{
-    options.DefaultScheme = OpenIddict.Validation.AspNetCore.OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme;
-});
-
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorizationBuilder()
+    .AddPolicy("RequireAuthentication", policy => policy.RequireAuthenticatedUser());
 
 // Configure HSTS (HIGH-2)
 builder.Services.AddHsts(options =>
@@ -270,7 +251,21 @@ app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = Dat
 app.MapDidEndpoints();
 app.MapCredentialEndpoints();
 
+// Map OAuth 2.0 endpoints (T063)
+app.MapTokenEndpoint();
+app.MapOAuthMetadataEndpoint();
+
+// Seed development data (T033)
+if (app.Environment.IsDevelopment())
+{
+#pragma warning disable CA2007 // ConfigureAwait not needed in main method
+    await DatabaseSeeder.SeedDevelopmentDataAsync(app.Services, app.Logger);
+#pragma warning restore CA2007
+}
+
+#pragma warning disable CA1849 // Calling Run() is acceptable for main entry point
 app.Run();
+#pragma warning restore CA1849
 
 // Make Program class accessible to integration/contract tests
 #pragma warning disable CA1515 // Program class must be public for WebApplicationFactory testing

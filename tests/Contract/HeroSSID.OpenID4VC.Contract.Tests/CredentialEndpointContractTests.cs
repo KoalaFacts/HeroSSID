@@ -13,6 +13,43 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
     private readonly HttpClient _client = factory.CreateClient();
 
     /// <summary>
+    /// Helper method to obtain OAuth access token for testing
+    /// </summary>
+#pragma warning disable CA2007 // ConfigureAwait not needed in test code
+    private async Task<string> GetAccessTokenAsync(string scope = "credential:issue credential:verify")
+    {
+        using var tokenRequest = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = "client_credentials",
+            ["client_id"] = "test_client",
+            ["client_secret"] = "test_secret",
+            ["scope"] = scope
+        });
+
+        var tokenResponse = await _client.PostAsync("/oauth2/token", tokenRequest);
+        var tokenResult = await tokenResponse.Content.ReadFromJsonAsync<dynamic>();
+        return tokenResult?.GetProperty("access_token").GetString()
+            ?? throw new InvalidOperationException("Access token not found");
+    }
+
+    /// <summary>
+    /// Helper method to POST JSON with OAuth authentication
+    /// </summary>
+    private async Task<HttpResponseMessage> PostAsJsonWithAuthAsync<T>(string requestUri, T value, string? accessToken = null)
+    {
+        accessToken ??= await GetAccessTokenAsync();
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, requestUri)
+        {
+            Content = JsonContent.Create(value)
+        };
+        request.Headers.Add("Authorization", $"Bearer {accessToken}");
+
+        return await _client.SendAsync(request);
+    }
+#pragma warning restore CA2007
+
+    /// <summary>
     /// T036: Contract test - POST /api/v1/credentials/issue returns JWT-VC with 201 status
     /// </summary>
     [Fact]
@@ -55,8 +92,8 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
             }
         };
 
-        // Act
-        var response = await _client.PostAsJsonAsync("/api/v1/credentials/issue", issueRequest);
+        // Act - Use OAuth authentication
+        var response = await PostAsJsonWithAuthAsync("/api/v1/credentials/issue", issueRequest);
 
         // Assert
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -101,7 +138,7 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
             CredentialType = "UniversityDegreeCredential",
             Claims = new { degree = new { type = "BachelorDegree" } }
         };
-        var issueResponse = await _client.PostAsJsonAsync("/api/v1/credentials/issue", issueRequest);
+        var issueResponse = await PostAsJsonWithAuthAsync("/api/v1/credentials/issue", issueRequest);
         var issueResult = await issueResponse.Content.ReadFromJsonAsync<dynamic>();
         string credential = issueResult?.GetProperty("credential").GetString()
             ?? throw new InvalidOperationException("Credential not found");
@@ -111,8 +148,8 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
             Credential = credential
         };
 
-        // Act
-        var response = await _client.PostAsJsonAsync("/api/v1/credentials/verify", verifyRequest);
+        // Act - Use OAuth authentication
+        var response = await PostAsJsonWithAuthAsync("/api/v1/credentials/verify", verifyRequest);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -141,8 +178,8 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
             Claims = new { }
         };
 
-        // Act
-        var response = await _client.PostAsJsonAsync("/api/v1/credentials/issue", issueRequest);
+        // Act - Use OAuth authentication
+        var response = await PostAsJsonWithAuthAsync("/api/v1/credentials/issue", issueRequest);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -198,7 +235,7 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
             CredentialType = "UniversityDegreeCredential",
             Claims = new { degree = new { type = "BachelorDegree" } }
         };
-        var issueResponse = await _client.PostAsJsonAsync("/api/v1/credentials/issue", issueRequest);
+        var issueResponse = await PostAsJsonWithAuthAsync("/api/v1/credentials/issue", issueRequest);
         var issueResult = await issueResponse.Content.ReadFromJsonAsync<dynamic>();
         string credential = issueResult?.GetProperty("credential").GetString()
             ?? throw new InvalidOperationException("Credential not found");
@@ -212,8 +249,8 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
             Credential = tamperedCredential
         };
 
-        // Act
-        var response = await _client.PostAsJsonAsync("/api/v1/credentials/verify", verifyRequest);
+        // Act - Use OAuth authentication
+        var response = await PostAsJsonWithAuthAsync("/api/v1/credentials/verify", verifyRequest);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
