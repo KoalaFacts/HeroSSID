@@ -15,11 +15,7 @@ namespace HeroSSID.Credentials.Implementations;
 /// This implementation uses the HeroSD-JWT library (https://github.com/KoalaFacts/HeroSD-JWT)
 /// to provide proper hash-based selective disclosure verification per IETF draft-22.
 ///
-/// Verifiers use this to validate SD-JWT credentials and reconstruct disclosed claims.
-///
-/// CRYPTOGRAPHY NOTE:
-/// This verifier expects HMAC-signed SD-JWTs to match the generator implementation.
-/// For ECDSA-signed SD-JWTs, update to use ECDSA public keys.
+/// Uses Ed25519 (EdDSA) for signature verification, consistent with HeroSSID's primary signing algorithm.
 /// </remarks>
 public sealed class HeroSdJwtVerifier : ISdJwtVerifier
 {
@@ -28,11 +24,11 @@ public sealed class HeroSdJwtVerifier : ISdJwtVerifier
     /// </summary>
     /// <param name="compactSdJwt">SD-JWT in compact format: jwt~disclosure1~disclosure2~...~</param>
     /// <param name="selectedDisclosures">Disclosure tokens selected by holder for this presentation (currently unused - disclosures embedded in compactSdJwt)</param>
-    /// <param name="issuerPublicKey">HMAC shared secret for verification (used as HMAC key)</param>
+    /// <param name="issuerPublicKey">Ed25519 public key for signature verification (32 bytes)</param>
     /// <returns>Verification result with reconstructed claims</returns>
     /// <remarks>
     /// This implementation:
-    /// 1. Verifies JWT signature using issuer's key
+    /// 1. Verifies Ed25519 (EdDSA) signature using issuer's public key
     /// 2. Validates disclosure tokens against JWT hash digests (_sd array)
     /// 3. Reconstructs full credential with disclosed claims only
     ///
@@ -53,7 +49,7 @@ public sealed class HeroSdJwtVerifier : ISdJwtVerifier
             // Create verifier instance
             var verifier = new SdJwtVerifier();
 
-            // Verify the presentation using HMAC
+            // Verify the presentation using Ed25519
             // The compactSdJwt contains: jwt~disclosure1~disclosure2~...~
             var result = verifier.VerifyPresentation(compactSdJwt, issuerPublicKey);
 

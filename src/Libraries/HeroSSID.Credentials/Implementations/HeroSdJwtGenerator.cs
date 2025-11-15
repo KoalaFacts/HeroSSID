@@ -15,15 +15,7 @@ namespace HeroSSID.Credentials.Implementations;
 /// This implementation uses the HeroSD-JWT library (https://github.com/KoalaFacts/HeroSD-JWT)
 /// to provide proper hash-based selective disclosure capabilities per IETF draft-22.
 ///
-/// CRYPTOGRAPHY NOTE:
-/// HeroSD-JWT supports HMAC (HS256), RSA (RS256), and ECDSA (ES256) signing algorithms.
-/// HeroSSID primarily uses Ed25519 (EdDSA) which is not directly supported by HeroSD-JWT v1.1.3.
-///
-/// Current implementation uses HMAC (HS256) as a compatible fallback.
-/// For production use with DIDs, consider:
-/// 1. Using ECDSA (ES256) with P-256 keys for SD-JWT credentials
-/// 2. Converting keys or using separate key pairs for SD-JWT vs regular JWTs
-/// 3. Requesting EdDSA support from HeroSD-JWT maintainers
+/// Uses Ed25519 (EdDSA) for signing, consistent with HeroSSID's primary signing algorithm.
 /// </remarks>
 public sealed class HeroSdJwtGenerator : ISdJwtGenerator
 {
@@ -32,7 +24,7 @@ public sealed class HeroSdJwtGenerator : ISdJwtGenerator
     /// </summary>
     /// <param name="claims">All claims to include in the credential</param>
     /// <param name="selectiveDisclosureClaims">Claims that should support selective disclosure (will be hashed)</param>
-    /// <param name="signingKey">Signing key bytes (used as HMAC key)</param>
+    /// <param name="signingKey">Ed25519 private key bytes (32 bytes, seed format)</param>
     /// <param name="issuerDid">DID identifier of the issuer</param>
     /// <param name="holderDid">DID identifier of the holder</param>
     /// <returns>SD-JWT result with compact format and disclosure tokens</returns>
@@ -41,6 +33,7 @@ public sealed class HeroSdJwtGenerator : ISdJwtGenerator
     /// - Hash-based claim disclosures per IETF draft-22
     /// - _sd array in JWT payload containing SHA-256 digests
     /// - Separate disclosure tokens for selective presentation
+    /// - Ed25519 (EdDSA) signatures for cryptographic verification
     /// </remarks>
     public SdJwtResult GenerateSdJwt(
         Dictionary<string, object> claims,
@@ -72,9 +65,8 @@ public sealed class HeroSdJwtGenerator : ISdJwtGenerator
             builder = builder.MakeSelective(selectiveClaim);
         }
 
-        // Sign with HMAC (HS256) - using signing key as HMAC secret
-        // NOTE: For production with DIDs, consider using ECDSA (ES256) instead
-        var sdJwt = builder.SignWithHmac(signingKey).Build();
+        // Sign with Ed25519 (EdDSA) - consistent with HeroSSID's primary signing algorithm
+        var sdJwt = builder.SignWithEd25519(signingKey).Build();
 
         // Extract disclosures and digests using reflection
         // (HeroSD-JWT's SdJwt object structure may vary across versions)

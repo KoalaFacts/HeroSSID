@@ -4,9 +4,7 @@ This document describes the integration of the HeroSD-JWT NuGet package (v1.1.3)
 
 ## Overview
 
-The HeroSD-JWT package (https://github.com/KoalaFacts/HeroSD-JWT) implements the IETF draft-ietf-oauth-selective-disclosure-jwt specification, providing hash-based selective disclosure capabilities for JWTs.
-
-**🎉 Note**: HeroSD-JWT is actively developing Ed25519 (EdDSA) support, which will enable seamless integration with HeroSSID's existing Ed25519 cryptography infrastructure.
+The HeroSD-JWT package (https://github.com/KoalaFacts/HeroSD-JWT) implements the IETF draft-ietf-oauth-selective-disclosure-jwt specification, providing hash-based selective disclosure capabilities for JWTs with Ed25519 (EdDSA) signature support.
 
 ## What Changed
 
@@ -51,27 +49,13 @@ The HeroSD-JWT integration provides:
 
 ## Cryptography
 
-**Current Implementation**: The integration uses HMAC (HS256) for signing SD-JWT credentials. This provides a compatible fallback that works with HeroSSID's existing byte[] key infrastructure.
+The integration uses **Ed25519 (EdDSA)** for signing SD-JWT credentials, consistent with HeroSSID's primary cryptographic algorithm. This ensures:
 
-**Future**: Once HeroSD-JWT releases Ed25519 support, the implementation can be easily updated to use Ed25519, matching HeroSSID's primary cryptographic algorithm.
-
-See [`docs/CRYPTOGRAPHY-CONSIDERATIONS.md`](CRYPTOGRAPHY-CONSIDERATIONS.md) for detailed information about cryptographic options and migration paths.
+- Uniform cryptography across all JWT operations (regular JWTs and SD-JWTs)
+- High-performance elliptic curve signatures
+- Compatibility with HeroSSID's DID infrastructure (did:key with Ed25519)
 
 ## Testing the Integration
-
-### Quick Test
-
-Run the integration test script:
-
-```bash
-./test-herosd-jwt-integration.sh
-```
-
-This script will:
-- Restore the HeroSD-JWT v1.0.7 package from NuGet
-- Build the solution
-- Run all unit, integration, and contract tests
-- Report success or show errors
 
 ### Manual Testing
 
@@ -88,7 +72,7 @@ The existing unit and integration tests work with the new implementation since t
 
 ## Implementation Details
 
-The integration uses the real HeroSD-JWT v1.0.7 API:
+The integration uses the real HeroSD-JWT v1.1.3 API with Ed25519 signing:
 
 **Generation**:
 ```csharp
@@ -97,14 +81,14 @@ var sdJwt = SdJwtBuilder.Create()
     .WithClaim("sub", holderDid)
     .WithClaim("email", "user@example.com")
     .MakeSelective("email")
-    .SignWithHmac(signingKey)
+    .SignWithEd25519(privateKeyBytes)  // 32-byte Ed25519 private key
     .Build();
 ```
 
 **Verification**:
 ```csharp
 var verifier = new SdJwtVerifier();
-var result = verifier.VerifyPresentation(compactSdJwt, key);
+var result = verifier.VerifyPresentation(compactSdJwt, publicKeyBytes);  // 32-byte Ed25519 public key
 var email = result.DisclosedClaims["email"];
 ```
 
@@ -139,6 +123,6 @@ If you encounter issues with the integration:
 
 ---
 
-**Last Updated**: 2025-11-14
+**Last Updated**: 2025-11-15
 **Version**: HeroSD-JWT v1.1.3
-**Status**: ✅ Production Integration Complete - Using HMAC (HS256), Ed25519 support coming soon
+**Status**: ✅ Production Integration Complete - Using Ed25519 (EdDSA)

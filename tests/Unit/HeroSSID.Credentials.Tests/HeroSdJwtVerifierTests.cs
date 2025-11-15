@@ -1,28 +1,35 @@
 using HeroSSID.Credentials.Implementations;
 using HeroSSID.Credentials.SdJwt;
+using NSec.Cryptography;
 using System;
 using System.Collections.Generic;
-using System.Text;
 using Xunit;
 
 namespace HeroSSID.Credentials.Tests;
 
 /// <summary>
 /// Integration tests for HeroSdJwtVerifier using real HeroSD-JWT NuGet package v1.1.3
-/// Tests the production implementation against the ISdJwtVerifier interface
+/// Tests the production implementation against the ISdJwtVerifier interface with Ed25519 verification
 /// </summary>
 public sealed class HeroSdJwtVerifierTests
 {
     private readonly HeroSdJwtGenerator _generator;
     private readonly HeroSdJwtVerifier _verifier;
-    private readonly byte[] _testHmacKey;
+    private readonly byte[] _testEd25519PrivateKey;
+    private readonly byte[] _testEd25519PublicKey;
 
     public HeroSdJwtVerifierTests()
     {
         _generator = new HeroSdJwtGenerator();
         _verifier = new HeroSdJwtVerifier();
-        // Generate a 256-bit HMAC key for HS256
-        _testHmacKey = Encoding.UTF8.GetBytes("test-secret-key-that-is-at-least-256-bits-long-for-hmac-sha256");
+
+        // Generate Ed25519 key pair for testing
+        var algorithm = SignatureAlgorithm.Ed25519;
+        var keyParams = new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport };
+        using var key = Key.Create(algorithm, keyParams);
+
+        _testEd25519PrivateKey = key.Export(KeyBlobFormat.RawPrivateKey);
+        _testEd25519PublicKey = key.PublicKey.Export(KeyBlobFormat.RawPublicKey);
     }
 
     [Fact]
@@ -42,7 +49,7 @@ public sealed class HeroSdJwtVerifierTests
         var sdJwtResult = _generator.GenerateSdJwt(
             claims,
             selectiveDisclosureClaims,
-            _testHmacKey,
+            _testEd25519PrivateKey,
             issuerDid,
             holderDid);
 
@@ -50,7 +57,7 @@ public sealed class HeroSdJwtVerifierTests
         var verificationResult = _verifier.VerifySdJwt(
             sdJwtResult.CompactSdJwt,
             sdJwtResult.DisclosureTokens,
-            _testHmacKey);
+            _testEd25519PublicKey);
 
         // Assert
         Assert.NotNull(verificationResult);
@@ -76,7 +83,7 @@ public sealed class HeroSdJwtVerifierTests
         var sdJwtResult = _generator.GenerateSdJwt(
             claims,
             selectiveDisclosureClaims,
-            _testHmacKey,
+            _testEd25519PrivateKey,
             issuerDid,
             holderDid);
 
@@ -84,7 +91,7 @@ public sealed class HeroSdJwtVerifierTests
         var verificationResult = _verifier.VerifySdJwt(
             sdJwtResult.CompactSdJwt,
             sdJwtResult.DisclosureTokens,
-            _testHmacKey);
+            _testEd25519PublicKey);
 
         // Assert
         Assert.NotNull(verificationResult.DisclosedClaims);
@@ -106,18 +113,21 @@ public sealed class HeroSdJwtVerifierTests
         var sdJwtResult = _generator.GenerateSdJwt(
             claims,
             selectiveDisclosureClaims,
-            _testHmacKey,
+            _testEd25519PrivateKey,
             issuerDid,
             holderDid);
 
-        // Use different key for verification
-        var wrongKey = Encoding.UTF8.GetBytes("wrong-secret-key-that-is-at-least-256-bits-long-for-hmac-sha256-test");
+        // Generate different Ed25519 key pair for verification (wrong key)
+        var algorithm = SignatureAlgorithm.Ed25519;
+        var keyParams = new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport };
+        using var wrongKey = Key.Create(algorithm, keyParams);
+        var wrongPublicKey = wrongKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
 
         // Act - Verify with wrong key
         var verificationResult = _verifier.VerifySdJwt(
             sdJwtResult.CompactSdJwt,
             sdJwtResult.DisclosureTokens,
-            wrongKey);
+            wrongPublicKey);
 
         // Assert
         Assert.False(verificationResult.IsValid);
@@ -136,7 +146,7 @@ public sealed class HeroSdJwtVerifierTests
         var verificationResult = _verifier.VerifySdJwt(
             malformedSdJwt,
             disclosures,
-            _testHmacKey);
+            _testEd25519PublicKey);
 
         // Assert
         Assert.False(verificationResult.IsValid);
@@ -152,7 +162,7 @@ public sealed class HeroSdJwtVerifierTests
 
         // Act & Assert
         Assert.Throws<ArgumentException>(() =>
-            _verifier.VerifySdJwt(emptySdJwt, disclosures, _testHmacKey));
+            _verifier.VerifySdJwt(emptySdJwt, disclosures, _testEd25519PublicKey));
     }
 
     [Fact]
@@ -198,7 +208,7 @@ public sealed class HeroSdJwtVerifierTests
         var sdJwtResult = _generator.GenerateSdJwt(
             claims,
             selectiveDisclosureClaims,
-            _testHmacKey,
+            _testEd25519PrivateKey,
             issuerDid,
             holderDid);
 
@@ -206,7 +216,7 @@ public sealed class HeroSdJwtVerifierTests
         var verificationResult = _verifier.VerifySdJwt(
             sdJwtResult.CompactSdJwt,
             sdJwtResult.DisclosureTokens,
-            _testHmacKey);
+            _testEd25519PublicKey);
 
         // Assert
         Assert.True(verificationResult.IsValid);
@@ -241,14 +251,14 @@ public sealed class HeroSdJwtVerifierTests
         var sdJwtResult = _generator.GenerateSdJwt(
             claims,
             selectiveDisclosureClaims,
-            _testHmacKey,
+            _testEd25519PrivateKey,
             issuerDid,
             holderDid);
 
         var verificationResult = _verifier.VerifySdJwt(
             sdJwtResult.CompactSdJwt,
             sdJwtResult.DisclosureTokens,
-            _testHmacKey);
+            _testEd25519PublicKey);
 
         // Assert
         Assert.True(verificationResult.IsValid);

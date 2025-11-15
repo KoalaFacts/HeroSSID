@@ -1,27 +1,34 @@
 using HeroSSID.Credentials.Implementations;
 using HeroSSID.Credentials.SdJwt;
+using NSec.Cryptography;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using Xunit;
 
 namespace HeroSSID.Credentials.Tests;
 
 /// <summary>
 /// Integration tests for HeroSdJwtGenerator using real HeroSD-JWT NuGet package v1.1.3
-/// Tests the production implementation against the ISdJwtGenerator interface
+/// Tests the production implementation against the ISdJwtGenerator interface with Ed25519 signing
 /// </summary>
 public sealed class HeroSdJwtGeneratorTests
 {
     private readonly HeroSdJwtGenerator _generator;
-    private readonly byte[] _testHmacKey;
+    private readonly byte[] _testEd25519PrivateKey;
+    private readonly byte[] _testEd25519PublicKey;
 
     public HeroSdJwtGeneratorTests()
     {
         _generator = new HeroSdJwtGenerator();
-        // Generate a 256-bit HMAC key for HS256
-        _testHmacKey = Encoding.UTF8.GetBytes("test-secret-key-that-is-at-least-256-bits-long-for-hmac-sha256");
+
+        // Generate Ed25519 key pair for testing
+        var algorithm = SignatureAlgorithm.Ed25519;
+        var keyParams = new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport };
+        using var key = Key.Create(algorithm, keyParams);
+
+        _testEd25519PrivateKey = key.Export(KeyBlobFormat.RawPrivateKey);
+        _testEd25519PublicKey = key.PublicKey.Export(KeyBlobFormat.RawPublicKey);
     }
 
     [Fact]
@@ -42,7 +49,7 @@ public sealed class HeroSdJwtGeneratorTests
         var result = _generator.GenerateSdJwt(
             claims,
             selectiveDisclosureClaims,
-            _testHmacKey,
+            _testEd25519PrivateKey,
             issuerDid,
             holderDid);
 
@@ -80,7 +87,7 @@ public sealed class HeroSdJwtGeneratorTests
         var result = _generator.GenerateSdJwt(
             claims,
             selectiveDisclosureClaims,
-            _testHmacKey,
+            _testEd25519PrivateKey,
             issuerDid,
             holderDid);
 
@@ -109,7 +116,7 @@ public sealed class HeroSdJwtGeneratorTests
         var result = _generator.GenerateSdJwt(
             claims,
             selectiveDisclosureClaims,
-            _testHmacKey,
+            _testEd25519PrivateKey,
             issuerDid,
             holderDid);
 
@@ -228,7 +235,7 @@ public sealed class HeroSdJwtGeneratorTests
         var result = _generator.GenerateSdJwt(
             claims,
             selectiveDisclosureClaims,
-            _testHmacKey,
+            _testEd25519PrivateKey,
             issuerDid,
             holderDid);
 
