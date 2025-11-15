@@ -1,6 +1,6 @@
 # HeroSD-JWT Integration
 
-This document describes the integration of the HeroSD-JWT NuGet package (v1.0.7) into HeroSSID for production-ready SD-JWT (Selective Disclosure JWT) functionality.
+This document describes the integration of the HeroSD-JWT NuGet package (v1.1.3) into HeroSSID for production-ready SD-JWT (Selective Disclosure JWT) functionality.
 
 ## Overview
 
@@ -12,10 +12,10 @@ The HeroSD-JWT package (https://github.com/KoalaFacts/HeroSD-JWT) implements the
 
 ### 1. Package Reference Added
 
-Added HeroSD-JWT NuGet package v1.0.7 to `HeroSSID.Credentials.csproj`:
+Added HeroSD-JWT NuGet package v1.1.3 to `HeroSSID.Credentials.csproj`:
 
 ```xml
-<PackageReference Include="HeroSD-JWT" Version="1.0.7" />
+<PackageReference Include="HeroSD-JWT" Version="1.1.3" />
 ```
 
 ### 2. Production Implementations Created
@@ -139,6 +139,6 @@ If you encounter issues with the integration:
 
 ---
 
-**Last Updated**: 2025-11-03
-**Version**: HeroSD-JWT v1.0.7
+**Last Updated**: 2025-11-14
+**Version**: HeroSD-JWT v1.1.3
 **Status**: ✅ Production Integration Complete - Using HMAC (HS256), Ed25519 support coming soon

@@ -8,7 +8,7 @@ using System.Reflection;
 namespace HeroSSID.Credentials.Implementations;
 
 /// <summary>
-/// Production implementation of ISdJwtGenerator using HeroSD-JWT NuGet package v1.0.7
+/// Production implementation of ISdJwtGenerator using HeroSD-JWT NuGet package v1.1.3
 /// Implements IETF draft-ietf-oauth-selective-disclosure-jwt specification
 /// </summary>
 /// <remarks>
@@ -17,7 +17,7 @@ namespace HeroSSID.Credentials.Implementations;
 ///
 /// CRYPTOGRAPHY NOTE:
 /// HeroSD-JWT supports HMAC (HS256), RSA (RS256), and ECDSA (ES256) signing algorithms.
-/// HeroSSID primarily uses Ed25519 (EdDSA) which is not directly supported by HeroSD-JWT v1.0.7.
+/// HeroSSID primarily uses Ed25519 (EdDSA) which is not directly supported by HeroSD-JWT v1.1.3.
 ///
 /// Current implementation uses HMAC (HS256) as a compatible fallback.
 /// For production use with DIDs, consider:

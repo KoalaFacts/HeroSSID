@@ -8,7 +8,7 @@ using System.Reflection;
 namespace HeroSSID.Credentials.Implementations;
 
 /// <summary>
-/// Production implementation of ISdJwtVerifier using HeroSD-JWT NuGet package v1.0.7
+/// Production implementation of ISdJwtVerifier using HeroSD-JWT NuGet package v1.1.3
 /// Implements IETF draft-ietf-oauth-selective-disclosure-jwt specification
 /// </summary>
 /// <remarks>
