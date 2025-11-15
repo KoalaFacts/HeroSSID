@@ -64,7 +64,7 @@ public sealed class MockSdJwtGenerator : ISdJwtGenerator
         });
 
         // Sign the JWT
-        var jwt = Ed25519JwtSigner.CreateSignedJwt(header, payload, signingKey);
+        var jwt = Ed25519JwtHelper.CreateSignedJwt(header, payload, signingKey);
 
         // MOCK: Return empty disclosure tokens (real implementation will have actual disclosures)
         // Format would be: jwt~disclosure1~disclosure2~...~

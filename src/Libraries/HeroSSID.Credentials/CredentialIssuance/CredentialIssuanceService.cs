@@ -272,7 +272,7 @@ public sealed class CredentialIssuanceService : ICredentialIssuanceService
             });
 
             // Sign the JWT with Ed25519
-            var jwt = Utilities.Ed25519JwtSigner.CreateSignedJwt(header, payload, privateKeyBytes);
+            var jwt = Utilities.Ed25519JwtHelper.CreateSignedJwt(header, payload, privateKeyBytes);
 
             return jwt;
         }

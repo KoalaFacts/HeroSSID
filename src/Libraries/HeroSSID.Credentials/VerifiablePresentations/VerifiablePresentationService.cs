@@ -93,7 +93,7 @@ public sealed class VerifiablePresentationService : IVerifiablePresentationServi
         }
 
         // Parse credential JWT to extract claims
-        var payload = Ed25519JwtSigner.ExtractPayload(credentialJwt);
+        var payload = Ed25519JwtHelper.ExtractPayload(credentialJwt);
         var payloadDoc = JsonDocument.Parse(payload);
 
         // Extract credential subject claims
@@ -175,7 +175,7 @@ public sealed class VerifiablePresentationService : IVerifiablePresentationServi
 
         // Extract issuer DID from presentation to look up public key
         var jwtPart = presentationJwt.Split('~')[0];
-        var payload = Ed25519JwtSigner.ExtractPayload(jwtPart);
+        var payload = Ed25519JwtHelper.ExtractPayload(jwtPart);
         var payloadDoc = JsonDocument.Parse(payload);
 
         string? issuerDidIdentifier = null;

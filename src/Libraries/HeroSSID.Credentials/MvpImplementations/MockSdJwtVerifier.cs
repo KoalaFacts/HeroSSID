@@ -37,7 +37,7 @@ public sealed class MockSdJwtVerifier : ISdJwtVerifier
         var jwtPart = compactSdJwt.Split('~')[0];
 
         // Verify JWT signature
-        var isSignatureValid = Ed25519JwtSigner.VerifySignedJwt(jwtPart, issuerPublicKey);
+        var isSignatureValid = Ed25519JwtHelper.VerifySignedJwt(jwtPart, issuerPublicKey);
 
         if (!isSignatureValid)
         {
@@ -52,7 +52,7 @@ public sealed class MockSdJwtVerifier : ISdJwtVerifier
         // Parse JWT payload to extract claims
         try
         {
-            var payloadJson = Ed25519JwtSigner.ExtractPayload(jwtPart);
+            var payloadJson = Ed25519JwtHelper.ExtractPayload(jwtPart);
             var payload = JsonDocument.Parse(payloadJson);
 
             string? issuerDid = null;

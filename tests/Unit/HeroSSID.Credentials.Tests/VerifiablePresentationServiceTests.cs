@@ -50,7 +50,7 @@ public sealed class VerifiablePresentationServiceTests : IDisposable
         var keyParams = new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport };
         using var key = Key.Create(algorithm, keyParams);
         var rawPrivateKey = key.Export(KeyBlobFormat.RawPrivateKey); // 64 bytes
-        _testPrivateKey = rawPrivateKey[..32]; // Extract seed (first 32 bytes) for Ed25519JwtSigner
+        _testPrivateKey = rawPrivateKey[..32]; // Extract seed (first 32 bytes) for Ed25519JwtHelper
         _testPublicKey = key.PublicKey.Export(KeyBlobFormat.RawPublicKey);
     }
 
@@ -209,7 +209,7 @@ public sealed class VerifiablePresentationServiceTests : IDisposable
             }
         });
 
-        return Utilities.Ed25519JwtSigner.CreateSignedJwt(header, payload, _testPrivateKey);
+        return Utilities.Ed25519JwtHelper.CreateSignedJwt(header, payload, _testPrivateKey);
     }
 
     private async Task SeedTestDataAsync()

@@ -273,7 +273,7 @@ public sealed class CredentialVerificationServiceTests : IDisposable
             }
         });
 
-        return Ed25519JwtSigner.CreateSignedJwt(header, payload, _testPrivateKey);
+        return Ed25519JwtHelper.CreateSignedJwt(header, payload, _testPrivateKey);
     }
 
     private string CreateTestJwtWithExpiration(DateTimeOffset expiration)
@@ -294,7 +294,7 @@ public sealed class CredentialVerificationServiceTests : IDisposable
             }
         });
 
-        return Ed25519JwtSigner.CreateSignedJwt(header, payload, _testPrivateKey);
+        return Ed25519JwtHelper.CreateSignedJwt(header, payload, _testPrivateKey);
     }
 
     private async Task SeedTestIssuerDidAsync()

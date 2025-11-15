@@ -167,7 +167,7 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
         // Validate JWT header
         try
         {
-            var headerJson = Ed25519JwtSigner.ExtractHeader(credentialJwt);
+            var headerJson = Ed25519JwtHelper.ExtractHeader(credentialJwt);
             var headerDocument = JsonDocument.Parse(headerJson);
 
             // SECURITY: Strict header validation to prevent JWT confusion attacks
@@ -247,7 +247,7 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
 
         try
         {
-            var payloadJson = Ed25519JwtSigner.ExtractPayload(credentialJwt);
+            var payloadJson = Ed25519JwtHelper.ExtractPayload(credentialJwt);
             var payloadDocument = JsonDocument.Parse(payloadJson);
 
             // Extract issuer DID
@@ -396,7 +396,7 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
         }
 
         // T028: Verify Ed25519 signature
-        var isSignatureValid = Ed25519JwtSigner.VerifySignedJwt(
+        var isSignatureValid = Ed25519JwtHelper.VerifySignedJwt(
             credentialJwt,
             issuerDidEntity.PublicKeyEd25519);
 
