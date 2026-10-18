@@ -391,6 +391,15 @@ public sealed class DidCreationService(
             rng.GetBytes(entropyTest);
         }
 
+        ValidateEntropySample(entropyTest);
+    }
+
+    // ValidateSystemEntropy supplies exactly 256 bytes. Keep sample validation
+    // separate so its existing boundaries can be characterized deterministically.
+    private static void ValidateEntropySample(byte[] entropyTest)
+    {
+        const int sampleSize = 256;
+
         // Check for obvious patterns indicating poor entropy:
         // 1. All bytes are the same (complete failure)
         if (entropyTest.All(b => b == entropyTest[0]))
