@@ -168,10 +168,20 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
         try
         {
             var headerJson = Ed25519JwtSigner.ExtractHeader(credentialJwt);
-            var headerDocument = JsonDocument.Parse(headerJson);
+            using var headerDocument = JsonDocument.Parse(headerJson);
+
+            if (headerDocument.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                var result = CreateFailedResult(
+                    VerificationStatus.MalformedJwt,
+                    "JWT header must be a JSON object");
+                LogVerificationFailure(result.Status);
+                return result;
+            }
 
             // SECURITY: Strict header validation to prevent JWT confusion attacks
             if (!headerDocument.RootElement.TryGetProperty(TypeClaim, out var typ) ||
+                typ.ValueKind != JsonValueKind.String ||
                 typ.GetString() != ExpectedType)
             {
                 var result = CreateFailedResult(
@@ -182,6 +192,7 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
             }
 
             if (!headerDocument.RootElement.TryGetProperty(AlgorithmClaim, out var alg) ||
+                alg.ValueKind != JsonValueKind.String ||
                 alg.GetString() != ExpectedAlgorithm)
             {
                 var result = CreateFailedResult(
@@ -248,7 +259,16 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
         try
         {
             var payloadJson = Ed25519JwtSigner.ExtractPayload(credentialJwt);
-            var payloadDocument = JsonDocument.Parse(payloadJson);
+            using var payloadDocument = JsonDocument.Parse(payloadJson);
+
+            if (payloadDocument.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                var result = CreateFailedResult(
+                    VerificationStatus.MalformedJwt,
+                    "JWT payload must be a JSON object");
+                LogVerificationFailure(result.Status);
+                return result;
+            }
 
             // Extract issuer DID
             if (!payloadDocument.RootElement.TryGetProperty(IssuerClaim, out var issElement))
@@ -256,6 +276,14 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
                 var result = CreateFailedResult(
                     VerificationStatus.MalformedJwt,
                     "JWT payload missing required issuer claim");
+                LogVerificationFailure(result.Status);
+                return result;
+            }
+            if (issElement.ValueKind != JsonValueKind.String && issElement.ValueKind != JsonValueKind.Null)
+            {
+                var result = CreateFailedResult(
+                    VerificationStatus.MalformedJwt,
+                    "JWT issuer claim must be a string");
                 LogVerificationFailure(result.Status);
                 return result;
             }
@@ -280,7 +308,8 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
                     // Null expiration means credential doesn't expire - this is valid
                     expiresAt = null;
                 }
-                else if (expElement.TryGetInt64(out var expUnix) &&
+                else if (expElement.ValueKind == JsonValueKind.Number &&
+                    expElement.TryGetInt64(out var expUnix) &&
                     expUnix >= MinValidTimestamp &&
                     expUnix <= MaxValidTimestamp)
                 {
@@ -300,6 +329,14 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
             credentialSubject = null;
             if (payloadDocument.RootElement.TryGetProperty(VerifiableCredentialClaim, out var vcElement))
             {
+                if (vcElement.ValueKind != JsonValueKind.Object)
+                {
+                    var result = CreateFailedResult(
+                        VerificationStatus.MalformedJwt,
+                        "Verifiable credential must be a JSON object");
+                    LogVerificationFailure(result.Status);
+                    return result;
+                }
                 if (vcElement.TryGetProperty(CredentialSubjectClaim, out var csElement))
                 {
                     var csJson = csElement.GetRawText();
