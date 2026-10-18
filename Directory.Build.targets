@@ -1,0 +1,11 @@
+<Project>
+  <!-- Opt-in CI analysis uses the current SDK compiler, not the legacy runner's Roslyn. -->
+  <PropertyGroup Condition="'$(EnableSecurityScan)' == 'true' and '$(IsTestProject)' != 'true' and !$(MSBuildProjectName.EndsWith('.Tests'))">
+    <RunAnalyzersDuringBuild>true</RunAnalyzersDuringBuild>
+    <ErrorLog>$(MSBuildProjectDirectory)/obj/security-scan.sarif,version=2.1</ErrorLog>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(EnableSecurityScan)' == 'true' and '$(IsTestProject)' != 'true' and !$(MSBuildProjectName.EndsWith('.Tests'))">
+    <PackageReference Include="SecurityCodeScan.VS2019" Version="5.6.7" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

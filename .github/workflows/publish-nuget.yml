@@ -123,6 +123,7 @@ jobs:
         run: dotnet restore
 
       - name: Run dependency vulnerability scan
+        shell: bash
         run: |
           dotnet list package --vulnerable --include-transitive 2>&1 | tee vulnerability-report.txt
           if grep -q "has the following vulnerable packages" vulnerability-report.txt; then
@@ -132,13 +133,11 @@ jobs:
           fi
           echo "No vulnerable packages detected."
 
-      - name: Install security scanning tools
-        run: |
-          dotnet tool install --global security-scan --version 5.6.7 || true
-
       - name: Run security analysis
+        shell: bash
         run: |
-          security-scan HeroSSID.sln --excl-proj=**/*Tests.csproj --verbose || echo "Security scan completed"
+          dotnet build HeroSSID.sln --configuration Release --no-incremental --disable-build-servers -m:1 \
+            -p:EnableSecurityScan=true 2>&1 | tee security-scan.log
 
       - name: Upload security scan results
         if: always()
@@ -147,7 +146,8 @@ jobs:
           name: security-scan-results
           path: |
             vulnerability-report.txt
-            SecurityReport.html
+            **/obj/security-scan.sarif
+            security-scan.log
           retention-days: 90
 
   release:
