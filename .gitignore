@@ -231,3 +231,7 @@ RUNNING-*.md
 # Windows null device files
 nul
 NUL
+
+# Credential endpoint source is application code, not a local credentials directory.
+!src/Services/HeroSSID.Api/Features/Credentials/
+!src/Services/HeroSSID.Api/Features/Credentials/*.cs

@@ -18,8 +18,7 @@ public sealed class DatabaseFixture : IAsyncLifetime
     /// </summary>
     public async ValueTask InitializeAsync()
     {
-        _postgresContainer = new PostgreSqlBuilder()
-            .WithImage("postgres:17")
+        _postgresContainer = new PostgreSqlBuilder("postgres:17")
             .WithDatabase("herossid_test")
             .WithUsername("herossid_test")
             .WithPassword("test_password")

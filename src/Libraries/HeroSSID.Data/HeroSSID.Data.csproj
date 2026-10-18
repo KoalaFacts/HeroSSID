@@ -25,18 +25,18 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.10" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.10">
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.21" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.21">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="9.0.10" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="9.0.10">
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="9.0.21" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="9.0.21">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.4" />
-    <PackageReference Include="OpenIddict.EntityFrameworkCore" Version="5.*" />
+    <PackageReference Include="OpenIddict.EntityFrameworkCore" Version="5.8.0" />
   </ItemGroup>
 
 </Project>

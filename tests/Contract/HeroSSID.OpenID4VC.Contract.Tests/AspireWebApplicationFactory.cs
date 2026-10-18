@@ -17,8 +17,7 @@ namespace HeroSSID.OpenID4VC.Contract.Tests;
 public sealed class AspireWebApplicationFactory : WebApplicationFactory<Program>, IAsyncLifetime
 #pragma warning restore CA1515
 {
-    private readonly PostgreSqlContainer _postgresContainer = new PostgreSqlBuilder()
-        .WithImage("postgres:16-alpine")
+    private readonly PostgreSqlContainer _postgresContainer = new PostgreSqlBuilder("postgres:16-alpine")
         .WithDatabase("herossid_test")
         .WithUsername("postgres")
         .WithPassword("test_password")

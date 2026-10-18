@@ -52,6 +52,7 @@ builder.Services.AddScoped<IDidResolutionService, DidResolutionService>();
 // Register Credential services
 builder.Services.AddScoped<ICredentialIssuanceService, CredentialIssuanceService>();
 builder.Services.AddScoped<ICredentialVerificationService, CredentialVerificationService>();
+builder.Services.AddScoped<ICredentialDidLookup, CredentialDidLookup>();
 
 // Add database context
 builder.Services.AddDbContext<HeroDbContext>(options =>
