@@ -1,0 +1,150 @@
+using System.Text.Json;
+using HeroSSID.Core.TenantManagement;
+using HeroSSID.Credentials.CredentialIssuance;
+using HeroSSID.Credentials.CredentialVerification;
+using HeroSSID.Credentials.Utilities;
+using Microsoft.AspNetCore.Mvc;
+
+namespace HeroSSID.Api.Features.Credentials;
+
+/// <summary>REST credential issuance and verification endpoints.</summary>
+public static class CredentialEndpoints
+{
+    public static void MapCredentialEndpoints(this IEndpointRouteBuilder app)
+    {
+        var credentials = app.MapGroup("/api/v1/credentials")
+            .WithTags("Credentials")
+            .WithOpenApi();
+
+        credentials.MapPost("/issue", IssueAsync)
+            .RequireAuthorization("RequireAuthentication")
+            .WithName("IssueCredential")
+            .WithSummary("Issue a JWT verifiable credential")
+            .Produces<IssueCredentialResponse>(StatusCodes.Status201Created)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+
+        credentials.MapPost("/verify", VerifyAsync)
+            .AllowAnonymous()
+            .WithName("VerifyCredential")
+            .WithSummary("Verify a JWT verifiable credential")
+            .Produces<VerifyCredentialResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+    }
+
+    internal static async Task<IResult> IssueAsync(
+        [FromBody] IssueCredentialRequest request,
+        [FromServices] ICredentialDidLookup didLookup,
+        [FromServices] ICredentialIssuanceService issuanceService,
+        [FromServices] ITenantContext tenantContext,
+        [FromServices] ILogger<Program> logger,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.IssuerDid) ||
+            string.IsNullOrWhiteSpace(request.HolderDid) ||
+            string.IsNullOrWhiteSpace(request.CredentialType) ||
+            request.Claims is null || request.Claims.Count == 0)
+        {
+            return InvalidRequest("IssuerDid, HolderDid, CredentialType and non-empty Claims are required.");
+        }
+
+        try
+        {
+            var issuerId = await didLookup.FindIssuerAsync(
+                request.IssuerDid, tenantContext.GetCurrentTenantId(), cancellationToken).ConfigureAwait(false);
+            var holderId = await didLookup.FindHolderAsync(request.HolderDid, cancellationToken).ConfigureAwait(false);
+            if (issuerId is null || holderId is null)
+            {
+                return InvalidRequest("The issuer or holder DID is unavailable for credential issuance.");
+            }
+
+            var credential = await issuanceService.IssueCredentialAsync(
+                tenantContext, issuerId.Value, holderId.Value, request.CredentialType, request.Claims,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            // No credential retrieval route exists, so do not advertise an invented Location URI.
+            return Results.Json(new IssueCredentialResponse(credential), statusCode: StatusCodes.Status201Created);
+        }
+        catch (ArgumentException)
+        {
+            return InvalidRequest("The credential issuance request is invalid.");
+        }
+        catch (InvalidOperationException exception) when (exception.Message == "Rate limit exceeded for credential issuance")
+        {
+            return RateLimitExceeded();
+        }
+#pragma warning disable CA1031 // Translate unexpected endpoint failures without exposing credentials or internal details.
+        catch (Exception exception) when (exception is not OperationCanceledException)
+#pragma warning restore CA1031
+        {
+            logger.LogError(exception, "Credential issuance failed");
+            return InternalError();
+        }
+    }
+
+    internal static async Task<IResult> VerifyAsync(
+        [FromBody] VerifyCredentialRequest request,
+        [FromServices] ICredentialVerificationService verificationService,
+        [FromServices] ITenantContext tenantContext,
+        [FromServices] ILogger<Program> logger,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Credential))
+        {
+            return InvalidRequest("Credential is required.");
+        }
+
+        try
+        {
+            var result = await verificationService.VerifyCredentialAsync(
+                tenantContext, request.Credential, cancellationToken).ConfigureAwait(false);
+            if (result.Status == VerificationStatus.MalformedJwt)
+            {
+                return InvalidRequest("The credential is not a supported JWT verifiable credential.");
+            }
+
+            if (!result.IsValid)
+            {
+                // The library can return parsed claims before checking the signature. Do not expose them as verified identity.
+                return Results.Ok(new VerifyCredentialResponse(false, null, null));
+            }
+
+            // Only decode the exact token that the service has successfully verified.
+            using var payload = JsonDocument.Parse(Ed25519JwtSigner.ExtractPayload(request.Credential));
+            var holderDid = payload.RootElement.TryGetProperty("sub", out var subject) && subject.ValueKind == JsonValueKind.String
+                ? subject.GetString()
+                : null;
+            return Results.Ok(new VerifyCredentialResponse(true, result.IssuerDid, holderDid));
+        }
+        catch (ArgumentException)
+        {
+            return InvalidRequest("The credential verification request is invalid.");
+        }
+        catch (InvalidOperationException exception) when (exception.Message == "Rate limit exceeded for credential verification")
+        {
+            return RateLimitExceeded();
+        }
+#pragma warning disable CA1031 // Translate unexpected endpoint failures without exposing credentials or internal details.
+        catch (Exception exception) when (exception is not OperationCanceledException)
+#pragma warning restore CA1031
+        {
+            logger.LogError(exception, "Credential verification failed");
+            return InternalError();
+        }
+    }
+
+    private static IResult InvalidRequest(string detail) => Results.Problem(
+        title: "Invalid Request", detail: detail, statusCode: StatusCodes.Status400BadRequest);
+
+    private static IResult RateLimitExceeded() => Results.Problem(
+        title: "Too Many Requests", detail: "The credential operation rate limit was exceeded.",
+        statusCode: StatusCodes.Status429TooManyRequests);
+
+    private static IResult InternalError() => Results.Problem(
+        title: "Internal Server Error", detail: "An unexpected error occurred during the credential operation.",
+        statusCode: StatusCodes.Status500InternalServerError);
+}
