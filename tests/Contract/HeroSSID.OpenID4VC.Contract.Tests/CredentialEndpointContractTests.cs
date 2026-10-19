@@ -27,9 +27,8 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
         });
 
         var tokenResponse = await _client.PostAsync("/oauth2/token", tokenRequest);
-        var tokenResult = await tokenResponse.Content.ReadFromJsonAsync<dynamic>();
-        return tokenResult?.GetProperty("access_token").GetString()
-            ?? throw new InvalidOperationException("Access token not found");
+        return await SetupResponse.ReadRequiredStringAsync(
+            tokenResponse, HttpStatusCode.OK, "Obtain OAuth access token", "access_token");
     }
 
     /// <summary>
@@ -63,9 +62,8 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
             KeyType = "Ed25519"
         };
         var issuerResponse = await _client.PostAsJsonAsync("/api/v1/dids", createIssuerDidRequest);
-        var issuerResult = await issuerResponse.Content.ReadFromJsonAsync<dynamic>();
-        string issuerDid = issuerResult?.GetProperty("did").GetString()
-            ?? throw new InvalidOperationException("Issuer DID not found");
+        var issuerDid = await SetupResponse.ReadRequiredStringAsync(
+            issuerResponse, HttpStatusCode.Created, "Create issuer DID", "did");
 
         var createHolderDidRequest = new
         {
@@ -73,9 +71,8 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
             KeyType = "Ed25519"
         };
         var holderResponse = await _client.PostAsJsonAsync("/api/v1/dids", createHolderDidRequest);
-        var holderResult = await holderResponse.Content.ReadFromJsonAsync<dynamic>();
-        string holderDid = holderResult?.GetProperty("did").GetString()
-            ?? throw new InvalidOperationException("Holder DID not found");
+        var holderDid = await SetupResponse.ReadRequiredStringAsync(
+            holderResponse, HttpStatusCode.Created, "Create holder DID", "did");
 
         var issueRequest = new
         {
@@ -121,15 +118,13 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
         // First issue a credential
         var issuerDidRequest = new { Method = "did:key", KeyType = "Ed25519" };
         var issuerResponse = await _client.PostAsJsonAsync("/api/v1/dids", issuerDidRequest);
-        var issuerResult = await issuerResponse.Content.ReadFromJsonAsync<dynamic>();
-        string issuerDid = issuerResult?.GetProperty("did").GetString()
-            ?? throw new InvalidOperationException("Issuer DID not found");
+        var issuerDid = await SetupResponse.ReadRequiredStringAsync(
+            issuerResponse, HttpStatusCode.Created, "Create issuer DID", "did");
 
         var holderDidRequest = new { Method = "did:key", KeyType = "Ed25519" };
         var holderResponse = await _client.PostAsJsonAsync("/api/v1/dids", holderDidRequest);
-        var holderResult = await holderResponse.Content.ReadFromJsonAsync<dynamic>();
-        string holderDid = holderResult?.GetProperty("did").GetString()
-            ?? throw new InvalidOperationException("Holder DID not found");
+        var holderDid = await SetupResponse.ReadRequiredStringAsync(
+            holderResponse, HttpStatusCode.Created, "Create holder DID", "did");
 
         var issueRequest = new
         {
@@ -139,9 +134,8 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
             Claims = new { degree = new { type = "BachelorDegree" } }
         };
         var issueResponse = await PostAsJsonWithAuthAsync("/api/v1/credentials/issue", issueRequest);
-        var issueResult = await issueResponse.Content.ReadFromJsonAsync<dynamic>();
-        string credential = issueResult?.GetProperty("credential").GetString()
-            ?? throw new InvalidOperationException("Credential not found");
+        var credential = await SetupResponse.ReadRequiredStringAsync(
+            issueResponse, HttpStatusCode.Created, "Issue setup credential", "credential");
 
         var verifyRequest = new
         {
@@ -218,15 +212,13 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
         // First issue a valid credential
         var issuerDidRequest = new { Method = "did:key", KeyType = "Ed25519" };
         var issuerResponse = await _client.PostAsJsonAsync("/api/v1/dids", issuerDidRequest);
-        var issuerResult = await issuerResponse.Content.ReadFromJsonAsync<dynamic>();
-        string issuerDid = issuerResult?.GetProperty("did").GetString()
-            ?? throw new InvalidOperationException("Issuer DID not found");
+        var issuerDid = await SetupResponse.ReadRequiredStringAsync(
+            issuerResponse, HttpStatusCode.Created, "Create issuer DID", "did");
 
         var holderDidRequest = new { Method = "did:key", KeyType = "Ed25519" };
         var holderResponse = await _client.PostAsJsonAsync("/api/v1/dids", holderDidRequest);
-        var holderResult = await holderResponse.Content.ReadFromJsonAsync<dynamic>();
-        string holderDid = holderResult?.GetProperty("did").GetString()
-            ?? throw new InvalidOperationException("Holder DID not found");
+        var holderDid = await SetupResponse.ReadRequiredStringAsync(
+            holderResponse, HttpStatusCode.Created, "Create holder DID", "did");
 
         var issueRequest = new
         {
@@ -236,9 +228,8 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
             Claims = new { degree = new { type = "BachelorDegree" } }
         };
         var issueResponse = await PostAsJsonWithAuthAsync("/api/v1/credentials/issue", issueRequest);
-        var issueResult = await issueResponse.Content.ReadFromJsonAsync<dynamic>();
-        string credential = issueResult?.GetProperty("credential").GetString()
-            ?? throw new InvalidOperationException("Credential not found");
+        var credential = await SetupResponse.ReadRequiredStringAsync(
+            issueResponse, HttpStatusCode.Created, "Issue setup credential", "credential");
 
         // Tamper with the credential (change the signature)
         var parts = credential.Split('.');
@@ -273,15 +264,13 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
         // First create DIDs (DID creation should NOT require auth)
         var issuerDidRequest = new { Method = "did:key", KeyType = "Ed25519" };
         var issuerResponse = await _client.PostAsJsonAsync("/api/v1/dids", issuerDidRequest);
-        var issuerResult = await issuerResponse.Content.ReadFromJsonAsync<dynamic>();
-        string issuerDid = issuerResult?.GetProperty("did").GetString()
-            ?? throw new InvalidOperationException("Issuer DID not found");
+        var issuerDid = await SetupResponse.ReadRequiredStringAsync(
+            issuerResponse, HttpStatusCode.Created, "Create issuer DID", "did");
 
         var holderDidRequest = new { Method = "did:key", KeyType = "Ed25519" };
         var holderResponse = await _client.PostAsJsonAsync("/api/v1/dids", holderDidRequest);
-        var holderResult = await holderResponse.Content.ReadFromJsonAsync<dynamic>();
-        string holderDid = holderResult?.GetProperty("did").GetString()
-            ?? throw new InvalidOperationException("Holder DID not found");
+        var holderDid = await SetupResponse.ReadRequiredStringAsync(
+            holderResponse, HttpStatusCode.Created, "Create holder DID", "did");
 
         var issueRequest = new
         {
@@ -315,15 +304,13 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
         // Create DIDs
         var issuerDidRequest = new { Method = "did:key", KeyType = "Ed25519" };
         var issuerResponse = await _client.PostAsJsonAsync("/api/v1/dids", issuerDidRequest);
-        var issuerResult = await issuerResponse.Content.ReadFromJsonAsync<dynamic>();
-        string issuerDid = issuerResult?.GetProperty("did").GetString()
-            ?? throw new InvalidOperationException("Issuer DID not found");
+        var issuerDid = await SetupResponse.ReadRequiredStringAsync(
+            issuerResponse, HttpStatusCode.Created, "Create issuer DID", "did");
 
         var holderDidRequest = new { Method = "did:key", KeyType = "Ed25519" };
         var holderResponse = await _client.PostAsJsonAsync("/api/v1/dids", holderDidRequest);
-        var holderResult = await holderResponse.Content.ReadFromJsonAsync<dynamic>();
-        string holderDid = holderResult?.GetProperty("did").GetString()
-            ?? throw new InvalidOperationException("Holder DID not found");
+        var holderDid = await SetupResponse.ReadRequiredStringAsync(
+            holderResponse, HttpStatusCode.Created, "Create holder DID", "did");
 
         var issueRequest = new
         {
@@ -364,22 +351,19 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
         });
 
         var tokenResponse = await _client.PostAsync("/oauth2/token", tokenRequest);
-        var tokenResult = await tokenResponse.Content.ReadFromJsonAsync<dynamic>();
-        string accessToken = tokenResult?.GetProperty("access_token").GetString()
-            ?? throw new InvalidOperationException("Access token not found");
+        var accessToken = await SetupResponse.ReadRequiredStringAsync(
+            tokenResponse, HttpStatusCode.OK, "Obtain OAuth access token", "access_token");
 
         // Create DIDs
         var issuerDidRequest = new { Method = "did:key", KeyType = "Ed25519" };
         var issuerResponse = await _client.PostAsJsonAsync("/api/v1/dids", issuerDidRequest);
-        var issuerResult = await issuerResponse.Content.ReadFromJsonAsync<dynamic>();
-        string issuerDid = issuerResult?.GetProperty("did").GetString()
-            ?? throw new InvalidOperationException("Issuer DID not found");
+        var issuerDid = await SetupResponse.ReadRequiredStringAsync(
+            issuerResponse, HttpStatusCode.Created, "Create issuer DID", "did");
 
         var holderDidRequest = new { Method = "did:key", KeyType = "Ed25519" };
         var holderResponse = await _client.PostAsJsonAsync("/api/v1/dids", holderDidRequest);
-        var holderResult = await holderResponse.Content.ReadFromJsonAsync<dynamic>();
-        string holderDid = holderResult?.GetProperty("did").GetString()
-            ?? throw new InvalidOperationException("Holder DID not found");
+        var holderDid = await SetupResponse.ReadRequiredStringAsync(
+            holderResponse, HttpStatusCode.Created, "Create holder DID", "did");
 
         var issueRequest = new
         {
