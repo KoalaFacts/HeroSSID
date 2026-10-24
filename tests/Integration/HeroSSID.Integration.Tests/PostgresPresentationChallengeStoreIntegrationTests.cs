@@ -50,7 +50,7 @@ public sealed class PostgresPresentationChallengeStoreIntegrationTests(DatabaseF
             .Select(index => Task.Run(() =>
                 (index % 2 == 0 ? first : second).TryConsume(tenant, challenge.Audience, challenge.Nonce)));
         var results = await Task.WhenAll(consumers).ConfigureAwait(true);
-        Assert.Single(results.Where(success => success));
+        Assert.Single(results, success => success);
 
         // A new store after the first two have gone away must still reject the replay.
         var restarted = new PostgresPresentationChallengeStore(dataSource, TimeProvider.System);
@@ -79,7 +79,7 @@ public sealed class PostgresPresentationChallengeStoreIntegrationTests(DatabaseF
             }
         }));
         var results = await Task.WhenAll(admissions).ConfigureAwait(true);
-        var issued = Assert.Single(results.Where(challenge => challenge != null));
+        var issued = Assert.Single(results, challenge => challenge != null);
         Assert.NotNull(first.Find(tenant, "verifier", issued!.Nonce));
         Assert.Throws<InvalidOperationException>(() => second.Issue(tenant, "verifier", "issuer"));
         Assert.True(second.TryConsume(tenant, "verifier", issued.Nonce));
