@@ -122,7 +122,7 @@ public sealed class PostgresPresentationChallengeStoreIntegrationTests(DatabaseF
         var options = new DbContextOptionsBuilder<HeroDbContext>().UseNpgsql(_fixture.ConnectionString).Options;
         await using var signingDb = new HeroDbContext(options);
         await using var verificationDb = new HeroDbContext(options);
-        using var provider = new ServiceCollection().AddDataProtection().BuildServiceProvider();
+        using var provider = new ServiceCollection().AddDataProtection().Services.BuildServiceProvider();
         var encryption = new LocalKeyEncryptionService(provider.GetRequiredService<IDataProtectionProvider>());
         using var limiter = new InMemoryRateLimiter();
         using var loggerFactory = LoggerFactory.Create(_ => { });
