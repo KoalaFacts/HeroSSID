@@ -5,7 +5,7 @@ using HeroSSID.Cryptography.Abstractions;
 using HeroSSID.Core.TenantManagement;
 using HeroSSID.Infrastructure.KeyEncryption;
 using HeroSSID.Infrastructure.RateLimiting;
-using HeroSSID.Infrastructure.TenantManagement;
+using HeroSSID.Api.Authentication;
 using HeroSSID.DidOperations.DidMethod;
 using HeroSSID.DidOperations.DidCreation;
 using HeroSSID.DidOperations.DidResolution;
@@ -36,9 +36,9 @@ builder.Services.AddScoped<IKeyEncryptionService, LocalKeyEncryptionService>();
 // Register rate limiter for credential operations
 builder.Services.AddSingleton<IRateLimiter, InMemoryRateLimiter>();
 
-// Register tenant context (MVP: single tenant, production: replace with JWT-based implementation)
-builder.Services.AddScoped<ITenantContext, DefaultTenantContext>();
-// Issuance authorization binds the signed OAuth tenant to the active tenant context.
+// Every HTTP operation derives ownership from its validated bearer identity.
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ITenantContext, AuthenticatedTenantContext>();
 builder.Services.AddScoped<IAuthorizationHandler, CredentialIssueAuthorizationHandler>();
 
 // Register DID method implementations (did:key and did:web)
@@ -151,15 +151,16 @@ builder.Services.AddProblemDetails();
 // Add structured logging (T030)
 // Note: AddServiceDefaults() is an Aspire extension - skipping for now as it requires Aspire ServiceDefaults package
 
-// Validate once at startup: no predictable signing key or implicit issuer/audience outside Development.
-// The token endpoint uses this same immutable configuration as the bearer verifier.
-var jwtSettings = JwtSigningSettings.FromConfiguration(builder.Configuration, builder.Environment);
-builder.Services.AddSingleton(jwtSettings);
+// Add JWT Bearer authentication for OAuth 2.0 (T066)
+builder.Services.AddSingleton(provider => JwtSigningSettings.FromConfiguration(
+    provider.GetRequiredService<IConfiguration>(), provider.GetRequiredService<IHostEnvironment>()));
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
+    .AddJwtBearer();
+
+builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
+    .Configure<JwtSigningSettings>((options, jwt) =>
     {
-        // Keep signed OAuth claim names (scope and tenant_id) unchanged for policy validation.
         options.MapInboundClaims = false;
         options.TokenValidationParameters = new TokenValidationParameters
         {
@@ -167,17 +168,33 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateAudience = true,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            ValidIssuer = jwtSettings.Issuer,
-            ValidAudience = jwtSettings.Audience,
-            IssuerSigningKey = new SymmetricSecurityKey(System.Text.Encoding.UTF8.GetBytes(jwtSettings.Secret)),
-            ClockSkew = TimeSpan.FromMinutes(5)
+            ValidIssuer = jwt.Issuer,
+            ValidAudience = jwt.Audience,
+            IssuerSigningKey = jwt.SigningKey,
+            ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
+            ClockSkew = TimeSpan.Zero
+        };
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = context =>
+            {
+                if (!AuthenticatedTenantContext.HasUnambiguousValidatedTenant(context.SecurityToken, context.Principal))
+                {
+                    context.Fail("A single non-empty tenant_id GUID claim is required.");
+                }
+                return Task.CompletedTask;
+            }
         };
     });
 
 builder.Services.AddAuthorizationBuilder()
     .AddPolicy("RequireAuthentication", policy => policy.RequireAuthenticatedUser())
-    .AddPolicy(CredentialIssueRequirement.PolicyName, policy =>
-        policy.RequireAuthenticatedUser().AddRequirements(new CredentialIssueRequirement()));
+    .AddPolicy(OperationScopes.DidManage, policy => policy.RequireAuthenticatedUser()
+        .RequireAssertion(context => OperationScopes.HasScope(context.User, OperationScopes.DidManage)))
+    .AddPolicy(CredentialIssueRequirement.PolicyName, policy => policy.RequireAuthenticatedUser()
+        .AddRequirements(new CredentialIssueRequirement()))
+    .AddPolicy(OperationScopes.CredentialVerify, policy => policy.RequireAuthenticatedUser()
+        .RequireAssertion(context => OperationScopes.HasScope(context.User, OperationScopes.CredentialVerify)));
 
 // Configure HSTS (HIGH-2)
 builder.Services.AddHsts(options =>
@@ -196,6 +213,9 @@ builder.WebHost.ConfigureKestrel(options =>
 });
 
 var app = builder.Build();
+
+// Fail before serving requests, after all host configuration providers have been applied.
+_ = app.Services.GetRequiredService<JwtSigningSettings>();
 
 // Configure the HTTP request pipeline
 if (app.Environment.IsDevelopment())

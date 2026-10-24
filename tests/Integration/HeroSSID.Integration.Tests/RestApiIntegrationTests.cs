@@ -61,7 +61,7 @@ public class RestApiIntegrationTests(AspireWebApplicationFactory factory) : ICla
             KeyType = "Ed25519"
         };
 
-        var issuerDidResponse = await _client.PostAsJsonAsync("/api/v1/dids", createIssuerDidRequest, ct);
+        var issuerDidResponse = await _client.AuthorizedPostAsJsonAsync("/api/v1/dids", createIssuerDidRequest, ct);
         Assert.Equal(HttpStatusCode.Created, issuerDidResponse.StatusCode);
 
         var issuerDidResult = await issuerDidResponse.Content.ReadFromJsonAsync<dynamic>(cancellationToken: ct);
@@ -80,7 +80,7 @@ public class RestApiIntegrationTests(AspireWebApplicationFactory factory) : ICla
             KeyType = "Ed25519"
         };
 
-        var holderDidResponse = await _client.PostAsJsonAsync("/api/v1/dids", createHolderDidRequest, ct);
+        var holderDidResponse = await _client.AuthorizedPostAsJsonAsync("/api/v1/dids", createHolderDidRequest, ct);
         Assert.Equal(HttpStatusCode.Created, holderDidResponse.StatusCode);
 
         var holderDidResult = await holderDidResponse.Content.ReadFromJsonAsync<dynamic>(cancellationToken: ct);
@@ -93,7 +93,7 @@ public class RestApiIntegrationTests(AspireWebApplicationFactory factory) : ICla
         Assert.StartsWith("did:key:", holderDid);
 
         // Step 3: Verify DIDs can be resolved
-        var resolveIssuerResponse = await _client.GetAsync($"/api/v1/dids/{Uri.EscapeDataString(issuerDid)}", ct);
+        var resolveIssuerResponse = await _client.AuthorizedGetAsync($"/api/v1/dids/{Uri.EscapeDataString(issuerDid)}", ct);
         Assert.Equal(HttpStatusCode.OK, resolveIssuerResponse.StatusCode);
 
         var issuerResponseContent = await resolveIssuerResponse.Content.ReadAsStringAsync(ct);
@@ -102,7 +102,7 @@ public class RestApiIntegrationTests(AspireWebApplicationFactory factory) : ICla
         Assert.True(issuerRoot.TryGetProperty("id", out var idElement), "DID document must have id property");
         Assert.Equal(issuerDid, idElement.GetString());
 
-        var resolveHolderResponse = await _client.GetAsync($"/api/v1/dids/{Uri.EscapeDataString(holderDid)}", ct);
+        var resolveHolderResponse = await _client.AuthorizedGetAsync($"/api/v1/dids/{Uri.EscapeDataString(holderDid)}", ct);
         Assert.Equal(HttpStatusCode.OK, resolveHolderResponse.StatusCode);
 
         // Step 4: Issue a verifiable credential
@@ -177,7 +177,7 @@ public class RestApiIntegrationTests(AspireWebApplicationFactory factory) : ICla
 
         // Create issuer DID once
         var issuerDidRequest = new { Method = "did:key", KeyType = "Ed25519" };
-        var issuerResponse = await _client.PostAsJsonAsync("/api/v1/dids", issuerDidRequest, ct);
+        var issuerResponse = await _client.AuthorizedPostAsJsonAsync("/api/v1/dids", issuerDidRequest, ct);
         var issuerResult = await issuerResponse.Content.ReadFromJsonAsync<dynamic>(cancellationToken: ct);
         string issuerDid = issuerResult?.GetProperty("did").GetString()
             ?? throw new InvalidOperationException("Issuer DID not found");
@@ -189,7 +189,7 @@ public class RestApiIntegrationTests(AspireWebApplicationFactory factory) : ICla
         {
             // Create holder DID
             var holderDidRequest = new { Method = "did:key", KeyType = "Ed25519" };
-            var holderResponse = await _client.PostAsJsonAsync("/api/v1/dids", holderDidRequest, ct);
+            var holderResponse = await _client.AuthorizedPostAsJsonAsync("/api/v1/dids", holderDidRequest, ct);
             var holderResult = await holderResponse.Content.ReadFromJsonAsync<dynamic>(cancellationToken: ct);
             string holderDid = holderResult?.GetProperty("did").GetString()
                 ?? throw new InvalidOperationException($"Holder DID {i} not found");

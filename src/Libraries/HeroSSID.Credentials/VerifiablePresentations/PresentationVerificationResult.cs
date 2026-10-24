@@ -22,8 +22,7 @@ public sealed class PresentationVerificationResult
     public required string[] ValidationErrors { get; init; }
 
     /// <summary>
-    /// Disclosed claims from all credentials in the presentation
-    /// Only contains claims that holder chose to disclose
+    /// All subject claims from the verified original credential; null on every failure
     /// </summary>
     public Dictionary<string, object>? DisclosedClaims { get; init; }
 
@@ -44,7 +43,7 @@ public sealed class PresentationVerificationResult
 /// </summary>
 public enum PresentationVerificationStatus
 {
-    /// <summary>All credentials valid, all disclosures valid</summary>
+    /// <summary>Both signatures, state, holder binding and single-use challenge are valid</summary>
     Valid,
 
     /// <summary>One or more credential signatures invalid</summary>
@@ -60,5 +59,20 @@ public enum PresentationVerificationStatus
     IssuerNotFound,
 
     /// <summary>One or more credentials expired</summary>
-    CredentialExpired
+    CredentialExpired,
+
+    /// <summary>Challenge is unknown, mismatched, expired or already consumed</summary>
+    ChallengeInvalid,
+
+    /// <summary>The enrolled holder identity or public key is unavailable or inactive</summary>
+    HolderInvalid,
+
+    /// <summary>The outer holder signature is invalid</summary>
+    PresentationSignatureInvalid,
+
+    /// <summary>The presentation validity interval is invalid or expired</summary>
+    PresentationExpired,
+
+    /// <summary>The original credential fails signature, issuer, holder, lifetime or state validation</summary>
+    CredentialInvalid
 }

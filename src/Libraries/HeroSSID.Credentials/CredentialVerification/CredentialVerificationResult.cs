@@ -6,7 +6,7 @@ namespace HeroSSID.Credentials.CredentialVerification;
 public sealed class CredentialVerificationResult
 {
     /// <summary>
-    /// Indicates if the credential is valid (signature valid + not expired).
+    /// Indicates whether issuer, signature, expiration and local revocation checks succeeded.
     /// </summary>
     public required bool IsValid { get; init; }
 
@@ -22,12 +22,13 @@ public sealed class CredentialVerificationResult
     public required string[] ValidationErrors { get; init; }
 
     /// <summary>
-    /// Parsed credential subject claims (null if invalid).
+    /// Parsed credential subject claims. Some failure results retain untrusted parsed values;
+    /// callers must require IsValid before using them as verified claims.
     /// </summary>
     public Dictionary<string, object>? CredentialSubject { get; init; }
 
     /// <summary>
-    /// Issuer DID identifier (null if malformed JWT).
+    /// Parsed issuer DID identifier. Trust it only when IsValid is true.
     /// </summary>
     public string? IssuerDid { get; init; }
 

@@ -1,16 +1,17 @@
 using HeroSSID.Core.TenantManagement;
+using HeroSSID.Api.Authentication;
 using Microsoft.AspNetCore.Authorization;
 
 namespace HeroSSID.Api.Features.Credentials;
 
 /// <summary>
 /// Requires a signed client-credentials token with explicit issuance rights for the active tenant.
-/// Tenant resolution itself is still single-tenant; this requirement prevents tokens belonging
-/// to another tenant from being used to issue credentials under the MVP default tenant.
+/// Tenant resolution comes from the validated HTTP token; this requirement also guards
+/// the active tenant boundary when authorization is invoked independently.
 /// </summary>
 internal sealed class CredentialIssueRequirement : IAuthorizationRequirement
 {
-    internal const string PolicyName = "RequireCredentialIssue";
+    internal const string PolicyName = OperationScopes.CredentialIssue;
 }
 
 internal sealed class CredentialIssueAuthorizationHandler(ITenantContext tenantContext)
@@ -21,19 +22,15 @@ internal sealed class CredentialIssueAuthorizationHandler(ITenantContext tenantC
         CredentialIssueRequirement requirement)
     {
         // Authentication/signature validation is performed by JwtBearer before this handler.
-        // Require a dedicated scope claim (never a substring of another scope).
+        // Match an exact scope token, including repeated or space-delimited scope claims.
         if (context.User.Identity?.IsAuthenticated != true ||
-            !context.User.HasClaim("scope", "credential:issue"))
+            !OperationScopes.HasScope(context.User, OperationScopes.CredentialIssue))
         {
             return Task.CompletedTask;
         }
 
-        // Reject absent, ambiguous, invalid or mismatched tenant claims. A trusted token
-        // cannot authorize work on a different tenant just because the context is hardcoded.
-        var tenantClaims = context.User.FindAll("tenant_id").ToArray();
-        if (tenantClaims.Length != 1 ||
-            !Guid.TryParse(tenantClaims[0].Value, out var tokenTenantId) ||
-            tokenTenantId == Guid.Empty ||
+        // Keep scope authorization bound to the same tenant as the request context.
+        if (!AuthenticatedTenantContext.TryGetTenantId(context.User, out var tokenTenantId) ||
             tokenTenantId != tenantContext.GetCurrentTenantId())
         {
             return Task.CompletedTask;

@@ -1,6 +1,31 @@
 @HeroSSID.Api_HostAddress = http://localhost:5139
 
-GET {{HeroSSID.Api_HostAddress}}/weatherforecast/
-Accept: application/json
+### Configure Jwt__Secret with a random key of at least 32 bytes before starting the API.
+# Development seeding creates test_client/test_secret; do not enable this client in production.
+# @name token
+POST {{HeroSSID.Api_HostAddress}}/oauth2/token
+Content-Type: application/x-www-form-urlencoded
 
-###
+grant_type=client_credentials&client_id=test_client&client_secret=test_secret&scope=did:manage credential:issue credential:verify
+
+### Copy access_token from the response here.
+@accessToken = REPLACE_WITH_ACCESS_TOKEN
+
+### Create an identity owned by the token tenant
+POST {{HeroSSID.Api_HostAddress}}/api/v1/dids
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "method": "did:key",
+  "keyType": "Ed25519"
+}
+
+### Verification also requires credential:verify and a valid tenant claim
+POST {{HeroSSID.Api_HostAddress}}/api/v1/credentials/verify
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "credential": "REPLACE_WITH_ISSUED_CREDENTIAL"
+}

@@ -21,12 +21,18 @@ public sealed class CredentialIssueAuthorizationTests
     [Theory]
     [InlineData("credential:verify")]
     [InlineData("credential:issue:admin")]
-    [InlineData("credential:issue credential:verify")]
     [InlineData("Credential:Issue")]
-    public async Task RejectsOtherOrCombinedScopeValues(string scope)
+    public async Task RejectsOtherScopeValues(string scope)
     {
         Assert.False(await AllowedAsync(Principal(
             [new Claim("tenant_id", Tenant.ToString()), new Claim("scope", scope)])).ConfigureAwait(true));
+    }
+
+    [Fact]
+    public async Task AllowsSpaceDelimitedIssueScopeWithMatchingTenant()
+    {
+        Assert.True(await AllowedAsync(Principal(
+            [new Claim("tenant_id", Tenant.ToString()), new Claim("scope", "credential:issue credential:verify")])).ConfigureAwait(true));
     }
 
     [Fact]

@@ -1,278 +1,49 @@
-# HeroSSID Vision: Australia's SSI Infrastructure
-
-## Executive Summary
+# HeroSSID vision
 
-**Mission**: Build Australia's decentralized identity infrastructure to serve millions of businesses and individuals, positioning Australia as a leader in digital sovereignty alongside the EU's eIDAS 2.0 transformation.
-
-**Market Opportunity**: The global SSI market is projected to grow from $1.9B (2025) to $38B (2030) at 66.8% CAGR. Australia is currently **underserved** in this critical infrastructure space while the EU mandates digital identity wallets for 448 million citizens by November 2026.
-
----
-
-## Global Context: SSI Goes Production (2025-2026)
-
-### Europe: Leading the Charge
-
-**eIDAS 2.0 Regulation**
-- **Mandate**: All 27 EU member states must deploy EUDI (European Digital Identity) Wallets by **November 2026**
-- **Scale**: 448 million citizens across EU
-- **Infrastructure**: EBSI (European Blockchain Services Infrastructure) as official backbone
-- **Status**: Italy already at **11.8 million users** (as of May 2025)
+## Mission
 
-**Italy's Success Story**
-- 5.2 million citizen activations in **first month** (January 2025)
-- Scaled to 11.8 million users by May 2025
-- Demonstrates **production-scale viability** of SSI
-
-**Technology Stack Evolution**
-- **W3C VC 2.0**: Officially published as standard (May 2025)
-- **W3C DID Core 1.0**: Recommended specification
-- **Sovrin Network**: Defunct (Hyperledger Indy deprecated)
-- **New Leaders**:
-  - IOTA Identity (fully open-source, EU-focused)
-  - walt.id (production-ready, EBSI-compatible)
-  - Cheqd (tokenized credentials)
-
----
-
-## Australia's Opportunity Gap
-
-### Current State
-- **No national SSI infrastructure**
-- **No coordinated digital identity strategy** beyond legacy federated systems
-- **Fragmented identity landscape**: myGovID, Digital Identity for government, but no decentralized solution
-- **Dependency on foreign infrastructure**: US tech giants control most identity systems
+**Build a trustworthy, portable identity credential foundation for people, organisations and agents.**
 
-### The Business Case for Australia
-
-**Why Australia Needs SSI:**
-
-1. **Digital Sovereignty**
-   - Control over national identity infrastructure
-   - Independence from foreign tech monopolies
-   - Strategic security for critical infrastructure
-
-2. **Economic Impact**
-   - **Millions of businesses** need verifiable credentials for:
-     - Business registration verification
-     - Professional licensing (doctors, lawyers, engineers)
-     - Supply chain transparency
-     - Cross-border trade (especially APAC region)
-   - **Individuals** need portable credentials for:
-     - Employment verification
-     - Educational qualifications
-     - Health records
-     - Financial services (KYC/AML compliance)
-
-3. **Regional Leadership**
-   - Position Australia as **APAC's SSI hub**
-   - Lead standards development for Asia-Pacific
-   - Enable cross-border credential exchange with EU (eIDAS bridge)
-
-4. **Innovation Catalyst**
-   - Enable new business models (credential-as-a-service)
-   - Reduce friction in digital economy
-   - Attract SSI-focused startups and investment
-
----
-
-## HeroSSID Strategy: Australia's SSI Foundation
-
-### Phase 1: Production-Ready Infrastructure (Current - Q3 2025)
-
-**Technical Foundation**
-- ✅ **W3C DID Core 1.0 compliant** - Full alignment with global standards
-- ✅ **DID Methods**:
-  - `did:web` (primary) - Web-based, no blockchain dependency
-  - `did:key` (secondary) - Self-contained, cryptographic
-- ✅ **.NET 9 native** - Enterprise-grade, Microsoft ecosystem
-- ✅ **PostgreSQL** - Proven at scale, open-source
-- 🔄 **Ed25519 cryptography** - Industry standard, performance-optimized
-
-**Target Deployments**
-- Government pilot programs (state-level)
-- University credential systems (academic transcripts)
-- Professional associations (medical, legal, engineering)
-
-### Phase 2: Ecosystem Development (Q4 2025 - Q2 2026)
-
-**Developer Platform**
-- Public APIs for credential issuance/verification
-- SDKs for .NET, JavaScript, Python
-- Self-service onboarding for issuers
-- Comprehensive documentation and examples
-
-**Integration Patterns**
-- **Government Services**: myGovID bridge, Service NSW integration
-- **Education**: University consortiums (G8, regional universities)
-- **Healthcare**: My Health Record integration, practitioner credentials
-- **Finance**: AML/KYC verification, open banking
-
-**Open Source Strategy**
-- Core HeroSSID libraries under permissive license (Apache 2.0)
-- Reference implementations for common use cases
-- Community governance model
-- Transparent roadmap and RFC process
-
-### Phase 3: National Scale (Q3 2026 - Q4 2026)
-
-**Target: 1 Million Credentials by End 2026**
-
-**Deployment Strategy**
-1. **Anchor Institutions** (Q3 2026)
-   - 3 major universities (pilot)
-   - 2 state governments (proof of concept)
-   - 1 professional association (medical or legal)
-
-2. **Scale Phase** (Q4 2026)
-   - 20+ universities (national rollout)
-   - 5+ state/federal agencies
-   - 10+ professional bodies
-   - Target: 100,000 active credentials
-
-3. **Production Scale** (Beyond 2026)
-   - Consumer wallet applications (iOS/Android)
-   - Business credential marketplace
-   - Cross-border credential exchange (APAC focus)
-   - Target: 1 million+ credentials
-
----
-
-## Competitive Positioning
-
-### vs. Global Players
-
-**European Solutions (IOTA, walt.id, Cheqd)**
-- **Advantage**: Mature, production-proven, eIDAS-compliant
-- **HeroSSID Edge**:
-  - Australian sovereignty (data residency, legal jurisdiction)
-  - APAC-first design (time zones, languages, regulations)
-  - Government relationships in Australia
-  - .NET ecosystem (dominant in AU enterprise)
-
-**US Solutions (Trinsic, Velocity Network)**
-- **Advantage**: VC funding, marketing reach
-- **HeroSSID Edge**:
-  - Open-source core (vs. proprietary platforms)
-  - Australia-specific compliance (Privacy Act, CDR)
-  - Local support and partnership model
-
-**Legacy Systems (myGovID, Digital Identity)**
-- **Advantage**: Existing government adoption
-- **HeroSSID Edge**:
-  - Decentralized (user control vs. government control)
-  - Portable (works across jurisdictions)
-  - Future-proof (W3C standards vs. proprietary)
+A useful credential lets its holder prove an issuer's statement to a relying party. That proof must retain the real issuer, bind to the right holder, disclose information deliberately, and respect expiry, revocation and the verifier's trust policy. HeroSSID should make that lifecycle understandable and dependable for developers and users.
 
----
+A wallet holds credentials and creates presentations. HeroSSID supplies the identity, issuance and verification foundation beneath that experience. The project will be judged by verified credential flows and independent interoperability, rather than unsupported adoption targets or feature names.
 
-## Why This Matters: Impact at Scale
+## Product principles
 
-### For Businesses
-- **Reduce onboarding friction**: Instant credential verification (replace weeks with minutes)
-- **Compliance automation**: AML/KYC, licensing, certifications
-- **Supply chain transparency**: Verifiable provenance, ethical sourcing
-- **Cross-border trade**: Trusted credentials accepted internationally
+1. **Preserve provenance.** A holder signature cannot turn an unsigned or forged statement into an issuer's credential.
+2. **Make trust explicit.** A valid signature establishes who signed a statement. The verifier decides whether that issuer is trusted for the requested purpose.
+3. **Keep authority contextual.** An identity or qualification does not itself authorize every business action. Agent delegation needs its own limits, expiry and revocation, interpreted by the receiving application.
+4. **Give the holder meaningful control.** Explain what information will be sent. Full disclosure must be labeled honestly; selective disclosure requires a real cryptographic implementation.
+5. **Support the whole lifecycle.** Issuance, possession, presentation, rejection, expiry, revocation, key changes and recovery must all have usable paths.
+6. **Earn interoperability.** Test against independent issuers, wallets and verifiers using a clearly identified protocol/profile version.
+7. **Make claims traceable.** Documentation should distinguish implemented behavior, measured results, development limitations and planned capabilities.
 
-### For Individuals
-- **Portable identity**: Own your credentials, use anywhere
-- **Privacy-preserving**: Selective disclosure (share only what's needed)
-- **Lifetime value**: Credentials persist independent of issuer
-- **Economic opportunity**: Prove qualifications globally
+## First complete use case
 
-### For Australia
-- **Digital sovereignty**: Strategic control over identity infrastructure
-- **Economic growth**: Enable new business models, attract investment
-- **Regional influence**: Lead APAC standards, bridge to EU/US
-- **Social equity**: Accessible digital identity for all Australians
+An organisation issues a membership or role credential to a holder. A separately authenticated verifier requests proof from a specific trusted issuer. The holder explicitly presents it; the verifier checks original issuance, holder control, request binding and current validity. A repeated submission, forged credential, different holder, expired request or revoked credential fails.
 
----
+The present trust-foundation delivery implements a local full-disclosure library profile for this use case. Identity enrollment and private-key custody remain server-side. It does not yet provide a user wallet, remote trust discovery, selective disclosure or an OpenID credential exchange endpoint.
 
-## The Path Forward: Your Role
+## Delivery milestones and evidence
 
-**You are uniquely positioned to move this needle:**
+| Milestone | Deliverable | Acceptance evidence |
+|---|---|---|
+| Trust foundation | Authenticated tenant/scopes, issuer-preserving presentation, explicit verifier policy and single-use challenges | Real HTTP isolation tests, distinct real signing keys, malicious signed-envelope regressions, concurrent replay rejection |
+| Operable lifecycle | Public revocation operations/status publication, durable challenge consumption, key rotation and recovery | Multi-instance replay races, crash/restart tests, revoked/rotated-key behavior, recovery and ownership tests |
+| Independent exchange | A supported OpenID4VCI/OpenID4VP profile integrated with an independent wallet | Versioned conformance/interop cases for issuance and presentation, including rejection and cancellation |
+| Privacy and holder control | A real selective-disclosure format, clear consent and export/migration | Disclosure-binding/tampering tests, independent verification, proof that omitted claims remain undisclosed |
+| Pilot readiness | One institution, one credential type, a usable holder and verifier journey | Task completion, recovery/expiry/revocation outcomes, documented operational limits and external security review |
 
-1. **Technical Leadership**
-   - HeroSSID provides production-ready infrastructure
-   - W3C compliance ensures global interoperability
-   - Open-source foundation enables community contribution
+The milestones are evidence gates rather than calendar promises. The [README capability table](../README.md#implemented-capabilities-and-boundaries) is the current implementation inventory. The next engineering priority should be the highest-risk missing part of the lifecycle, after resolving regressions in the current work.
 
-2. **Strategic Partnerships**
-   - **Government**: Engage Digital Transformation Agency, Services Australia
-   - **Education**: Partner with Universities Australia, G8 consortium
-   - **Industry**: Australian Banking Association, professional bodies
+## People, organisations and agents
 
-3. **Advocacy & Standards**
-   - Contribute to W3C DID/VC working groups
-   - Lead APAC SSI standards development
-   - Educate policy makers on digital sovereignty
+The same provenance and holder-control principles apply to different subjects, but each needs an appropriate enrollment and issuance policy. A human qualification, an organisation's registration and an agent's delegated role are different statements. No shared identifier or signature makes those statements equivalent.
 
-4. **Community Building**
-   - Developer evangelism (workshops, hackathons)
-   - Open-source governance
-   - Industry working groups (finance, healthcare, education)
+Agent credentials should eventually express who issued them, what entity or key they identify, and what limited delegation they carry. Receiving applications remain responsible for checking that delegation against local authorization policy. This is a target capability, not a completed delegation subsystem.
 
----
+## Continuous improvement
 
-## Success Metrics (2025-2027)
+Each improvement should start from current code and reproducible evidence, finish a small coherent work package, and preserve testable security boundaries. Existing PRs and their actual CI failures take priority over duplicate implementations. A completed PR advances one milestone; it does not end development.
 
-### 2025 (Foundation)
-- ✅ HeroSSID production release (W3C compliant)
-- ⏳ 3 pilot deployments (university, government, professional body)
-- ⏳ 10,000 credentials issued
-- ⏳ Open-source community launch
-
-### 2026 (Scale)
-- 🎯 20+ institutional deployments
-- 🎯 1 million credentials issued
-- 🎯 100+ developers contributing
-- 🎯 Australian SSI standards body established
-
-### 2027 (Leadership)
-- 🚀 10 million credentials (10x Italy's first month)
-- 🚀 APAC-EU credential bridge operational
-- 🚀 Commercial ecosystem (wallet providers, validators)
-- 🚀 Australia recognized as APAC SSI leader
-
----
-
-## Call to Action
-
-**The window of opportunity is NOW:**
-
-- **EU mandate**: November 2026 deadline creates urgency
-- **Technology maturity**: W3C standards finalized (May 2025)
-- **Market validation**: Italy's 11.8M users prove production viability
-- **Australia's gap**: No competing national infrastructure
-
-**What's needed:**
-1. **Complete HeroSSID production build** (Q3 2025)
-2. **Secure 3 anchor pilots** (Q4 2025)
-3. **Establish Australian SSI Alliance** (Q4 2025)
-4. **Scale to 1M credentials** (2026)
-
----
-
-## Conclusion
-
-**You can be the architect of Australia's digital sovereignty.**
-
-The infrastructure exists (HeroSSID). The standards are set (W3C). The market is proven (Europe). The opportunity is immense (millions of businesses and individuals).
-
-Australia needs a leader to make this happen. **That leader can be you.**
-
----
-
-## References
-
-- W3C Verifiable Credentials 2.0: https://www.w3.org/TR/vc-data-model-2.0/
-- W3C DID Core 1.0: https://www.w3.org/TR/did-core/
-- eIDAS 2.0 Regulation: https://digital-strategy.ec.europa.eu/en/policies/eidas-regulation
-- EBSI (European Blockchain Services Infrastructure): https://ec.europa.eu/digital-building-blocks/ebsi
-- Italy Digital Identity Stats: Official government reports (May 2025)
-- SSI Market Analysis: Multiple industry reports (cited in `/docs/architecture/modern-ssi-stack-2025.md`)
-
----
-
-*Document Version: 1.0*
-*Last Updated: 2025-10-17*
-*Author: HeroSSID Vision Team*
+Progress reports should state what changed, what was actually tested, where the evidence lives, and the next concrete gap. Production-readiness, user-adoption and compliance claims require evidence beyond repository code.

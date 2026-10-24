@@ -25,4 +25,22 @@ public interface ICredentialVerificationService
         ITenantContext tenantContext,
         string credentialJwt,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Verifies an enrolled issuer's public credential while charging the actual requester.</summary>
+    /// <param name="requesterContext">Trusted holder or verifier context responsible for the request.</param>
+    /// <param name="issuerTenantId">Issuer lookup tenant resolved from its enrolled public DID record.</param>
+    /// <param name="credentialJwt">Original issuer-signed JWT credential.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The signature and credential-state verification result.</returns>
+    /// <remarks>
+    /// This is public-record verification, not authorization to act for the issuer. Presentation callers
+    /// must independently enforce their trusted issuer and holder policy. The issuer tenant scopes DID
+    /// and revocation lookups only; the requester tenant owns the rate-limit charge. HTTP tenant-local
+    /// verification must continue using <see cref="VerifyCredentialAsync"/>.
+    /// </remarks>
+    public Task<CredentialVerificationResult> VerifyCredentialFromIssuerAsync(
+        ITenantContext requesterContext,
+        Guid issuerTenantId,
+        string credentialJwt,
+        CancellationToken cancellationToken = default);
 }
