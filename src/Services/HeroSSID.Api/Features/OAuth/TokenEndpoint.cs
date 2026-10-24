@@ -37,7 +37,7 @@ public static class TokenEndpoint
     private static async Task<IResult> HandleTokenRequestAsync(
         HttpContext httpContext,
         [FromServices] HeroDbContext dbContext,
-        [FromServices] IConfiguration configuration,
+        [FromServices] JwtSigningSettings jwtSettings,
         [FromServices] ILogger<Program> logger)
     {
         // Parse form data
@@ -149,7 +149,7 @@ public static class TokenEndpoint
         }
 
         // Generate JWT token
-        var token = GenerateJwtToken(client, requestedScopes, configuration);
+        var token = GenerateJwtToken(client, requestedScopes, jwtSettings);
 
         // T069: Log successful token issuance
         logger.LogInformation(
@@ -174,13 +174,9 @@ public static class TokenEndpoint
     private static string GenerateJwtToken(
         HeroSSID.Data.Entities.OAuthClient client,
         string[] scopes,
-        IConfiguration configuration)
+        JwtSigningSettings jwtSettings)
     {
-        // Get JWT settings from configuration (or use defaults for development)
-        var jwtSecret = configuration["Jwt:Secret"] ?? "your-256-bit-secret-key-change-in-production-min-32-chars";
-        var jwtIssuer = configuration["Jwt:Issuer"] ?? "https://herossid.api";
-        var jwtAudience = configuration["Jwt:Audience"] ?? "https://herossid.api";
-
+        // Issuance and bearer verification must use the same validated key and audience.
         // Create claims
         var claims = new List<Claim>
         {
@@ -198,13 +194,13 @@ public static class TokenEndpoint
         }
 
         // Create signing credentials
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret));
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings.Secret));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
         // Create token
         var token = new JwtSecurityToken(
-            issuer: jwtIssuer,
-            audience: jwtAudience,
+            issuer: jwtSettings.Issuer,
+            audience: jwtSettings.Audience,
             claims: claims,
             notBefore: DateTime.UtcNow,
             expires: DateTime.UtcNow.AddHours(1),
