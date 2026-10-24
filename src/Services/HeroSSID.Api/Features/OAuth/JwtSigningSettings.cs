@@ -42,7 +42,7 @@ internal sealed class JwtSigningSettings
         // HMAC zero-pads keys shorter than SHA-256's 64-byte block size. Appending
         // NUL bytes to the public development key does not change its HMAC signature.
         // Reject NULs rather than treating those equivalent encodings as distinct keys.
-        if (secret.Contains("\0", StringComparison.Ordinal))
+        if (secret.Contains('\0'))
         {
             throw new InvalidOperationException("Jwt:Secret must not contain NUL characters.");
         }
