@@ -251,6 +251,39 @@ public sealed class CredentialVerificationServiceTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task VerifyCredentialAsyncRevokedCredentialCannotBypassRevocationWithPaddedSignature()
+    {
+        await SeedTestIssuerDidAsync().ConfigureAwait(true);
+        var issuerDid = await _dbContext.Dids.SingleAsync().ConfigureAwait(true);
+        var revokedJwt = CreateValidTestJwt();
+        _dbContext.VerifiableCredentials.Add(new VerifiableCredentialEntity
+        {
+            Id = Guid.NewGuid(),
+            TenantId = _tenantId,
+            IssuerDidId = issuerDid.Id,
+            HolderDidId = issuerDid.Id,
+            CredentialType = "TestCredential",
+            CredentialJwt = revokedJwt,
+            Status = "revoked",
+            IssuedAt = DateTimeOffset.UtcNow,
+            RevokedAt = DateTimeOffset.UtcNow
+        });
+        await _dbContext.SaveChangesAsync().ConfigureAwait(true);
+
+        var service = CreateService();
+        var revokedResult = await service.VerifyCredentialAsync(_tenantContext, revokedJwt).ConfigureAwait(true);
+        Assert.False(revokedResult.IsValid);
+        Assert.Equal(VerificationStatus.Revoked, revokedResult.Status);
+
+        // The original verifier accepted the same signature bytes with padding,
+        // but its database revocation check compared JWT text byte-for-byte.
+        var paddedJwt = revokedJwt + "==";
+        var paddedResult = await service.VerifyCredentialAsync(_tenantContext, paddedJwt).ConfigureAwait(true);
+        Assert.False(paddedResult.IsValid);
+        Assert.Equal(VerificationStatus.SignatureInvalid, paddedResult.Status);
+    }
+
     private CredentialVerificationService CreateService()
     {
         return new CredentialVerificationService(_dbContext, _rateLimiter, null);

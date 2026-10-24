@@ -95,8 +95,17 @@ public static class Ed25519JwtSigner
             var signingInput = $"{parts[0]}.{parts[1]}";
             var signingInputBytes = Encoding.UTF8.GetBytes(signingInput);
 
-            // Decode signature
+            // Decode signature and require its unique, unpadded base64url representation.
+            // Compact JWT/JWS signatures must be canonical: otherwise callers can alter
+            // padding or unused pad bits without changing the Ed25519 signature bytes.
+            // That is particularly dangerous when credentials are revoked by matching
+            // their stored compact JWT representation.
             var signatureBytes = Base64UrlEncoder.DecodeBytes(parts[2]);
+            if (signatureBytes.Length != 64 ||
+                !string.Equals(Base64UrlEncoder.Encode(signatureBytes), parts[2], StringComparison.Ordinal))
+            {
+                return false;
+            }
 
             // Import public key using NSec (PublicKey is not IDisposable, no using statement needed)
             var publicKey = PublicKey.Import(Ed25519Algorithm, publicKeyBytes, KeyBlobFormat.RawPublicKey);
