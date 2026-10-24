@@ -147,6 +147,8 @@ dotnet test --verbosity normal
 
 The API signs OAuth access tokens with HMAC-SHA256. **Outside `Development`**, startup fails unless `Jwt:Secret` (at least 32 UTF-8 bytes), `Jwt:Issuer`, and `Jwt:Audience` are explicitly configured. Set these through environment-specific secret management (for example, `Jwt__Secret`, `Jwt__Issuer`, `Jwt__Audience`); never use the development signing secret outside a local environment. The OAuth token endpoint and bearer validator share these validated values.
 
+Credential issuance now additionally requires the exact `credential:issue` OAuth scope and a single non-empty `tenant_id` claim matching the current tenant context. The current context still uses the MVP default tenant, so this is a **fail-closed restriction to the default tenant**, not multi-tenant support. Clients of other tenants must not be permitted to issue until request-derived tenant resolution and complete authorization are implemented.
+
 This removes a predictable default access-token signing key, **not** the platform's other production blockers: the default tenant context is still hardcoded, credential presentation still uses a mock SD-JWT implementation, and real issuer/holder trust policies remain incomplete. Do not expose this API as a multi-tenant identity service until those controls are implemented and independently tested.
 
 ### Database Migrations

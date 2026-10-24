@@ -1,5 +1,6 @@
 using HeroSSID.Credentials.CredentialIssuance;
 using HeroSSID.Credentials.CredentialVerification;
+using HeroSSID.Credentials.Utilities;
 using HeroSSID.Credentials.MvpImplementations;
 using HeroSSID.Infrastructure.KeyEncryption;
 using HeroSSID.Infrastructure.RateLimiting;
@@ -242,7 +243,11 @@ public sealed class SecurityEdgeCaseTests : IDisposable
 
         // Act - Tamper with the signature
         var jwtParts = validJwt.Split('.');
-        var tamperedSignature = jwtParts[2].Replace('a', 'b').Replace('A', 'B');
+        // Flip a real signature byte; character replacement can be a no-op for random signatures.
+        var alteredSignatureBytes = Base64UrlEncoder.DecodeBytes(jwtParts[2]);
+        alteredSignatureBytes[0] ^= 0x01;
+        var tamperedSignature = Base64UrlEncoder.Encode(alteredSignatureBytes);
+        Assert.NotEqual(jwtParts[2], tamperedSignature);
         var tamperedJwt = $"{jwtParts[0]}.{jwtParts[1]}.{tamperedSignature}";
 
         // Assert - Verification should fail due to invalid signature
