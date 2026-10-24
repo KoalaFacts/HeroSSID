@@ -17,7 +17,7 @@ public static class CredentialEndpoints
             .WithOpenApi();
 
         credentials.MapPost("/issue", IssueAsync)
-            .RequireAuthorization("RequireAuthentication")
+            .RequireAuthorization(CredentialIssueRequirement.PolicyName)
             .WithName("IssueCredential")
             .WithSummary("Issue a JWT verifiable credential")
             .Produces<IssueCredentialResponse>(StatusCodes.Status201Created)

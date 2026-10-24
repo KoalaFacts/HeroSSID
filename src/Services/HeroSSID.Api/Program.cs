@@ -17,6 +17,7 @@ using HeroSSID.Api.Features.Credentials;
 using HeroSSID.Api.Features.OAuth;
 using HeroSSID.Api.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.EntityFrameworkCore;
 using Asp.Versioning;
@@ -37,6 +38,8 @@ builder.Services.AddSingleton<IRateLimiter, InMemoryRateLimiter>();
 
 // Register tenant context (MVP: single tenant, production: replace with JWT-based implementation)
 builder.Services.AddScoped<ITenantContext, DefaultTenantContext>();
+// Issuance authorization binds the signed OAuth tenant to the active tenant context.
+builder.Services.AddScoped<IAuthorizationHandler, CredentialIssueAuthorizationHandler>();
 
 // Register DID method implementations (did:key and did:web)
 builder.Services.AddScoped<IDidMethod, DidKeyMethod>();
@@ -156,6 +159,8 @@ builder.Services.AddSingleton(jwtSettings);
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
+        // Keep signed OAuth claim names (scope and tenant_id) unchanged for policy validation.
+        options.MapInboundClaims = false;
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
@@ -170,7 +175,9 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 
 builder.Services.AddAuthorizationBuilder()
-    .AddPolicy("RequireAuthentication", policy => policy.RequireAuthenticatedUser());
+    .AddPolicy("RequireAuthentication", policy => policy.RequireAuthenticatedUser())
+    .AddPolicy(CredentialIssueRequirement.PolicyName, policy =>
+        policy.RequireAuthenticatedUser().AddRequirements(new CredentialIssueRequirement()));
 
 // Configure HSTS (HIGH-2)
 builder.Services.AddHsts(options =>

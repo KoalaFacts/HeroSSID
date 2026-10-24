@@ -263,7 +263,7 @@ public sealed class CredentialEndpointTests
         var endpoints = ((IEndpointRouteBuilder)app).DataSources.SelectMany(source => source.Endpoints).OfType<RouteEndpoint>().ToArray();
         var issue = Assert.Single(endpoints, endpoint => endpoint.RoutePattern.RawText == "/api/v1/credentials/issue");
         var verify = Assert.Single(endpoints, endpoint => endpoint.RoutePattern.RawText == "/api/v1/credentials/verify");
-        Assert.Contains(issue.Metadata.GetOrderedMetadata<IAuthorizeData>(), auth => auth.Policy == "RequireAuthentication");
+        Assert.Contains(issue.Metadata.GetOrderedMetadata<IAuthorizeData>(), auth => auth.Policy == CredentialIssueRequirement.PolicyName);
         Assert.Null(issue.Metadata.GetMetadata<IAllowAnonymous>());
         Assert.NotNull(verify.Metadata.GetMetadata<IAllowAnonymous>());
         Assert.Empty(verify.Metadata.GetOrderedMetadata<IAuthorizeData>());
