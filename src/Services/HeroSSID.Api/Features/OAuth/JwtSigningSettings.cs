@@ -7,8 +7,19 @@ namespace HeroSSID.Api.Features.OAuth;
 /// <summary>
 /// Validated access-token signing configuration, shared by JWT issuance and verification.
 /// </summary>
-internal sealed record JwtSigningSettings(string Secret, string Issuer, string Audience)
+internal sealed class JwtSigningSettings
 {
+    internal JwtSigningSettings(string secret, string issuer, string audience)
+    {
+        Secret = secret;
+        Issuer = issuer;
+        Audience = audience;
+    }
+
+    internal string Secret { get; }
+    internal string Issuer { get; }
+    internal string Audience { get; }
+
     // Local development convenience only. A production deployment must never accept this key.
     internal const string DevelopmentSecret = "your-256-bit-secret-key-change-in-production-min-32-chars";
 
