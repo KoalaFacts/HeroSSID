@@ -358,5 +358,8 @@ public sealed class CredentialEndpointTests
             Token = credentialJwt; Tenant = tenantContext; Cancellation = cancellationToken;
             return Failure is null ? Task.FromResult(Result) : Task.FromException<CredentialVerificationResult>(Failure);
         }
+
+        public Task<CredentialVerificationResult> VerifyCredentialFromIssuerAsync(ITenantContext requesterContext, Guid issuerTenantId, string credentialJwt, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("The REST endpoint must use tenant-local verification.");
     }
 }

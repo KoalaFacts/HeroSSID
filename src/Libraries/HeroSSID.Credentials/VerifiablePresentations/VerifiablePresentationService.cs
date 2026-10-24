@@ -88,7 +88,7 @@ public sealed class VerifiablePresentationService : IVerifiablePresentationServi
             throw new ArgumentException("An active holder DID belonging to this tenant is required.", nameof(holderDidId));
         }
 
-        var credential = await ValidateCredentialAsync(credentialJwt, holder.DidIdentifier, challenge.TrustedIssuerDid, cancellationToken).ConfigureAwait(false);
+        var credential = await ValidateCredentialAsync(tenantContext, credentialJwt, holder.DidIdentifier, challenge.TrustedIssuerDid, cancellationToken).ConfigureAwait(false);
         if (!credential.IsValid)
         {
             throw new ArgumentException("The credential signature, issuer, holder, state or lifetime is invalid.", nameof(credentialJwt));
@@ -190,7 +190,7 @@ public sealed class VerifiablePresentationService : IVerifiablePresentationServi
             return Failure(PresentationVerificationStatus.PresentationSignatureInvalid, "The holder signature is invalid.");
         }
 
-        var credential = await ValidateCredentialAsync(credentials[0].GetString()!, holderDid, challenge.TrustedIssuerDid, cancellationToken).ConfigureAwait(false);
+        var credential = await ValidateCredentialAsync(verifierContext, credentials[0].GetString()!, holderDid, challenge.TrustedIssuerDid, cancellationToken).ConfigureAwait(false);
         if (!credential.IsValid)
         {
             return Failure(PresentationVerificationStatus.CredentialInvalid, "The original credential signature, issuer, holder, state or lifetime is invalid.");
@@ -242,7 +242,7 @@ public sealed class VerifiablePresentationService : IVerifiablePresentationServi
     }
 
     private async Task<CredentialVerificationResult> ValidateCredentialAsync(
-        string jwt, string holderDid, string trustedIssuerDid, CancellationToken cancellationToken)
+        ITenantContext requesterContext, string jwt, string holderDid, string trustedIssuerDid, CancellationToken cancellationToken)
     {
         var now = _timeProvider.GetUtcNow().ToUnixTimeSeconds();
         if (!StrictJwtReader.TryRead(jwt, "vc+jwt", MaximumCredentialLength, out var payload) ||
@@ -275,7 +275,7 @@ public sealed class VerifiablePresentationService : IVerifiablePresentationServi
             return InvalidCredential();
         }
 
-        return await _credentialVerifier.VerifyCredentialAsync(new EnrolledIssuerContext(issuer.TenantId), jwt, cancellationToken).ConfigureAwait(false);
+        return await _credentialVerifier.VerifyCredentialFromIssuerAsync(requesterContext, issuer.TenantId, jwt, cancellationToken).ConfigureAwait(false);
     }
 
     private static CredentialVerificationResult InvalidCredential() => new()
@@ -292,8 +292,4 @@ public sealed class VerifiablePresentationService : IVerifiablePresentationServi
         ValidationErrors = new[] { message }
     };
 
-    private sealed class EnrolledIssuerContext(Guid tenantId) : ITenantContext
-    {
-        public Guid GetCurrentTenantId() => tenantId;
-    }
 }

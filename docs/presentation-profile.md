@@ -47,15 +47,25 @@ Local credential verification checks the original issuer signature and whether a
 
 Presentation verification reads public identity/status columns, not encrypted private keys. Failure results have no disclosed claims, holder DID or issuer DIDs. The direct credential-verifier library has an older result shape that can include parsed fields on failure; callers must always check `IsValid`. REST credential verification already suppresses identity fields on failure.
 
+## Request accounting
+
+The credential verifier records a request before JWT parsing and signature work, including malformed or forged credentials that reach that verifier. The `CREDENTIAL_VERIFY` charge belongs to the actual requester: the holder during presentation creation and the verifier during presentation acceptance. The issuer's tenant scopes public DID and revocation lookups; naming an issuer must never let a caller spend that issuer's quota. Creation and verification each perform one original-credential check. If both requesters belong to the same tenant, they consume two operations in that tenant's window.
+
+`VerifyCredentialAsync(tenantContext, credentialJwt)` remains tenant-local for both data lookup and accounting. The presentation service instead uses `VerifyCredentialFromIssuerAsync(requesterContext, issuerTenantId, credentialJwt)` after resolving the enrolled issuer and enforcing its stored trust policy. This public-record verification primitive grants no authority to act for the issuer. Both tenant identities must be non-empty. HTTP callers cannot select an alternate issuer tenant through the tenant-local REST endpoint.
+
 ## Migration from the mock presentation API
 
 The legacy `CreatePresentationAsync` overload with `claimsToDisclose` always throws `NotSupportedException`, including when the selection is null. The legacy `VerifyPresentationAsync` overload taking disclosure tokens always returns an invalid challenge result for a nonempty input. Migrate to the challenge-based overloads and obtain explicit agreement to disclose the whole credential.
 
 `SelectedDisclosures` remains an empty compatibility property. `DisclosedClaimNames` lists all subject claims. The service constructor now takes `ICredentialVerificationService`, `IPresentationChallengeStore` and `TimeProvider` in place of mock SD-JWT dependencies. `AddCredentialsServices()` registers the complete profile and no `ISdJwtGenerator`/`ISdJwtVerifier` mock.
 
+Custom `ICredentialVerificationService` implementations must implement the new `VerifyCredentialFromIssuerAsync` member and preserve the separation between requester accounting and issuer lookup. Do not emulate it by replacing the requester context with an issuer context.
+
 ## Operational release gates
 
 The default process-local store invalidates outstanding challenges after restart and does not coordinate across replicas. A production shared store must preserve owner/audience binding, bounded issuance, expiry, and one atomic consume operation. Do not replace it with separate distributed read/delete calls.
+
+The default rate limiter is also process-local. Its separate allow and record calls are not an atomic reservation, so strict quotas under concurrent load require further implementation work. Cross-instance atomic quotas remain a production gate.
 
 The current database enrollment/key-custody model, local revocation lookup and request model need further lifecycle and operational work before production use. State checks are not a distributed transaction spanning a relying party's later business action. This profile supplies proof validation; applications must define how promptly status changes affect their own authorization decisions.
 

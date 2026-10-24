@@ -79,6 +79,62 @@ public sealed class VerifiablePresentationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ThreeTenantFlowUsesIndependentRequesterQuotas()
+    {
+        using var limiter = new InMemoryRateLimiter(maxOperations: 1);
+        var service = CreateService(rateLimiter: limiter);
+        var original = CreateCredential();
+        var challenge = NewChallenge();
+
+        var presentation = await service.CreatePresentationAsync(_holderContext, original, _holder.Id, challenge).ConfigureAwait(true);
+        var result = await service.VerifyPresentationAsync(_verifierContext, presentation.PresentationJwt, Audience, challenge.Nonce).ConfigureAwait(true);
+
+        Assert.True(result.IsValid);
+        var issuerResult = await new CredentialVerificationService(_db, limiter).VerifyCredentialAsync(_issuerContext, original).ConfigureAwait(true);
+        Assert.True(issuerResult.IsValid);
+        Assert.False(await limiter.IsAllowedAsync(_holderContext.GetCurrentTenantId(), "CREDENTIAL_VERIFY").ConfigureAwait(true));
+        Assert.False(await limiter.IsAllowedAsync(_verifierContext.GetCurrentTenantId(), "CREDENTIAL_VERIFY").ConfigureAwait(true));
+    }
+
+    [Fact]
+    public async Task ForgedCreationExhaustsHolderQuotaWithoutSpendingIssuerQuota()
+    {
+        using var limiter = new InMemoryRateLimiter(maxOperations: 1);
+        var service = CreateService(rateLimiter: limiter);
+        var forged = CreateCredential(signingKey: _holderKey);
+        var challenge = NewChallenge();
+
+        await Assert.ThrowsAsync<ArgumentException>(() => service.CreatePresentationAsync(
+            _holderContext, forged, _holder.Id, challenge)).ConfigureAwait(true);
+
+        var legitimate = await new CredentialVerificationService(_db, limiter).VerifyCredentialAsync(_issuerContext, CreateCredential()).ConfigureAwait(true);
+        Assert.True(legitimate.IsValid);
+        Assert.False(await limiter.IsAllowedAsync(_holderContext.GetCurrentTenantId(), "CREDENTIAL_VERIFY").ConfigureAwait(true));
+        Assert.True(await limiter.IsAllowedAsync(_verifierContext.GetCurrentTenantId(), "CREDENTIAL_VERIFY").ConfigureAwait(true));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreatePresentationAsync(
+            _holderContext, forged, _holder.Id, challenge)).ConfigureAwait(true);
+    }
+
+    [Fact]
+    public async Task ForgedPresentationExhaustsVerifierQuotaWithoutSpendingIssuerQuota()
+    {
+        using var limiter = new InMemoryRateLimiter(maxOperations: 1);
+        var service = CreateService(rateLimiter: limiter);
+        var challenge = NewChallenge();
+        var forged = CreateEnvelope(CreateCredential(signingKey: _holderKey), challenge);
+
+        AssertInvalid(await service.VerifyPresentationAsync(_verifierContext, forged, Audience, challenge.Nonce).ConfigureAwait(true));
+        Assert.NotNull(_challenges.Find(_verifierContext.GetCurrentTenantId(), Audience, challenge.Nonce));
+
+        var legitimate = await new CredentialVerificationService(_db, limiter).VerifyCredentialAsync(_issuerContext, CreateCredential()).ConfigureAwait(true);
+        Assert.True(legitimate.IsValid);
+        Assert.False(await limiter.IsAllowedAsync(_verifierContext.GetCurrentTenantId(), "CREDENTIAL_VERIFY").ConfigureAwait(true));
+        Assert.True(await limiter.IsAllowedAsync(_holderContext.GetCurrentTenantId(), "CREDENTIAL_VERIFY").ConfigureAwait(true));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.VerifyPresentationAsync(
+            _verifierContext, forged, Audience, challenge.Nonce)).ConfigureAwait(true);
+    }
+
+    [Fact]
     public async Task SecurityRegressionForgedIssuerCredentialCannotBecomeValidPresentation()
     {
         var challenge = NewChallenge();
@@ -428,10 +484,11 @@ public sealed class VerifiablePresentationServiceTests : IDisposable
         AssertInvalid(await service.VerifyPresentationAsync(_verifierContext, "legacy.jwt.presentation", Array.Empty<string>()).ConfigureAwait(true));
     }
 
-    private VerifiablePresentationService CreateService(HeroDbContext? db = null, IKeyEncryptionService? encryption = null, IPresentationChallengeStore? challenges = null)
+    private VerifiablePresentationService CreateService(HeroDbContext? db = null, IKeyEncryptionService? encryption = null, IPresentationChallengeStore? challenges = null, IRateLimiter? rateLimiter = null)
     {
         var context = db ?? _db;
-        return new VerifiablePresentationService(context, new CredentialVerificationService(context, _rateLimiter), _rateLimiter,
+        var limiter = rateLimiter ?? _rateLimiter;
+        return new VerifiablePresentationService(context, new CredentialVerificationService(context, limiter), limiter,
             encryption ?? new CopyKeyEncryption(), challenges ?? _challenges, _clock);
     }
 
@@ -547,6 +604,13 @@ public sealed class VerifiablePresentationServiceTests : IDisposable
         public async Task<CredentialVerificationResult> VerifyCredentialAsync(ITenantContext tenantContext, string credentialJwt, CancellationToken cancellationToken = default)
         {
             var result = await inner.VerifyCredentialAsync(tenantContext, credentialJwt, cancellationToken).ConfigureAwait(false);
+            advance();
+            return result;
+        }
+
+        public async Task<CredentialVerificationResult> VerifyCredentialFromIssuerAsync(ITenantContext requesterContext, Guid issuerTenantId, string credentialJwt, CancellationToken cancellationToken = default)
+        {
+            var result = await inner.VerifyCredentialFromIssuerAsync(requesterContext, issuerTenantId, credentialJwt, cancellationToken).ConfigureAwait(false);
             advance();
             return result;
         }
