@@ -162,7 +162,7 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
         }
 
         // Issuer lookup ownership never grants permission to spend the issuer's request quota.
-        var isAllowed = await _rateLimiter.IsAllowedAsync(
+        var isAllowed = await _rateLimiter.TryAcquireAsync(
             requesterTenantId,
             RateLimitOperationType,
             cancellationToken).ConfigureAwait(false);
@@ -176,11 +176,7 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
             throw new InvalidOperationException("Rate limit exceeded for credential verification");
         }
 
-        // Charge the request before parsing or signature work: malformed and forged tokens
-        // must exhaust the same limit as valid credentials. A check without RecordOperation
-        // never fills InMemoryRateLimiter's sliding window.
-        await _rateLimiter.RecordOperationAsync(
-            requesterTenantId, RateLimitOperationType, cancellationToken).ConfigureAwait(false);
+        // Atomic admission above charges this requester once, before parsing or signature work.
 
         // T024: JWT format validation
         var parts = credentialJwt.Split('.');

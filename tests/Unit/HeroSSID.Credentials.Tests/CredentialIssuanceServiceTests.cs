@@ -405,6 +405,9 @@ public sealed class CredentialIssuanceServiceTests : IDisposable
 
     private sealed class MockRateLimiter : IRateLimiter
     {
+        public Task<bool> TryAcquireAsync(Guid tenantId, string operationType, CancellationToken cancellationToken = default)
+            => Task.FromResult(true);
+
         public Task<bool> IsAllowedAsync(Guid tenantId, string operationType, CancellationToken cancellationToken = default)
             => Task.FromResult(true);
 

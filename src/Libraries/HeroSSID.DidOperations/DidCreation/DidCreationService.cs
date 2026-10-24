@@ -101,15 +101,13 @@ public sealed class DidCreationService(
         if (_rateLimiter != null)
         {
             Guid tenantId = _tenantContext.GetCurrentTenantId();
-            bool isAllowed = await _rateLimiter.IsAllowedAsync(tenantId, "DID_CREATE", cancellationToken).ConfigureAwait(false);
+            bool isAllowed = await _rateLimiter.TryAcquireAsync(tenantId, "DID_CREATE", cancellationToken).ConfigureAwait(false);
 
             if (!isAllowed)
             {
                 throw new InvalidOperationException("Rate limit exceeded for DID creation. Please try again later.");
             }
 
-            // Record this operation for rate limiting
-            await _rateLimiter.RecordOperationAsync(tenantId, "DID_CREATE", cancellationToken).ConfigureAwait(false);
         }
 
         s_logStartingDidCreation(_logger, null);
