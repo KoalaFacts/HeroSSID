@@ -161,6 +161,50 @@ public sealed class Ed25519JwtSignerTests
         Assert.False(isValid);
     }
 
+    [Fact]
+    public void VerifySignedJwtRejectsPaddedSignatureEncoding()
+    {
+        var (privateKey, publicKey) = GenerateTestKeyPair();
+        var jwt = Ed25519JwtSigner.CreateSignedJwt(
+            "{\"typ\":\"vc+jwt\",\"alg\":\"EdDSA\"}",
+            "{\"iss\":\"did:example:issuer\"}",
+            privateKey);
+
+        // The same signature bytes have more than one textual representation if
+        // signature decoding accepts base64 padding. The compact JWS is unpadded.
+        var parts = jwt.Split('.');
+        var paddedSignature = parts[2] + "==";
+        Assert.Equal(Base64UrlEncoder.DecodeBytes(parts[2]), Base64UrlEncoder.DecodeBytes(paddedSignature));
+
+        Assert.True(Ed25519JwtSigner.VerifySignedJwt(jwt, publicKey));
+        Assert.False(Ed25519JwtSigner.VerifySignedJwt(
+            $"{parts[0]}.{parts[1]}.{paddedSignature}", publicKey));
+    }
+
+    [Fact]
+    public void VerifySignedJwtRejectsNonCanonicalSignaturePadBits()
+    {
+        var (privateKey, publicKey) = GenerateTestKeyPair();
+        var jwt = Ed25519JwtSigner.CreateSignedJwt(
+            "{\"typ\":\"vc+jwt\",\"alg\":\"EdDSA\"}",
+            "{\"iss\":\"did:example:issuer\"}",
+            privateKey);
+
+        var parts = jwt.Split('.');
+        const string base64UrlAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+        // Ed25519 signatures are 64 bytes: only the top two bits of the final
+        // base64url character carry data. Flip the otherwise ignored low bits.
+        var finalIndex = base64UrlAlphabet.IndexOf(parts[2][^1], StringComparison.Ordinal);
+        var alternateFinalCharacter = base64UrlAlphabet[(finalIndex & 0x30) | ((finalIndex + 1) & 0x0f)];
+        var alternateSignature = parts[2][..^1] + alternateFinalCharacter;
+        Assert.NotEqual(parts[2], alternateSignature);
+        Assert.Equal(Base64UrlEncoder.DecodeBytes(parts[2]), Base64UrlEncoder.DecodeBytes(alternateSignature));
+
+        Assert.True(Ed25519JwtSigner.VerifySignedJwt(jwt, publicKey));
+        Assert.False(Ed25519JwtSigner.VerifySignedJwt(
+            $"{parts[0]}.{parts[1]}.{alternateSignature}", publicKey));
+    }
+
     private static (byte[] privateKey, byte[] publicKey) GenerateTestKeyPair()
     {
         var algorithm = SignatureAlgorithm.Ed25519;

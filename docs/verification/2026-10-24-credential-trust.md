@@ -24,7 +24,18 @@ Regression tests use real Ed25519 or HS256 signatures and real HTTP middleware. 
 - Independently review presentation and authorization changes. Reproduce review findings, fix them and obtain a narrow recheck.
 - Check the final candidate commit's CI before integration. No test exclusions or relaxed security assertions were introduced to obtain a pass.
 
-At the integrated presentation checkpoint, the credential suite reports **196 passed, 0 failed, 2 pre-existing skips**; general unit **21**, data unit **3**, DID unit **58** and pure DID contract **7** pass. The final authorization slice reports **66 passed**, including raw-JSON duplicate-tenant and HS384 rejection cases. The full solution build reports **0 warnings and 0 errors**. The delivery PR records final counts and exact-commit CI results.
+After integrating concurrent main commit `b92ec65b8b3f2e66fdee7038efbab3fa204baddf` (PRs #11–#13), the complete local runnable set reports **389 passed, 0 failed, 2 pre-existing skips**:
+
+| Suite | Passed | Skipped |
+|---|---:|---:|
+| Credentials | 199 | 2 |
+| API | 101 | 0 |
+| General unit | 21 | 0 |
+| Data unit | 3 | 0 |
+| DID unit | 58 | 0 |
+| Pure DID contracts | 7 | 0 |
+
+The full merged Release build reports **0 warnings and 0 errors**. Upstream canonical-signature/pad-bit tests, NUL-key rejection, production issuer/audience requirements and issuance authorization coverage are retained. The authentication integration received an additional independent review with no remaining blocker. [PR #14](https://github.com/KoalaFacts/HeroSSID/pull/14) records final PostgreSQL CI and integration status.
 
 The two existing credential skips concern concurrent operations sharing one DbContext. New presentation concurrency coverage uses separate database scopes with a singleton challenge store and requires exactly one successful acceptance. The PostgreSQL presentation test also inspects executed SELECT commands to ensure verification does not retrieve encrypted private-key columns.
 

@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using HeroSSID.Api.Authentication;
 
 namespace HeroSSID.Api.Features.OAuth;
 
@@ -29,7 +28,7 @@ public static class WellKnownEndpoint
     private static IResult GetAuthorizationServerMetadata(
         HttpContext httpContext,
         [FromServices] ILogger<Program> logger,
-        [FromServices] JwtConfiguration jwt)
+        [FromServices] JwtSigningSettings jwt)
     {
         // Get the base URL from the request
         var baseUrl = $"{httpContext.Request.Scheme}://{httpContext.Request.Host}";

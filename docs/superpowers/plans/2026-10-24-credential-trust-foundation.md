@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-24-credential-trust-design.md`
 
+**Delivery tracking:** [PR #14](https://github.com/KoalaFacts/HeroSSID/pull/14) records the current candidate, CI and integration status. The final delivery checkboxes depend on that external evidence.
+
 ## Global Constraints
 
 - Retain existing target frameworks and production dependencies; no migrations or production database writes.

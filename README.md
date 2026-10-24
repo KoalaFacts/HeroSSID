@@ -46,7 +46,7 @@ export Jwt__Secret="$(openssl rand -base64 48)"
 dotnet run --project src/Services/HeroSSID.Api --no-launch-profile --urls http://localhost:5139
 ```
 
-`Jwt__Secret` is required in every environment. Missing, whitespace, shorter-than-32-byte UTF-8 values and the previous placeholder are rejected at startup. Use a stable managed secret outside disposable development; changing it invalidates outstanding access tokens. Optional `Jwt__Issuer` and `Jwt__Audience` default to `https://herossid.api` and must not be empty when configured. They identify access-token validation policy, not a requirement that the local HTTP server use that hostname.
+`Jwt__Secret` is required in every environment. Missing, whitespace, shorter-than-32-byte UTF-8 values, NUL-containing values and the previous placeholder are rejected at startup. Use a stable managed secret outside disposable development; changing it invalidates outstanding access tokens. `Jwt__Issuer` and `Jwt__Audience` must be explicitly configured outside Development. In Development they default to `https://herossid.api`. They identify access-token validation policy, not a requirement that the local HTTP server use that hostname.
 
 Development startup creates `test_client` / `test_secret` with `did:manage credential:issue credential:verify`. These are deliberately public local-development credentials. Existing seed rows are not overwritten: a retained development database needs `did:manage` explicitly granted to its test client. Production client provisioning is a separate operational responsibility.
 

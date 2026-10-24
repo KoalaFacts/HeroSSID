@@ -17,6 +17,7 @@ using HeroSSID.Api.Features.Credentials;
 using HeroSSID.Api.Features.OAuth;
 using HeroSSID.Api.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.EntityFrameworkCore;
 using Asp.Versioning;
@@ -38,6 +39,7 @@ builder.Services.AddSingleton<IRateLimiter, InMemoryRateLimiter>();
 // Every HTTP operation derives ownership from its validated bearer identity.
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantContext, AuthenticatedTenantContext>();
+builder.Services.AddScoped<IAuthorizationHandler, CredentialIssueAuthorizationHandler>();
 
 // Register DID method implementations (did:key and did:web)
 builder.Services.AddScoped<IDidMethod, DidKeyMethod>();
@@ -150,13 +152,14 @@ builder.Services.AddProblemDetails();
 // Note: AddServiceDefaults() is an Aspire extension - skipping for now as it requires Aspire ServiceDefaults package
 
 // Add JWT Bearer authentication for OAuth 2.0 (T066)
-builder.Services.AddSingleton<JwtConfiguration>();
+builder.Services.AddSingleton(provider => JwtSigningSettings.FromConfiguration(
+    provider.GetRequiredService<IConfiguration>(), provider.GetRequiredService<IHostEnvironment>()));
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer();
 
 builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
-    .Configure<JwtConfiguration>((options, jwt) =>
+    .Configure<JwtSigningSettings>((options, jwt) =>
     {
         options.MapInboundClaims = false;
         options.TokenValidationParameters = new TokenValidationParameters
@@ -188,8 +191,8 @@ builder.Services.AddAuthorizationBuilder()
     .AddPolicy("RequireAuthentication", policy => policy.RequireAuthenticatedUser())
     .AddPolicy(OperationScopes.DidManage, policy => policy.RequireAuthenticatedUser()
         .RequireAssertion(context => OperationScopes.HasScope(context.User, OperationScopes.DidManage)))
-    .AddPolicy(OperationScopes.CredentialIssue, policy => policy.RequireAuthenticatedUser()
-        .RequireAssertion(context => OperationScopes.HasScope(context.User, OperationScopes.CredentialIssue)))
+    .AddPolicy(CredentialIssueRequirement.PolicyName, policy => policy.RequireAuthenticatedUser()
+        .AddRequirements(new CredentialIssueRequirement()))
     .AddPolicy(OperationScopes.CredentialVerify, policy => policy.RequireAuthenticatedUser()
         .RequireAssertion(context => OperationScopes.HasScope(context.User, OperationScopes.CredentialVerify)));
 
@@ -212,7 +215,7 @@ builder.WebHost.ConfigureKestrel(options =>
 var app = builder.Build();
 
 // Fail before serving requests, after all host configuration providers have been applied.
-_ = app.Services.GetRequiredService<JwtConfiguration>();
+_ = app.Services.GetRequiredService<JwtSigningSettings>();
 
 // Configure the HTTP request pipeline
 if (app.Environment.IsDevelopment())

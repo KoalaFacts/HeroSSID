@@ -48,6 +48,25 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
     }
 #pragma warning restore CA2007
 
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("credential:verify")]
+    public async Task PostCredentialsIssue_WithoutIssueScope_Returns403BeforeAnyDidLookup(string scope)
+    {
+        var token = await GetAccessTokenAsync(scope);
+        var issueRequest = new
+        {
+            IssuerDid = "did:key:unused-issuer",
+            HolderDid = "did:key:unused-holder",
+            CredentialType = "DegreeCredential",
+            Claims = new { degree = "Bachelor" }
+        };
+
+        using var response = await PostAsJsonWithAuthAsync("/api/v1/credentials/issue", issueRequest, token);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
     /// <summary>
     /// T036: Contract test - POST /api/v1/credentials/issue returns JWT-VC with 201 status
     /// </summary>

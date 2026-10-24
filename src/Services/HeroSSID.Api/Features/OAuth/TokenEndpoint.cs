@@ -1,7 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
-using HeroSSID.Api.Authentication;
 using HeroSSID.Data;
 using Microsoft.AspNetCore.Cryptography.KeyDerivation;
 using Microsoft.AspNetCore.Mvc;
@@ -37,7 +36,7 @@ public static class TokenEndpoint
     private static async Task<IResult> HandleTokenRequestAsync(
         HttpContext httpContext,
         [FromServices] HeroDbContext dbContext,
-        [FromServices] JwtConfiguration jwt,
+        [FromServices] JwtSigningSettings jwt,
         [FromServices] ILogger<Program> logger)
     {
         // Parse form data
@@ -174,7 +173,7 @@ public static class TokenEndpoint
     private static string GenerateJwtToken(
         HeroSSID.Data.Entities.OAuthClient client,
         string[] scopes,
-        JwtConfiguration jwt)
+        JwtSigningSettings jwt)
     {
         // Create claims
         var claims = new List<Claim>
