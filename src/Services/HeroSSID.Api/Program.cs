@@ -148,10 +148,10 @@ builder.Services.AddProblemDetails();
 // Add structured logging (T030)
 // Note: AddServiceDefaults() is an Aspire extension - skipping for now as it requires Aspire ServiceDefaults package
 
-// Add JWT Bearer authentication for OAuth 2.0 (T066)
-var jwtSecret = builder.Configuration["Jwt:Secret"] ?? "your-256-bit-secret-key-change-in-production-min-32-chars";
-var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "https://herossid.api";
-var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "https://herossid.api";
+// Validate once at startup: no predictable signing key or implicit issuer/audience outside Development.
+// The token endpoint uses this same immutable configuration as the bearer verifier.
+var jwtSettings = JwtSigningSettings.FromConfiguration(builder.Configuration, builder.Environment);
+builder.Services.AddSingleton(jwtSettings);
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -162,9 +162,9 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateAudience = true,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            ValidIssuer = jwtIssuer,
-            ValidAudience = jwtAudience,
-            IssuerSigningKey = new SymmetricSecurityKey(System.Text.Encoding.UTF8.GetBytes(jwtSecret)),
+            ValidIssuer = jwtSettings.Issuer,
+            ValidAudience = jwtSettings.Audience,
+            IssuerSigningKey = new SymmetricSecurityKey(System.Text.Encoding.UTF8.GetBytes(jwtSettings.Secret)),
             ClockSkew = TimeSpan.FromMinutes(5)
         };
     });

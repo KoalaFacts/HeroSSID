@@ -143,6 +143,12 @@ dotnet test tests/Unit/HeroSSID.DidOperations.Tests/
 dotnet test --verbosity normal
 ```
 
+### JWT signing configuration
+
+The API signs OAuth access tokens with HMAC-SHA256. **Outside `Development`**, startup fails unless `Jwt:Secret` (at least 32 UTF-8 bytes), `Jwt:Issuer`, and `Jwt:Audience` are explicitly configured. Set these through environment-specific secret management (for example, `Jwt__Secret`, `Jwt__Issuer`, `Jwt__Audience`); never use the development signing secret outside a local environment. The OAuth token endpoint and bearer validator share these validated values.
+
+This removes a predictable default access-token signing key, **not** the platform's other production blockers: the default tenant context is still hardcoded, credential presentation still uses a mock SD-JWT implementation, and real issuer/holder trust policies remain incomplete. Do not expose this API as a multi-tenant identity service until those controls are implemented and independently tested.
+
 ### Database Migrations
 
 ```bash
