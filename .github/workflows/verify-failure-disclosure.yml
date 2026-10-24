@@ -1,0 +1,53 @@
+name: Focused non-PostgreSQL verification (not full CI)
+
+on: create
+
+permissions:
+  contents: read
+
+jobs:
+  non_database_verification:
+    if: github.event.ref_type == 'branch' && startsWith(github.event.ref, 'verify/failure-disclosure-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Identify exact source and verification boundary
+        run: |
+          git rev-parse HEAD
+          git rev-parse HEAD^
+          git diff --stat HEAD^ HEAD
+          echo 'Only non-PostgreSQL suites run here. This is NOT full CI or permission to merge.'
+      - name: Restore and build Release without changing warning policies
+        run: |
+          dotnet restore HeroSSID.sln
+          dotnet build HeroSSID.sln --configuration Release --no-restore
+      - name: Run every non-PostgreSQL suite and preserve all failures
+        shell: bash
+        run: |
+          failed=0
+          projects=(
+            tests/Unit/HeroSSID.Unit.Tests/HeroSSID.Unit.Tests.csproj
+            tests/Unit/HeroSSID.Api.Tests/HeroSSID.Api.Tests.csproj
+            tests/Unit/HeroSSID.Data.Tests/HeroSSID.Data.Tests.csproj
+            tests/Unit/HeroSSID.DidOperations.Tests/HeroSSID.DidOperations.Tests.csproj
+            tests/Contract/HeroSSID.DidOperations.Contract.Tests/HeroSSID.DidOperations.Contract.Tests.csproj
+            tests/Unit/HeroSSID.Credentials.Tests/HeroSSID.Credentials.Tests.csproj
+          )
+          for project in "${projects[@]}"; do
+            dotnet test "$project" --configuration Release --no-build --no-restore \
+              --logger 'trx;LogFileName=results.trx' --verbosity normal || failed=1
+          done
+          exit "$failed"
+      - name: Upload exact test evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: non-postgresql-test-results
+          path: '**/TestResults/*.trx'
+          retention-days: 7
