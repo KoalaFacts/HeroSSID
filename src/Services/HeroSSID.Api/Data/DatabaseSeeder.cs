@@ -39,7 +39,7 @@ internal static class DatabaseSeeder
                     ClientSecretHash = HashSecret("test_secret"),
                     DisplayName = "Test Client (Development)",
                     TenantId = HeroDbContext.DefaultTenantId,
-                    Scopes = "credential:issue credential:verify",
+                    Scopes = "did:manage credential:issue credential:verify",
                     IsEnabled = true,
                     CreatedAt = DateTimeOffset.UtcNow
                 };

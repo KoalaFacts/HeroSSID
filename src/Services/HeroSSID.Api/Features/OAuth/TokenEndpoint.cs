@@ -1,7 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
-using System.Text;
+using HeroSSID.Api.Authentication;
 using HeroSSID.Data;
 using Microsoft.AspNetCore.Cryptography.KeyDerivation;
 using Microsoft.AspNetCore.Mvc;
@@ -37,7 +37,7 @@ public static class TokenEndpoint
     private static async Task<IResult> HandleTokenRequestAsync(
         HttpContext httpContext,
         [FromServices] HeroDbContext dbContext,
-        [FromServices] IConfiguration configuration,
+        [FromServices] JwtConfiguration jwt,
         [FromServices] ILogger<Program> logger)
     {
         // Parse form data
@@ -100,7 +100,7 @@ public static class TokenEndpoint
         var client = await dbContext.OAuthClients
             .FirstOrDefaultAsync(c => c.ClientId == clientId && c.IsEnabled);
 
-        if (client == null)
+        if (client == null || client.TenantId == Guid.Empty)
         {
             logger.LogWarning("OAuth token request failed: Client {ClientId} not found", clientId);
             return Results.Json(
@@ -149,7 +149,7 @@ public static class TokenEndpoint
         }
 
         // Generate JWT token
-        var token = GenerateJwtToken(client, requestedScopes, configuration);
+        var token = GenerateJwtToken(client, requestedScopes, jwt);
 
         // T069: Log successful token issuance
         logger.LogInformation(
@@ -174,13 +174,8 @@ public static class TokenEndpoint
     private static string GenerateJwtToken(
         HeroSSID.Data.Entities.OAuthClient client,
         string[] scopes,
-        IConfiguration configuration)
+        JwtConfiguration jwt)
     {
-        // Get JWT settings from configuration (or use defaults for development)
-        var jwtSecret = configuration["Jwt:Secret"] ?? "your-256-bit-secret-key-change-in-production-min-32-chars";
-        var jwtIssuer = configuration["Jwt:Issuer"] ?? "https://herossid.api";
-        var jwtAudience = configuration["Jwt:Audience"] ?? "https://herossid.api";
-
         // Create claims
         var claims = new List<Claim>
         {
@@ -198,13 +193,12 @@ public static class TokenEndpoint
         }
 
         // Create signing credentials
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret));
-        var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+        var credentials = new SigningCredentials(jwt.SigningKey, SecurityAlgorithms.HmacSha256);
 
         // Create token
         var token = new JwtSecurityToken(
-            issuer: jwtIssuer,
-            audience: jwtAudience,
+            issuer: jwt.Issuer,
+            audience: jwt.Audience,
             claims: claims,
             notBefore: DateTime.UtcNow,
             expires: DateTime.UtcNow.AddHours(1),
@@ -224,6 +218,7 @@ public static class TokenEndpoint
         {
             // Decode the stored hash
             byte[] hashBytes = Convert.FromBase64String(storedHash);
+            if (hashBytes.Length != 48) { return false; }
 
             // Extract salt (first 16 bytes)
             byte[] salt = new byte[128 / 8];
@@ -237,16 +232,7 @@ public static class TokenEndpoint
                 iterationCount: 100000,
                 numBytesRequested: 256 / 8);
 
-            // Compare hashes (constant time comparison)
-            for (int i = 0; i < hash.Length; i++)
-            {
-                if (hashBytes[i + salt.Length] != hash[i])
-                {
-                    return false;
-                }
-            }
-
-            return true;
+            return CryptographicOperations.FixedTimeEquals(hashBytes.AsSpan(salt.Length), hash);
         }
         catch
         {

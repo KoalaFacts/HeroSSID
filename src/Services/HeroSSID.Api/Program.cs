@@ -5,7 +5,7 @@ using HeroSSID.Cryptography.Abstractions;
 using HeroSSID.Core.TenantManagement;
 using HeroSSID.Infrastructure.KeyEncryption;
 using HeroSSID.Infrastructure.RateLimiting;
-using HeroSSID.Infrastructure.TenantManagement;
+using HeroSSID.Api.Authentication;
 using HeroSSID.DidOperations.DidMethod;
 using HeroSSID.DidOperations.DidCreation;
 using HeroSSID.DidOperations.DidResolution;
@@ -35,8 +35,9 @@ builder.Services.AddScoped<IKeyEncryptionService, LocalKeyEncryptionService>();
 // Register rate limiter for credential operations
 builder.Services.AddSingleton<IRateLimiter, InMemoryRateLimiter>();
 
-// Register tenant context (MVP: single tenant, production: replace with JWT-based implementation)
-builder.Services.AddScoped<ITenantContext, DefaultTenantContext>();
+// Every HTTP operation derives ownership from its validated bearer identity.
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ITenantContext, AuthenticatedTenantContext>();
 
 // Register DID method implementations (did:key and did:web)
 builder.Services.AddScoped<IDidMethod, DidKeyMethod>();
@@ -149,28 +150,48 @@ builder.Services.AddProblemDetails();
 // Note: AddServiceDefaults() is an Aspire extension - skipping for now as it requires Aspire ServiceDefaults package
 
 // Add JWT Bearer authentication for OAuth 2.0 (T066)
-var jwtSecret = builder.Configuration["Jwt:Secret"] ?? "your-256-bit-secret-key-change-in-production-min-32-chars";
-var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "https://herossid.api";
-var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "https://herossid.api";
+builder.Services.AddSingleton<JwtConfiguration>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
+    .AddJwtBearer();
+
+builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
+    .Configure<JwtConfiguration>((options, jwt) =>
     {
+        options.MapInboundClaims = false;
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
             ValidateAudience = true,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            ValidIssuer = jwtIssuer,
-            ValidAudience = jwtAudience,
-            IssuerSigningKey = new SymmetricSecurityKey(System.Text.Encoding.UTF8.GetBytes(jwtSecret)),
-            ClockSkew = TimeSpan.FromMinutes(5)
+            ValidIssuer = jwt.Issuer,
+            ValidAudience = jwt.Audience,
+            IssuerSigningKey = jwt.SigningKey,
+            ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
+            ClockSkew = TimeSpan.Zero
+        };
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = context =>
+            {
+                if (!AuthenticatedTenantContext.HasUnambiguousValidatedTenant(context.SecurityToken, context.Principal))
+                {
+                    context.Fail("A single non-empty tenant_id GUID claim is required.");
+                }
+                return Task.CompletedTask;
+            }
         };
     });
 
 builder.Services.AddAuthorizationBuilder()
-    .AddPolicy("RequireAuthentication", policy => policy.RequireAuthenticatedUser());
+    .AddPolicy("RequireAuthentication", policy => policy.RequireAuthenticatedUser())
+    .AddPolicy(OperationScopes.DidManage, policy => policy.RequireAuthenticatedUser()
+        .RequireAssertion(context => OperationScopes.HasScope(context.User, OperationScopes.DidManage)))
+    .AddPolicy(OperationScopes.CredentialIssue, policy => policy.RequireAuthenticatedUser()
+        .RequireAssertion(context => OperationScopes.HasScope(context.User, OperationScopes.CredentialIssue)))
+    .AddPolicy(OperationScopes.CredentialVerify, policy => policy.RequireAuthenticatedUser()
+        .RequireAssertion(context => OperationScopes.HasScope(context.User, OperationScopes.CredentialVerify)));
 
 // Configure HSTS (HIGH-2)
 builder.Services.AddHsts(options =>
@@ -189,6 +210,9 @@ builder.WebHost.ConfigureKestrel(options =>
 });
 
 var app = builder.Build();
+
+// Fail before serving requests, after all host configuration providers have been applied.
+_ = app.Services.GetRequiredService<JwtConfiguration>();
 
 // Configure the HTTP request pipeline
 if (app.Environment.IsDevelopment())

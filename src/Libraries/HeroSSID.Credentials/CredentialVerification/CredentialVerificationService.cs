@@ -396,6 +396,7 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
         // SECURITY: Always filter by tenant ID to prevent cross-tenant access
         var issuerDidEntity = await _dbContext.Dids
             .Where(d => d.DidIdentifier == issuerDid && d.TenantId == tenantId)
+            .Select(d => new { d.PublicKeyEd25519, d.Status })
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -453,14 +454,23 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
             return result;
         }
 
+        // Canonical encodings keep equivalent signatures from bypassing the exact-token revocation lookup.
+        if (!StrictJwtReader.IsCanonicalCompact(credentialJwt, MaxJwtSizeBytes))
+        {
+            var result = CreateFailedResult(VerificationStatus.MalformedJwt, "JWT must use canonical compact base64url encoding");
+            LogVerificationFailure(result.Status);
+            return result;
+        }
+
         // T028a: Check credential revocation status
         // SECURITY: Check if credential has been revoked (with tenant isolation)
         var credential = await _dbContext.VerifiableCredentials
-            .Where(vc => vc.CredentialJwt == credentialJwt && vc.TenantId == tenantId)
+            .Where(vc => vc.CredentialJwt == credentialJwt && vc.TenantId == tenantId && vc.Status == "revoked")
+            .Select(vc => new { vc.Id })
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        if (credential?.Status == "revoked")
+        if (credential != null)
         {
             var result = CreateFailedResult(
                 VerificationStatus.Revoked,

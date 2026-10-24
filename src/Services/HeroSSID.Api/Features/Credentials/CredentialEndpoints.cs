@@ -1,4 +1,5 @@
 using System.Text.Json;
+using HeroSSID.Api.Authentication;
 using HeroSSID.Core.TenantManagement;
 using HeroSSID.Credentials.CredentialIssuance;
 using HeroSSID.Credentials.CredentialVerification;
@@ -17,20 +18,23 @@ public static class CredentialEndpoints
             .WithOpenApi();
 
         credentials.MapPost("/issue", IssueAsync)
-            .RequireAuthorization("RequireAuthentication")
+            .RequireAuthorization(OperationScopes.CredentialIssue)
             .WithName("IssueCredential")
             .WithSummary("Issue a JWT verifiable credential")
             .Produces<IssueCredentialResponse>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         credentials.MapPost("/verify", VerifyAsync)
-            .AllowAnonymous()
+            .RequireAuthorization(OperationScopes.CredentialVerify)
             .WithName("VerifyCredential")
             .WithSummary("Verify a JWT verifiable credential")
             .Produces<VerifyCredentialResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
@@ -54,6 +58,7 @@ public static class CredentialEndpoints
 
         try
         {
+            // Issuance scope grants access to this tenant's issuers. Per-client DID grants are future work.
             var issuerId = await didLookup.FindIssuerAsync(
                 request.IssuerDid, tenantContext.GetCurrentTenantId(), cancellationToken).ConfigureAwait(false);
             var holderId = await didLookup.FindHolderAsync(request.HolderDid, cancellationToken).ConfigureAwait(false);

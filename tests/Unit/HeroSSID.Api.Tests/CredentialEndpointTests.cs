@@ -255,7 +255,7 @@ public sealed class CredentialEndpointTests
     }
 
     [Fact]
-    public async Task RouteMetadataProtectsIssueAndAllowsAnonymousVerification()
+    public async Task RouteMetadataProtectsIssueAndVerificationWithSeparateScopes()
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
         await using var app = builder.Build();
@@ -263,10 +263,10 @@ public sealed class CredentialEndpointTests
         var endpoints = ((IEndpointRouteBuilder)app).DataSources.SelectMany(source => source.Endpoints).OfType<RouteEndpoint>().ToArray();
         var issue = Assert.Single(endpoints, endpoint => endpoint.RoutePattern.RawText == "/api/v1/credentials/issue");
         var verify = Assert.Single(endpoints, endpoint => endpoint.RoutePattern.RawText == "/api/v1/credentials/verify");
-        Assert.Contains(issue.Metadata.GetOrderedMetadata<IAuthorizeData>(), auth => auth.Policy == "RequireAuthentication");
+        Assert.Contains(issue.Metadata.GetOrderedMetadata<IAuthorizeData>(), auth => auth.Policy == "credential:issue");
         Assert.Null(issue.Metadata.GetMetadata<IAllowAnonymous>());
-        Assert.NotNull(verify.Metadata.GetMetadata<IAllowAnonymous>());
-        Assert.Empty(verify.Metadata.GetOrderedMetadata<IAuthorizeData>());
+        Assert.Null(verify.Metadata.GetMetadata<IAllowAnonymous>());
+        Assert.Contains(verify.Metadata.GetOrderedMetadata<IAuthorizeData>(), auth => auth.Policy == "credential:verify");
         Assert.Equal("POST", Assert.Single(issue.Metadata.GetMetadata<IHttpMethodMetadata>()!.HttpMethods));
         Assert.Equal("POST", Assert.Single(verify.Metadata.GetMetadata<IHttpMethodMetadata>()!.HttpMethods));
     }

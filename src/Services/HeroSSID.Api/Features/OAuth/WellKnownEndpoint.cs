@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using HeroSSID.Api.Authentication;
 
 namespace HeroSSID.Api.Features.OAuth;
 
@@ -27,7 +28,8 @@ public static class WellKnownEndpoint
     /// </summary>
     private static IResult GetAuthorizationServerMetadata(
         HttpContext httpContext,
-        [FromServices] ILogger<Program> logger)
+        [FromServices] ILogger<Program> logger,
+        [FromServices] JwtConfiguration jwt)
     {
         // Get the base URL from the request
         var baseUrl = $"{httpContext.Request.Scheme}://{httpContext.Request.Host}";
@@ -39,7 +41,7 @@ public static class WellKnownEndpoint
         var metadata = new
         {
             // RFC 8414 REQUIRED fields
-            issuer = baseUrl,
+            issuer = jwt.Issuer,
             token_endpoint = $"{baseUrl}/oauth2/token",
 
             // RFC 8414 RECOMMENDED fields
@@ -55,6 +57,7 @@ public static class WellKnownEndpoint
             },
             scopes_supported = new[]
             {
+                "did:manage",
                 "credential:issue",
                 "credential:verify"
             },

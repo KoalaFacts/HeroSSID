@@ -40,7 +40,8 @@ public sealed class AspireWebApplicationFactory : WebApplicationFactory<Program>
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["ConnectionStrings:HeroDb"] = _postgresContainer.GetConnectionString(),
-                ["HEROSSID_DB_PASSWORD"] = "test_password"
+                ["HEROSSID_DB_PASSWORD"] = "test_password",
+                ["Jwt:Secret"] = "postgres-test-only-signing-key-at-least-32-bytes"
             });
         });
 
