@@ -22,18 +22,20 @@ public sealed class CredentialVerificationResult
     public required string[] ValidationErrors { get; init; }
 
     /// <summary>
-    /// Parsed credential subject claims. Some failure results retain untrusted parsed values;
-    /// callers must require IsValid before using them as verified claims.
+    /// Issuer-signed subject claims returned only after successful verification.
+    /// The verifier returns null on failure. Acceptance of these claims remains a relying-party decision.
     /// </summary>
     public Dictionary<string, object>? CredentialSubject { get; init; }
 
     /// <summary>
-    /// Parsed issuer DID identifier. Trust it only when IsValid is true.
+    /// Issuer DID returned after successful verification; null on failure.
+    /// A verified signature does not establish that the issuer is trusted for a business purpose.
     /// </summary>
     public string? IssuerDid { get; init; }
 
     /// <summary>
-    /// Credential expiration timestamp (null if no expiration).
+    /// Credential expiration timestamp after successful verification.
+    /// Null on failure or when a valid credential has no expiration.
     /// </summary>
     public DateTimeOffset? ExpiresAt { get; init; }
 }
