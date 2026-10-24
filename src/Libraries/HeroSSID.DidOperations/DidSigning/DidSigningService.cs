@@ -37,15 +37,13 @@ public sealed class DidSigningService(
         if (_rateLimiter != null)
         {
             Guid rateLimitTenantId = _tenantContext.GetCurrentTenantId();
-            bool isAllowed = await _rateLimiter.IsAllowedAsync(rateLimitTenantId, "DID_SIGN", cancellationToken).ConfigureAwait(false);
+            bool isAllowed = await _rateLimiter.TryAcquireAsync(rateLimitTenantId, "DID_SIGN", cancellationToken).ConfigureAwait(false);
 
             if (!isAllowed)
             {
                 throw new InvalidOperationException("Rate limit exceeded for DID signing. Please try again later.");
             }
 
-            // Record this operation for rate limiting
-            await _rateLimiter.RecordOperationAsync(rateLimitTenantId, "DID_SIGN", cancellationToken).ConfigureAwait(false);
         }
 
         // SECURITY: Get current tenant context

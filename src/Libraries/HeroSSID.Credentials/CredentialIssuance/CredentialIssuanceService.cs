@@ -153,8 +153,8 @@ public sealed class CredentialIssuanceService : ICredentialIssuanceService
         CancellationToken cancellationToken)
     {
 
-        // Check rate limit
-        var isAllowed = await _rateLimiter.IsAllowedAsync(currentTenantId, "CREDENTIAL_ISSUE", cancellationToken).ConfigureAwait(false);
+        // Reserve before signing/persistence; attempts rejected by later validation still spend a slot.
+        var isAllowed = await _rateLimiter.TryAcquireAsync(currentTenantId, "CREDENTIAL_ISSUE", cancellationToken).ConfigureAwait(false);
         if (!isAllowed)
         {
             // T050: Log rate limit exceeded event
@@ -220,9 +220,6 @@ public sealed class CredentialIssuanceService : ICredentialIssuanceService
 
         _dbContext.VerifiableCredentials.Add(credential);
         await _dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-
-        // Record operation for rate limiting
-        await _rateLimiter.RecordOperationAsync(currentTenantId, "CREDENTIAL_ISSUE", cancellationToken).ConfigureAwait(false);
 
         if (_logger != null)
         {

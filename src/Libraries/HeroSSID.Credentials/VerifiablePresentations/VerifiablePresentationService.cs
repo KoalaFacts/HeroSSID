@@ -74,7 +74,7 @@ public sealed class VerifiablePresentationService : IVerifiablePresentationServi
             throw new ArgumentException("A non-empty holder tenant is required.", nameof(tenantContext));
         }
 
-        if (!await _rateLimiter.IsAllowedAsync(tenantId, "PRESENTATION_CREATE", cancellationToken).ConfigureAwait(false))
+        if (!await _rateLimiter.TryAcquireAsync(tenantId, "PRESENTATION_CREATE", cancellationToken).ConfigureAwait(false))
         {
             throw new InvalidOperationException("Rate limit exceeded for presentation creation.");
         }
@@ -121,7 +121,6 @@ public sealed class VerifiablePresentationService : IVerifiablePresentationServi
         {
             privateKey = _keyEncryptionService.Decrypt(encryptedKey);
             var jwt = Ed25519JwtSigner.CreateSignedJwt(PresentationHeader, payload, privateKey);
-            await _rateLimiter.RecordOperationAsync(tenantId, "PRESENTATION_CREATE", cancellationToken).ConfigureAwait(false);
             return new PresentationResult
             {
                 PresentationJwt = jwt,
