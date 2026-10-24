@@ -6,6 +6,17 @@ namespace HeroSSID.Infrastructure.RateLimiting;
 public interface IRateLimiter
 {
     /// <summary>
+    /// Atomically reserves one operation within the active sliding window.
+    /// Rejected admission does not consume capacity. For enforcement use this call:
+    /// a separate check and record allows concurrent oversubscription.
+    /// </summary>
+    /// <param name="tenantId">The authenticated requester tenant</param>
+    /// <param name="operationType">Operation category</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Whether one permit was reserved</returns>
+    public Task<bool> TryAcquireAsync(Guid tenantId, string operationType, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Checks if an operation is allowed under current rate limits
     /// </summary>
     /// <param name="tenantId">Tenant identifier for rate limit tracking</param>
