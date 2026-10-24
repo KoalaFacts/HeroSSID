@@ -78,6 +78,16 @@ public sealed class JwtSigningSettingsTests
         Assert.Equal("https://api.example", settings.Audience);
     }
 
+    [Fact]
+    public void DiagnosticStringRepresentationNeverIncludesTheSigningSecret()
+    {
+        var settings = JwtSigningSettings.FromConfiguration(
+            ValidProductionConfiguration(),
+            new TestEnvironment("Production"));
+
+        Assert.DoesNotContain(settings.Secret, settings.ToString(), StringComparison.Ordinal);
+    }
+
     private static IConfigurationRoot ValidProductionConfiguration(string? secret = null) => Configuration(
         ("Jwt:Secret", secret ?? new string('k', 32)),
         ("Jwt:Issuer", "https://issuer.example"),
