@@ -194,7 +194,7 @@ public sealed class Ed25519JwtSignerTests
         const string base64UrlAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
         // Ed25519 signatures are 64 bytes: only the top two bits of the final
         // base64url character carry data. Flip the otherwise ignored low bits.
-        var finalIndex = base64UrlAlphabet.IndexOf(parts[2][^1]);
+        var finalIndex = base64UrlAlphabet.IndexOf(parts[2][^1], StringComparison.Ordinal);
         var alternateFinalCharacter = base64UrlAlphabet[(finalIndex & 0x30) | ((finalIndex + 1) & 0x0f)];
         var alternateSignature = parts[2][..^1] + alternateFinalCharacter;
         Assert.NotEqual(parts[2], alternateSignature);
