@@ -284,6 +284,46 @@ public sealed class CredentialVerificationServiceTests : IDisposable
         Assert.Equal(VerificationStatus.SignatureInvalid, paddedResult.Status);
     }
 
+    [Fact]
+    public async Task VerifyCredentialAsyncMalformedRequestsConsumeRateLimitPerTenant()
+    {
+        using var limiter = new InMemoryRateLimiter(windowSize: TimeSpan.FromMinutes(1), maxOperations: 2);
+        var verifier = new CredentialVerificationService(_dbContext, limiter);
+        const string invalidJwt = "not.a.valid.jwt.format";
+
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var rejected = await verifier.VerifyCredentialAsync(_tenantContext, invalidJwt).ConfigureAwait(true);
+            Assert.False(rejected.IsValid);
+            Assert.Equal(VerificationStatus.MalformedJwt, rejected.Status);
+        }
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await verifier.VerifyCredentialAsync(_tenantContext, invalidJwt).ConfigureAwait(true)).ConfigureAwait(true);
+        Assert.Contains("Rate limit exceeded", exception.Message, StringComparison.Ordinal);
+
+        // The exhausted caller must not consume another tenant's independent window.
+        var otherTenant = new TestTenantContext(Guid.Parse("22222222-2222-2222-2222-222222222222"));
+        var otherResult = await verifier.VerifyCredentialAsync(otherTenant, invalidJwt).ConfigureAwait(true);
+        Assert.Equal(VerificationStatus.MalformedJwt, otherResult.Status);
+    }
+
+    [Fact]
+    public async Task VerifyCredentialAsyncSuccessfulRequestsAlsoConsumeRateLimit()
+    {
+        await SeedTestIssuerDidAsync().ConfigureAwait(true);
+        using var limiter = new InMemoryRateLimiter(windowSize: TimeSpan.FromMinutes(1), maxOperations: 1);
+        var verifier = new CredentialVerificationService(_dbContext, limiter);
+        var credential = CreateValidTestJwt();
+
+        var first = await verifier.VerifyCredentialAsync(_tenantContext, credential).ConfigureAwait(true);
+        Assert.True(first.IsValid);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await verifier.VerifyCredentialAsync(_tenantContext, credential).ConfigureAwait(true)).ConfigureAwait(true);
+        Assert.Contains("Rate limit exceeded", exception.Message, StringComparison.Ordinal);
+    }
+
     private CredentialVerificationService CreateService()
     {
         return new CredentialVerificationService(_dbContext, _rateLimiter, null);

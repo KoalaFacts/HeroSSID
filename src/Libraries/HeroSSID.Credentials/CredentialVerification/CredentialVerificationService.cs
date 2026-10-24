@@ -153,6 +153,12 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
             throw new InvalidOperationException("Rate limit exceeded for credential verification");
         }
 
+        // Charge the request before parsing or signature work: malformed and forged tokens
+        // must exhaust the same limit as valid credentials. A check without RecordOperation
+        // never fills InMemoryRateLimiter's sliding window.
+        await _rateLimiter.RecordOperationAsync(
+            tenantId, RateLimitOperationType, cancellationToken).ConfigureAwait(false);
+
         // T024: JWT format validation
         var parts = credentialJwt.Split('.');
         if (parts.Length != 3)
