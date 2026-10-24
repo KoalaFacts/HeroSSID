@@ -97,6 +97,23 @@ public sealed class VerifiablePresentationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task InvalidPresentationCreationAlsoConsumesCreationQuota()
+    {
+        using var limiter = new InMemoryRateLimiter(maxOperations: 1);
+        var service = CreateService(rateLimiter: limiter);
+        var forged = CreateCredential(signingKey: _holderKey);
+        var challenge = NewChallenge();
+
+        await Assert.ThrowsAsync<ArgumentException>(() => service.CreatePresentationAsync(
+            _holderContext, forged, _holder.Id, challenge)).ConfigureAwait(true);
+
+        Assert.False(await limiter.IsAllowedAsync(
+            _holderContext.GetCurrentTenantId(), "PRESENTATION_CREATE").ConfigureAwait(true));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreatePresentationAsync(
+            _holderContext, forged, _holder.Id, challenge)).ConfigureAwait(true);
+    }
+
+    [Fact]
     public async Task ForgedCreationExhaustsHolderQuotaWithoutSpendingIssuerQuota()
     {
         using var limiter = new InMemoryRateLimiter(maxOperations: 1);

@@ -65,7 +65,9 @@ Custom `ICredentialVerificationService` implementations must implement the new `
 
 The default process-local store invalidates outstanding challenges after restart and does not coordinate across replicas. A production shared store must preserve owner/audience binding, bounded issuance, expiry, and one atomic consume operation. Do not replace it with separate distributed read/delete calls.
 
-The default rate limiter is also process-local. Its separate allow and record calls are not an atomic reservation, so strict quotas under concurrent load require further implementation work. Cross-instance atomic quotas remain a production gate.
+The default rate limiter is process-local and now offers atomic sliding-window reservation through `IRateLimiter.TryAcquireAsync`. Credential verification, issuance, presentation creation and DID creation/signing use this single call. Admission is charged before costly validation/cryptography; failed or forged attempts after basic input checks consume one slot, not only successful writes. Concurrent callers within one process cannot exceed a tenant/operation window limit.
+
+Legacy `IsAllowedAsync` and `RecordOperationAsync` remain for observation/recording compatibility, but must **not** be combined to enforce quotas: that two-call pattern is racy. Custom `IRateLimiter` implementations must implement atomic `TryAcquireAsync` before upgrading. This is not a distributed quota: cross-instance atomic reservation and persistence remain production release gates.
 
 The current database enrollment/key-custody model, local revocation lookup and request model need further lifecycle and operational work before production use. State checks are not a distributed transaction spanning a relying party's later business action. This profile supplies proof validation; applications must define how promptly status changes affect their own authorization decisions.
 

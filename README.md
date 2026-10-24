@@ -102,6 +102,8 @@ dotnet test tests/Unit/HeroSSID.Api.Tests --configuration Release
 dotnet test HeroSSID.sln --configuration Release
 ```
 
+The default in-memory operation limiter now reserves permits atomically per tenant and operation. Issuance and presentation creation charge an attempt before costly work, even if it later fails. This protects one process only, not multiple replicas; alternative `IRateLimiter` implementations must provide atomic `TryAcquireAsync`. Legacy `IsAllowedAsync` plus `RecordOperationAsync` is for observation/recording, not enforcement.
+
 The repository currently contains xUnit v2 and v3 projects. The credential suite retains two pre-existing skipped concurrency tests that use a shared DbContext; the new presentation replay test uses separate database scopes and a shared challenge store. PostgreSQL presentation tests also check that verification SQL does not select private-key columns. Test names containing “OpenID4VC” cover existing HTTP contracts and do not certify the unfinished protocols.
 
 Production readiness requires durable shared challenge consumption, complete signing-key and revocation lifecycles, interoperability testing, operational controls and independent security review. No production-readiness or standards-conformance certification is claimed.
