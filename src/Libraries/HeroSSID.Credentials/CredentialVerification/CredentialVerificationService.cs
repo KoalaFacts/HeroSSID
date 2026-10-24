@@ -118,13 +118,37 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
     /// <returns>Structured verification result with status code and details</returns>
     /// <exception cref="ArgumentNullException">Thrown when tenantContext is null</exception>
     /// <exception cref="ArgumentException">Thrown when credentialJwt is null or empty</exception>
-    public async Task<CredentialVerificationResult> VerifyCredentialAsync(
+    public Task<CredentialVerificationResult> VerifyCredentialAsync(
         ITenantContext tenantContext,
         string credentialJwt,
         CancellationToken cancellationToken = default)
     {
-        // T023: Input validation
         ArgumentNullException.ThrowIfNull(tenantContext);
+        var tenantId = tenantContext.GetCurrentTenantId();
+        return VerifyCredentialCoreAsync(tenantId, tenantId, credentialJwt, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task<CredentialVerificationResult> VerifyCredentialFromIssuerAsync(
+        ITenantContext requesterContext,
+        Guid issuerTenantId,
+        string credentialJwt,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(requesterContext);
+        return VerifyCredentialCoreAsync(requesterContext.GetCurrentTenantId(), issuerTenantId, credentialJwt, cancellationToken);
+    }
+
+    private async Task<CredentialVerificationResult> VerifyCredentialCoreAsync(
+        Guid requesterTenantId,
+        Guid issuerTenantId,
+        string credentialJwt,
+        CancellationToken cancellationToken)
+    {
+        if (requesterTenantId == Guid.Empty || issuerTenantId == Guid.Empty)
+        {
+            throw new ArgumentException("Non-empty requester and issuer tenant identities are required.");
+        }
 
         if (string.IsNullOrWhiteSpace(credentialJwt))
         {
@@ -137,10 +161,9 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
             throw new ArgumentException($"JWT size exceeds maximum allowed size of {MaxJwtSizeBytes} bytes", nameof(credentialJwt));
         }
 
-        // Rate limiting check - use tenant ID for proper isolation
-        var tenantId = tenantContext.GetCurrentTenantId();
+        // Issuer lookup ownership never grants permission to spend the issuer's request quota.
         var isAllowed = await _rateLimiter.IsAllowedAsync(
-            tenantId,
+            requesterTenantId,
             RateLimitOperationType,
             cancellationToken).ConfigureAwait(false);
 
@@ -148,10 +171,16 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
         {
             if (_logger != null)
             {
-                _logRateLimitExceeded(_logger, tenantId, null);
+                _logRateLimitExceeded(_logger, requesterTenantId, null);
             }
             throw new InvalidOperationException("Rate limit exceeded for credential verification");
         }
+
+        // Charge the request before parsing or signature work: malformed and forged tokens
+        // must exhaust the same limit as valid credentials. A check without RecordOperation
+        // never fills InMemoryRateLimiter's sliding window.
+        await _rateLimiter.RecordOperationAsync(
+            requesterTenantId, RateLimitOperationType, cancellationToken).ConfigureAwait(false);
 
         // T024: JWT format validation
         var parts = credentialJwt.Split('.');
@@ -395,7 +424,8 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
         // T027: Resolve issuer DID from database with ENFORCED tenant isolation
         // SECURITY: Always filter by tenant ID to prevent cross-tenant access
         var issuerDidEntity = await _dbContext.Dids
-            .Where(d => d.DidIdentifier == issuerDid && d.TenantId == tenantId)
+            .Where(d => d.DidIdentifier == issuerDid && d.TenantId == issuerTenantId)
+            .Select(d => new { d.PublicKeyEd25519, d.Status })
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -409,7 +439,7 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
                 credentialSubject);
             if (_logger != null)
             {
-                _logIssuerNotFound(_logger, issuerDid, tenantId, null);
+                _logIssuerNotFound(_logger, issuerDid, issuerTenantId, null);
             }
             LogVerificationFailure(result.Status);
             return result;
@@ -453,14 +483,23 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
             return result;
         }
 
+        // Canonical encodings keep equivalent signatures from bypassing the exact-token revocation lookup.
+        if (!StrictJwtReader.IsCanonicalCompact(credentialJwt, MaxJwtSizeBytes))
+        {
+            var result = CreateFailedResult(VerificationStatus.MalformedJwt, "JWT must use canonical compact base64url encoding");
+            LogVerificationFailure(result.Status);
+            return result;
+        }
+
         // T028a: Check credential revocation status
         // SECURITY: Check if credential has been revoked (with tenant isolation)
         var credential = await _dbContext.VerifiableCredentials
-            .Where(vc => vc.CredentialJwt == credentialJwt && vc.TenantId == tenantId)
+            .Where(vc => vc.CredentialJwt == credentialJwt && vc.TenantId == issuerTenantId && vc.Status == "revoked")
+            .Select(vc => new { vc.Id })
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        if (credential?.Status == "revoked")
+        if (credential != null)
         {
             var result = CreateFailedResult(
                 VerificationStatus.Revoked,

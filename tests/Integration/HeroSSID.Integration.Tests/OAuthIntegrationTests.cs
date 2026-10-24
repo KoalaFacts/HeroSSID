@@ -45,16 +45,16 @@ public sealed class OAuthIntegrationTests : IClassFixture<AspireWebApplicationFa
 
         Assert.False(string.IsNullOrWhiteSpace(accessToken), "Access token must not be empty");
 
-        // Step 2: Create DIDs (no auth required)
+        // Step 2: Create DIDs with did:manage authorization
         var issuerDidRequest = new { Method = "did:key", KeyType = "Ed25519" };
-        var issuerResponse = await _client.PostAsJsonAsync("/api/v1/dids", issuerDidRequest, ct);
+        var issuerResponse = await _client.AuthorizedPostAsJsonAsync("/api/v1/dids", issuerDidRequest, ct);
         var issuerResult = await issuerResponse.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
         string issuerDid = issuerResult.TryGetProperty("did", out var issuerDidElement)
             ? issuerDidElement.GetString() ?? throw new InvalidOperationException("Issuer DID is null")
             : throw new InvalidOperationException("Issuer DID not found");
 
         var holderDidRequest = new { Method = "did:key", KeyType = "Ed25519" };
-        var holderResponse = await _client.PostAsJsonAsync("/api/v1/dids", holderDidRequest, ct);
+        var holderResponse = await _client.AuthorizedPostAsJsonAsync("/api/v1/dids", holderDidRequest, ct);
         var holderResult = await holderResponse.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
         string holderDid = holderResult.TryGetProperty("did", out var holderDidElement)
             ? holderDidElement.GetString() ?? throw new InvalidOperationException("Holder DID is null")
@@ -94,10 +94,10 @@ public sealed class OAuthIntegrationTests : IClassFixture<AspireWebApplicationFa
         var jwtParts = credential.Split('.');
         Assert.Equal(3, jwtParts.Length);
 
-        // Step 4: Verify the credential (currently no auth required, but respects token if provided)
+        // Step 4: Verify the credential with credential:verify authorization
         var verifyRequest = new { Credential = credential };
 
-        var verifyResponse = await _client.PostAsJsonAsync("/api/v1/credentials/verify", verifyRequest, ct);
+        var verifyResponse = await _client.AuthorizedPostAsJsonAsync("/api/v1/credentials/verify", verifyRequest, ct);
         Assert.Equal(HttpStatusCode.OK, verifyResponse.StatusCode);
 
         var verifyResult = await verifyResponse.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);

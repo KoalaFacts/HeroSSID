@@ -284,6 +284,85 @@ public sealed class CredentialVerificationServiceTests : IDisposable
         Assert.Equal(VerificationStatus.SignatureInvalid, paddedResult.Status);
     }
 
+    [Fact]
+    public async Task VerifyCredentialAsyncMalformedRequestsConsumeRateLimitPerTenant()
+    {
+        using var limiter = new InMemoryRateLimiter(windowSize: TimeSpan.FromMinutes(1), maxOperations: 2);
+        var verifier = new CredentialVerificationService(_dbContext, limiter);
+        const string invalidJwt = "not.a.valid.jwt.format";
+
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var rejected = await verifier.VerifyCredentialAsync(_tenantContext, invalidJwt).ConfigureAwait(true);
+            Assert.False(rejected.IsValid);
+            Assert.Equal(VerificationStatus.MalformedJwt, rejected.Status);
+        }
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await verifier.VerifyCredentialAsync(_tenantContext, invalidJwt).ConfigureAwait(true)).ConfigureAwait(true);
+        Assert.Contains("Rate limit exceeded", exception.Message, StringComparison.Ordinal);
+
+        // The exhausted caller must not consume another tenant's independent window.
+        var otherTenant = new TestTenantContext(Guid.Parse("22222222-2222-2222-2222-222222222222"));
+        var otherResult = await verifier.VerifyCredentialAsync(otherTenant, invalidJwt).ConfigureAwait(true);
+        Assert.Equal(VerificationStatus.MalformedJwt, otherResult.Status);
+    }
+
+    [Fact]
+    public async Task VerifyCredentialAsyncSuccessfulRequestsAlsoConsumeRateLimit()
+    {
+        await SeedTestIssuerDidAsync().ConfigureAwait(true);
+        using var limiter = new InMemoryRateLimiter(windowSize: TimeSpan.FromMinutes(1), maxOperations: 1);
+        var verifier = new CredentialVerificationService(_dbContext, limiter);
+        var credential = CreateValidTestJwt();
+
+        var first = await verifier.VerifyCredentialAsync(_tenantContext, credential).ConfigureAwait(true);
+        Assert.True(first.IsValid);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await verifier.VerifyCredentialAsync(_tenantContext, credential).ConfigureAwait(true)).ConfigureAwait(true);
+        Assert.Contains("Rate limit exceeded", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task VerifyCredentialFromIssuerKeepsPublicLookupsInTheExplicitIssuerTenant()
+    {
+        await SeedTestIssuerDidAsync().ConfigureAwait(true);
+        var service = CreateService();
+        var original = CreateValidTestJwt();
+        var requester = new TestTenantContext(Guid.Parse("22222222-2222-2222-2222-222222222222"));
+
+        var tenantLocal = await service.VerifyCredentialAsync(requester, original).ConfigureAwait(true);
+        Assert.Equal(VerificationStatus.IssuerNotFound, tenantLocal.Status);
+        var publicProof = await service.VerifyCredentialFromIssuerAsync(requester, _tenantId, original).ConfigureAwait(true);
+        Assert.True(publicProof.IsValid);
+        var wrongLookup = await service.VerifyCredentialFromIssuerAsync(_tenantContext, requester.GetCurrentTenantId(), original).ConfigureAwait(true);
+        Assert.Equal(VerificationStatus.IssuerNotFound, wrongLookup.Status);
+
+        var issuer = await _dbContext.Dids.SingleAsync().ConfigureAwait(true);
+        _dbContext.VerifiableCredentials.Add(new VerifiableCredentialEntity
+        {
+            Id = Guid.NewGuid(), TenantId = _tenantId, IssuerDidId = issuer.Id, HolderDidId = issuer.Id,
+            CredentialType = "TestCredential", CredentialJwt = original, Status = "revoked"
+        });
+        await _dbContext.SaveChangesAsync().ConfigureAwait(true);
+        var revoked = await service.VerifyCredentialFromIssuerAsync(requester, _tenantId, original).ConfigureAwait(true);
+        Assert.False(revoked.IsValid);
+        Assert.Equal(VerificationStatus.Revoked, revoked.Status);
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task VerifyCredentialFromIssuerRejectsEmptyTenantIdentities(bool emptyRequester, bool emptyIssuer)
+    {
+        var requester = new TestTenantContext(emptyRequester ? Guid.Empty : _tenantId);
+        var issuer = emptyIssuer ? Guid.Empty : _tenantId;
+        await Assert.ThrowsAsync<ArgumentException>(() => CreateService().VerifyCredentialFromIssuerAsync(
+            requester, issuer, CreateValidTestJwt())).ConfigureAwait(true);
+    }
+
     private CredentialVerificationService CreateService()
     {
         return new CredentialVerificationService(_dbContext, _rateLimiter, null);

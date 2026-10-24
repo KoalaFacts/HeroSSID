@@ -26,7 +26,7 @@ public class DidEndpointContractTests(AspireWebApplicationFactory factory) : ICl
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/api/v1/dids", request);
+        var response = await _client.AuthorizedPostAsJsonAsync("/api/v1/dids", request);
 
         // Assert
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -53,7 +53,7 @@ public class DidEndpointContractTests(AspireWebApplicationFactory factory) : ICl
             Method = "did:key",
             KeyType = "Ed25519"
         };
-        var createResponse = await _client.PostAsJsonAsync("/api/v1/dids", createRequest);
+        var createResponse = await _client.AuthorizedPostAsJsonAsync("/api/v1/dids", createRequest);
         var createResult = await createResponse.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
 
         // Extract DID from response (location or body)
@@ -62,7 +62,7 @@ public class DidEndpointContractTests(AspireWebApplicationFactory factory) : ICl
             : throw new InvalidOperationException("DID not found in create response");
 
         // Act
-        var response = await _client.GetAsync($"/api/v1/dids/{Uri.EscapeDataString(did)}");
+        var response = await _client.AuthorizedGetAsync($"/api/v1/dids/{Uri.EscapeDataString(did)}");
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -94,7 +94,7 @@ public class DidEndpointContractTests(AspireWebApplicationFactory factory) : ICl
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/api/v1/dids", invalidRequest);
+        var response = await _client.AuthorizedPostAsJsonAsync("/api/v1/dids", invalidRequest);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -115,7 +115,7 @@ public class DidEndpointContractTests(AspireWebApplicationFactory factory) : ICl
         string nonExistentDid = "did:key:z6MkNonExistent";
 
         // Act
-        var response = await _client.GetAsync($"/api/v1/dids/{Uri.EscapeDataString(nonExistentDid)}");
+        var response = await _client.AuthorizedGetAsync($"/api/v1/dids/{Uri.EscapeDataString(nonExistentDid)}");
 
         // Assert
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);

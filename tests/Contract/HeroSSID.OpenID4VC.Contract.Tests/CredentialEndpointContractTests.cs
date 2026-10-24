@@ -80,7 +80,7 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
             Method = "did:key",
             KeyType = "Ed25519"
         };
-        var issuerResponse = await _client.PostAsJsonAsync("/api/v1/dids", createIssuerDidRequest);
+        var issuerResponse = await _client.AuthorizedPostAsJsonAsync("/api/v1/dids", createIssuerDidRequest);
         var issuerDid = await SetupResponse.ReadRequiredStringAsync(
             issuerResponse, HttpStatusCode.Created, "Create issuer DID", "did");
 
@@ -89,7 +89,7 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
             Method = "did:key",
             KeyType = "Ed25519"
         };
-        var holderResponse = await _client.PostAsJsonAsync("/api/v1/dids", createHolderDidRequest);
+        var holderResponse = await _client.AuthorizedPostAsJsonAsync("/api/v1/dids", createHolderDidRequest);
         var holderDid = await SetupResponse.ReadRequiredStringAsync(
             holderResponse, HttpStatusCode.Created, "Create holder DID", "did");
 
@@ -136,12 +136,12 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
         // Arrange
         // First issue a credential
         var issuerDidRequest = new { Method = "did:key", KeyType = "Ed25519" };
-        var issuerResponse = await _client.PostAsJsonAsync("/api/v1/dids", issuerDidRequest);
+        var issuerResponse = await _client.AuthorizedPostAsJsonAsync("/api/v1/dids", issuerDidRequest);
         var issuerDid = await SetupResponse.ReadRequiredStringAsync(
             issuerResponse, HttpStatusCode.Created, "Create issuer DID", "did");
 
         var holderDidRequest = new { Method = "did:key", KeyType = "Ed25519" };
-        var holderResponse = await _client.PostAsJsonAsync("/api/v1/dids", holderDidRequest);
+        var holderResponse = await _client.AuthorizedPostAsJsonAsync("/api/v1/dids", holderDidRequest);
         var holderDid = await SetupResponse.ReadRequiredStringAsync(
             holderResponse, HttpStatusCode.Created, "Create holder DID", "did");
 
@@ -213,7 +213,7 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/api/v1/credentials/verify", verifyRequest);
+        var response = await _client.AuthorizedPostAsJsonAsync("/api/v1/credentials/verify", verifyRequest);
 
         // Assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -230,12 +230,12 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
         // Arrange
         // First issue a valid credential
         var issuerDidRequest = new { Method = "did:key", KeyType = "Ed25519" };
-        var issuerResponse = await _client.PostAsJsonAsync("/api/v1/dids", issuerDidRequest);
+        var issuerResponse = await _client.AuthorizedPostAsJsonAsync("/api/v1/dids", issuerDidRequest);
         var issuerDid = await SetupResponse.ReadRequiredStringAsync(
             issuerResponse, HttpStatusCode.Created, "Create issuer DID", "did");
 
         var holderDidRequest = new { Method = "did:key", KeyType = "Ed25519" };
-        var holderResponse = await _client.PostAsJsonAsync("/api/v1/dids", holderDidRequest);
+        var holderResponse = await _client.AuthorizedPostAsJsonAsync("/api/v1/dids", holderDidRequest);
         var holderDid = await SetupResponse.ReadRequiredStringAsync(
             holderResponse, HttpStatusCode.Created, "Create holder DID", "did");
 
@@ -280,14 +280,14 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
     public async Task PostCredentialsIssue_WithoutAuthorizationToken_Returns401()
     {
         // Arrange - create request without Authorization header
-        // First create DIDs (DID creation should NOT require auth)
+        // First create DIDs with explicit did:manage authorization
         var issuerDidRequest = new { Method = "did:key", KeyType = "Ed25519" };
-        var issuerResponse = await _client.PostAsJsonAsync("/api/v1/dids", issuerDidRequest);
+        var issuerResponse = await _client.AuthorizedPostAsJsonAsync("/api/v1/dids", issuerDidRequest);
         var issuerDid = await SetupResponse.ReadRequiredStringAsync(
             issuerResponse, HttpStatusCode.Created, "Create issuer DID", "did");
 
         var holderDidRequest = new { Method = "did:key", KeyType = "Ed25519" };
-        var holderResponse = await _client.PostAsJsonAsync("/api/v1/dids", holderDidRequest);
+        var holderResponse = await _client.AuthorizedPostAsJsonAsync("/api/v1/dids", holderDidRequest);
         var holderDid = await SetupResponse.ReadRequiredStringAsync(
             holderResponse, HttpStatusCode.Created, "Create holder DID", "did");
 
@@ -322,12 +322,12 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
 
         // Create DIDs
         var issuerDidRequest = new { Method = "did:key", KeyType = "Ed25519" };
-        var issuerResponse = await _client.PostAsJsonAsync("/api/v1/dids", issuerDidRequest);
+        var issuerResponse = await _client.AuthorizedPostAsJsonAsync("/api/v1/dids", issuerDidRequest);
         var issuerDid = await SetupResponse.ReadRequiredStringAsync(
             issuerResponse, HttpStatusCode.Created, "Create issuer DID", "did");
 
         var holderDidRequest = new { Method = "did:key", KeyType = "Ed25519" };
-        var holderResponse = await _client.PostAsJsonAsync("/api/v1/dids", holderDidRequest);
+        var holderResponse = await _client.AuthorizedPostAsJsonAsync("/api/v1/dids", holderDidRequest);
         var holderDid = await SetupResponse.ReadRequiredStringAsync(
             holderResponse, HttpStatusCode.Created, "Create holder DID", "did");
 
@@ -375,12 +375,12 @@ public class CredentialEndpointContractTests(AspireWebApplicationFactory factory
 
         // Create DIDs
         var issuerDidRequest = new { Method = "did:key", KeyType = "Ed25519" };
-        var issuerResponse = await _client.PostAsJsonAsync("/api/v1/dids", issuerDidRequest);
+        var issuerResponse = await _client.AuthorizedPostAsJsonAsync("/api/v1/dids", issuerDidRequest);
         var issuerDid = await SetupResponse.ReadRequiredStringAsync(
             issuerResponse, HttpStatusCode.Created, "Create issuer DID", "did");
 
         var holderDidRequest = new { Method = "did:key", KeyType = "Ed25519" };
-        var holderResponse = await _client.PostAsJsonAsync("/api/v1/dids", holderDidRequest);
+        var holderResponse = await _client.AuthorizedPostAsJsonAsync("/api/v1/dids", holderDidRequest);
         var holderDid = await SetupResponse.ReadRequiredStringAsync(
             holderResponse, HttpStatusCode.Created, "Create holder DID", "did");
 

@@ -8,11 +8,11 @@ namespace HeroSSID.Api.Tests;
 public sealed class JwtSigningSettingsTests
 {
     [Fact]
-    public void DevelopmentAllowsExplicitlyLocalDefaults()
+    public void DevelopmentRequiresSecretButAllowsLocalIssuerAudienceDefaults()
     {
-        var settings = JwtSigningSettings.FromConfiguration(Configuration(), new TestEnvironment("Development"));
+        var settings = JwtSigningSettings.FromConfiguration(Configuration(("Jwt:Secret", new string('k', 32))), new TestEnvironment("Development"));
 
-        Assert.Equal(JwtSigningSettings.DevelopmentSecret, settings.Secret);
+        Assert.Equal(new string('k', 32), settings.Secret);
         Assert.Equal("https://herossid.api", settings.Issuer);
         Assert.Equal("https://herossid.api", settings.Audience);
     }
@@ -20,7 +20,8 @@ public sealed class JwtSigningSettingsTests
     [Theory]
     [InlineData("Production")]
     [InlineData("Staging")]
-    public void NonDevelopmentRequiresAnExplicitSigningSecret(string environmentName)
+    [InlineData("Development")]
+    public void EveryEnvironmentRequiresAnExplicitSigningSecret(string environmentName)
     {
         var config = Configuration(
             ("Jwt:Issuer", "https://issuer.example"),
@@ -32,12 +33,14 @@ public sealed class JwtSigningSettingsTests
         Assert.Contains("Jwt:Secret", failure.Message, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void ProductionRejectsExampleSigningSecret()
+    [Theory]
+    [InlineData("Production")]
+    [InlineData("Development")]
+    public void EveryEnvironmentRejectsExampleSigningSecret(string environmentName)
     {
         var failure = Assert.Throws<InvalidOperationException>(() => JwtSigningSettings.FromConfiguration(
             ValidProductionConfiguration(secret: JwtSigningSettings.DevelopmentSecret),
-            new TestEnvironment("Production")));
+            new TestEnvironment(environmentName)));
 
         Assert.Contains("example", failure.Message, StringComparison.Ordinal);
     }
@@ -45,7 +48,8 @@ public sealed class JwtSigningSettingsTests
     [Theory]
     [InlineData("Production")]
     [InlineData("Staging")]
-    public void NonDevelopmentRejectsHmacEquivalentZeroPaddedExampleKeys(string environmentName)
+    [InlineData("Development")]
+    public void EveryEnvironmentRejectsHmacEquivalentZeroPaddedExampleKeys(string environmentName)
     {
         // HMAC-SHA256 pads the public example key with zero bytes to a 64-byte block.
         // Suffixing that key with literal NULs produces exactly the same MAC.
@@ -95,6 +99,32 @@ public sealed class JwtSigningSettingsTests
         Assert.Equal(new string('k', 32), settings.Secret);
         Assert.Equal("https://issuer.example", settings.Issuer);
         Assert.Equal("https://api.example", settings.Audience);
+    }
+
+    [Theory]
+    [InlineData("Jwt:Issuer", "")]
+    [InlineData("Jwt:Issuer", " ")]
+    [InlineData("Jwt:Audience", "")]
+    [InlineData("Jwt:Audience", " ")]
+    public void DevelopmentRejectsExplicitlyEmptyIssuerOrAudience(string setting, string value)
+    {
+        var config = ValidProductionConfiguration();
+        config[setting] = value;
+        var failure = Assert.Throws<InvalidOperationException>(() =>
+            JwtSigningSettings.FromConfiguration(config, new TestEnvironment("Development")));
+        Assert.Contains(setting, failure.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Development")]
+    [InlineData("Staging")]
+    [InlineData("Production")]
+    public void EveryEnvironmentRejectsNulInOtherwiseUniqueSigningSecret(string environmentName)
+    {
+        var config = ValidProductionConfiguration(new string('k', 32) + "\0");
+        var failure = Assert.Throws<InvalidOperationException>(() =>
+            JwtSigningSettings.FromConfiguration(config, new TestEnvironment(environmentName)));
+        Assert.Contains("NUL", failure.Message, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -71,4 +71,24 @@ public sealed class DependencyInjectionTests
         // Assert
         Assert.Same(services, result);
     }
+
+    [Fact]
+    public void DefaultRegistrationUsesFullDisclosureAndSharesChallengeStoreAcrossScopes()
+    {
+        var services = new ServiceCollection();
+        services.AddDbContext<HeroDbContext>(options => options.UseInMemoryDatabase(Guid.NewGuid().ToString()));
+        services.AddDataProtection();
+        services.AddScoped<IKeyEncryptionService, LocalKeyEncryptionService>();
+        services.AddScoped<IRateLimiter, InMemoryRateLimiter>();
+        services.AddCredentialsServices();
+        using var provider = services.BuildServiceProvider();
+        using var first = provider.CreateScope();
+        using var second = provider.CreateScope();
+
+        Assert.IsType<VerifiablePresentationService>(first.ServiceProvider.GetRequiredService<IVerifiablePresentationService>());
+        Assert.Null(first.ServiceProvider.GetService<ISdJwtGenerator>());
+        Assert.Null(first.ServiceProvider.GetService<ISdJwtVerifier>());
+        Assert.Same(first.ServiceProvider.GetRequiredService<IPresentationChallengeStore>(),
+            second.ServiceProvider.GetRequiredService<IPresentationChallengeStore>());
+    }
 }

@@ -1,3 +1,4 @@
+using HeroSSID.Api.Authentication;
 using HeroSSID.Core.TenantManagement;
 using HeroSSID.DidOperations.DidCreation;
 using HeroSSID.DidOperations.DidResolution;
@@ -18,6 +19,7 @@ public static class DidEndpoints
     public static void MapDidEndpoints(this IEndpointRouteBuilder app)
     {
         var dids = app.MapGroup("/api/v1/dids")
+            .RequireAuthorization(OperationScopes.DidManage)
             .WithTags("DIDs")
             .WithOpenApi();
 

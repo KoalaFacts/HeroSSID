@@ -1,6 +1,7 @@
 using System.Text;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
+using Microsoft.IdentityModel.Tokens;
 
 namespace HeroSSID.Api.Features.OAuth;
 
@@ -14,13 +15,15 @@ internal sealed class JwtSigningSettings
         Secret = secret;
         Issuer = issuer;
         Audience = audience;
+        SigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
     }
 
+    internal SymmetricSecurityKey SigningKey { get; }
     internal string Secret { get; }
     internal string Issuer { get; }
     internal string Audience { get; }
 
-    // Local development convenience only. A production deployment must never accept this key.
+    // Historical example retained only to detect and reject unsafe configuration.
     internal const string DevelopmentSecret = "your-256-bit-secret-key-change-in-production-min-32-chars";
 
     internal static JwtSigningSettings FromConfiguration(IConfiguration configuration, IHostEnvironment environment)
@@ -31,12 +34,7 @@ internal sealed class JwtSigningSettings
         var secret = configuration["Jwt:Secret"];
         if (string.IsNullOrWhiteSpace(secret))
         {
-            if (!environment.IsDevelopment())
-            {
-                throw new InvalidOperationException("Jwt:Secret must be configured outside Development.");
-            }
-
-            secret = DevelopmentSecret;
+            throw new InvalidOperationException("Jwt:Secret must be explicitly configured in every environment.");
         }
 
         // HMAC zero-pads keys shorter than SHA-256's 64-byte block size. Appending
@@ -47,9 +45,10 @@ internal sealed class JwtSigningSettings
             throw new InvalidOperationException("Jwt:Secret must not contain NUL characters.");
         }
 
-        if (!environment.IsDevelopment() && string.Equals(secret, DevelopmentSecret, StringComparison.Ordinal))
+        if (secret.Contains("change-in-production", StringComparison.OrdinalIgnoreCase) ||
+            secret.Contains("your-256-bit-secret", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("The example JWT signing secret must not be used outside Development.");
+            throw new InvalidOperationException("Jwt:Secret must not use an example signing secret in any environment.");
         }
 
         if (Encoding.UTF8.GetByteCount(secret) < 32)
@@ -75,11 +74,11 @@ internal sealed class JwtSigningSettings
             return value;
         }
 
-        if (environment.IsDevelopment())
+        if (value is null && environment.IsDevelopment())
         {
             return developmentDefault;
         }
 
-        throw new InvalidOperationException($"{name} must be configured outside Development.");
+        throw new InvalidOperationException($"{name} must be non-empty and must be explicitly configured outside Development.");
     }
 }
