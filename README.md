@@ -12,7 +12,7 @@ HeroSSID is a development-stage .NET foundation for issuing, holding and verifyi
 | REST ownership | Validated bearer `tenant_id`, exact operation scopes, tenant-owned DID creation and issuer lookup | An issuance-scope client can use any issuer DID owned by its tenant; per-client DID grants are future work |
 | Credential issuance | Ed25519-signed JWT credentials and PostgreSQL persistence | Existing payloads use the 2018 credentials context; full VC 2.0 conformance is not established |
 | Credential verification | Issuer signature, optional expiration and local revocation checks | REST verification resolves issuers within the authenticated tenant; direct library callers must inspect `IsValid` before using parsed result fields |
-| Presentation library | Original issuer JWT embedded unchanged in a holder-signed `vp+jwt`; subject binding; verifier-owned trusted issuer, audience and single-use challenge | Full disclosure of one credential, local issuer/holder enrollment, process-local challenge storage; no presentation HTTP protocol endpoints |
+| Presentation library | Original issuer JWT embedded unchanged in a holder-signed `vp+jwt`; subject binding; verifier-owned trusted issuer, audience and single-use challenge | Full disclosure of one credential, local issuer/holder enrollment, process-local challenge storage by default (opt-in PostgreSQL shared store available); no presentation HTTP protocol endpoints |
 | OAuth | Client-credentials tokens with configured HS256 signing and validated tenant/scopes | Full OpenID4VCI issuance and OpenID4VP exchange are unfinished |
 | Key storage | Encrypted private-key storage through ASP.NET Data Protection; plaintext buffers cleared after signing | Managed signer/HSM integration and signing-key lifecycle are unfinished |
 | Revocation | Verification rejects locally recorded revoked JWTs, including duplicate records | Revocation service API and interoperable status-list publication are unfinished |
@@ -106,7 +106,17 @@ The default in-memory operation limiter now reserves permits atomically per tena
 
 The repository currently contains xUnit v2 and v3 projects. The credential suite retains two pre-existing skipped concurrency tests that use a shared DbContext; the new presentation replay test uses separate database scopes and a shared challenge store. PostgreSQL presentation tests also check that verification SQL does not select private-key columns. Test names containing “OpenID4VC” cover existing HTTP contracts and do not certify the unfinished protocols.
 
-Production readiness requires durable shared challenge consumption, complete signing-key and revocation lifecycles, interoperability testing, operational controls and independent security review. No production-readiness or standards-conformance certification is claimed.
+A PostgreSQL challenge store is available as an opt-in alternative to the process-local default. Apply the `PresentationChallenges` migration before enabling it, then register the shared data source and challenge store **before** `AddCredentialsServices()`:
+
+```csharp
+services.AddSingleton(Npgsql.NpgsqlDataSource.Create(postgresConnectionString));
+services.AddSingleton<IPresentationChallengeStore, PostgresPresentationChallengeStore>();
+services.AddCredentialsServices();
+```
+
+Every replica must use the same database and outstanding-capacity setting. Issuance performs the count and insert under one database transaction/advisory lock; successful verification consumes by one conditional SQL update. Both operations fail closed when the database is unavailable. Existing public synchronous `IPresentationChallengeStore` methods perform blocking database I/O; account for this in throughput and thread-pool sizing. This feature does not yet provide distributed rate limiting or an OpenID4VP HTTP protocol.
+
+Production readiness still requires durable shared challenge **deployment and operations**, distributed request quotas, complete signing-key and revocation lifecycles, interoperability testing, operational controls and independent security review. No production-readiness or standards-conformance certification is claimed.
 
 ## Documentation
 
