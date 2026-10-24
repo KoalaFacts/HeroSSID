@@ -43,6 +43,25 @@ public sealed class JwtSigningSettingsTests
     }
 
     [Theory]
+    [InlineData("Production")]
+    [InlineData("Staging")]
+    public void NonDevelopmentRejectsHmacEquivalentZeroPaddedExampleKeys(string environmentName)
+    {
+        // HMAC-SHA256 pads the public example key with zero bytes to a 64-byte block.
+        // Suffixing that key with literal NULs produces exactly the same MAC.
+        foreach (var suffix in new[] { "\0", "\0\0", "\0\0\0" })
+        {
+            var config = ValidProductionConfiguration(
+                secret: JwtSigningSettings.DevelopmentSecret + suffix);
+
+            var failure = Assert.Throws<InvalidOperationException>(() =>
+                JwtSigningSettings.FromConfiguration(config, new TestEnvironment(environmentName)));
+
+            Assert.Contains("NUL", failure.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Theory]
     [InlineData("short-secret")]
     [InlineData(" ")]
     public void ProductionRejectsMissingOrUndersizedKeys(string secret)
