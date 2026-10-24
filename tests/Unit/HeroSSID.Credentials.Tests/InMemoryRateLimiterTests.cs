@@ -10,15 +10,9 @@ public sealed class InMemoryRateLimiterTests
     {
         using var limiter = new InMemoryRateLimiter(maxOperations: 7);
         var tenant = Guid.NewGuid();
-        var granted = 0;
-
-        Parallel.For(0, 256, _ =>
-        {
-            if (limiter.TryAcquireAsync(tenant, "CREDENTIAL_VERIFY").GetAwaiter().GetResult())
-            {
-                Interlocked.Increment(ref granted);
-            }
-        });
+        var attempts = Enumerable.Range(0, 256)
+            .Select(_ => Task.Run(() => limiter.TryAcquireAsync(tenant, "CREDENTIAL_VERIFY")));
+        var granted = (await Task.WhenAll(attempts).ConfigureAwait(true)).Count(allowed => allowed);
 
         Assert.Equal(7, granted);
         Assert.False(await limiter.TryAcquireAsync(tenant, "CREDENTIAL_VERIFY").ConfigureAwait(true));
@@ -65,7 +59,7 @@ public sealed class InMemoryRateLimiterTests
         using var limiter = new InMemoryRateLimiter(maxOperations: 1);
         var tenant = Guid.NewGuid();
         using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
+        await cancellation.CancelAsync().ConfigureAwait(true);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             limiter.TryAcquireAsync(tenant, "DID_CREATE", cancellation.Token)).ConfigureAwait(true);
