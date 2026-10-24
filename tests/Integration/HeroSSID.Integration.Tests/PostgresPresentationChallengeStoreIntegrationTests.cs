@@ -1,11 +1,24 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using HeroSSID.Credentials.VerifiablePresentations;
+using HeroSSID.Core.TenantManagement;
+using HeroSSID.Credentials.CredentialIssuance;
+using HeroSSID.Credentials.CredentialVerification;
+using HeroSSID.DidOperations.DidCreation;
+using HeroSSID.DidOperations.DidMethod;
+using HeroSSID.DidOperations.DidMethods;
+using HeroSSID.DidOperations.DidResolution;
+using HeroSSID.Infrastructure.KeyEncryption;
+using HeroSSID.Infrastructure.RateLimiting;
 using HeroSSID.Data;
 using HeroSSID.Integration.Tests.TestInfrastructure;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Npgsql;
 using Xunit;
 
@@ -101,6 +114,64 @@ public sealed class PostgresPresentationChallengeStoreIntegrationTests(DatabaseF
         Assert.NotEqual(challenge.Nonce, second.Issue(tenant, challenge.Audience, "did:key:issuer").Nonce);
     }
 
+    [Fact]
+    public async Task RealIssuerAndHolderProofCanBeVerifiedAcrossIndependentDatabaseScopesOnce()
+    {
+        await PrepareTableAsync().ConfigureAwait(true);
+        await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
+        var options = new DbContextOptionsBuilder<HeroDbContext>().UseNpgsql(_fixture.ConnectionString).Options;
+        await using var signingDb = new HeroDbContext(options);
+        await using var verificationDb = new HeroDbContext(options);
+        using var provider = new ServiceCollection().AddDataProtection().BuildServiceProvider();
+        var encryption = new LocalKeyEncryptionService(provider.GetRequiredService<IDataProtectionProvider>());
+        using var limiter = new InMemoryRateLimiter();
+        using var loggerFactory = LoggerFactory.Create(_ => { });
+        var issuerContext = new TenantContext(Guid.NewGuid());
+        var holderContext = new TenantContext(Guid.NewGuid());
+        var verifierContext = new TenantContext(Guid.NewGuid());
+        var methods = new DidMethodResolver([new DidKeyMethod()]);
+
+        var issuerCreation = new DidCreationService(
+            signingDb, encryption, issuerContext, methods, loggerFactory.CreateLogger<DidCreationService>(), limiter);
+        var holderCreation = new DidCreationService(
+            signingDb, encryption, holderContext, methods, loggerFactory.CreateLogger<DidCreationService>(), limiter);
+        using var issuer = await issuerCreation.CreateDidAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
+        using var holder = await holderCreation.CreateDidAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.NotEqual(issuer.PublicKey, holder.PublicKey);
+
+        var issuance = new CredentialIssuanceService(signingDb, encryption, limiter);
+        var original = await issuance.IssueCredentialAsync(
+            issuerContext, issuer.Id, holder.Id, "MembershipCredential",
+            new Dictionary<string, object> { ["role"] = "member", ["id"] = holder.DidIdentifier },
+            DateTimeOffset.UtcNow.AddMinutes(10), TestContext.Current.CancellationToken).ConfigureAwait(true);
+
+        var storeOnIssuerReplica = new PostgresPresentationChallengeStore(dataSource, TimeProvider.System);
+        var signing = new VerifiablePresentationService(
+            signingDb, new CredentialVerificationService(signingDb, limiter), limiter, encryption,
+            storeOnIssuerReplica, TimeProvider.System);
+        const string audience = "https://independent-verifier.example/vp";
+        var request = signing.CreateChallenge(verifierContext, audience, issuer.DidIdentifier);
+        var proof = await signing.CreatePresentationAsync(
+            holderContext, original, holder.Id, request, TestContext.Current.CancellationToken).ConfigureAwait(true);
+
+        var storeOnVerifierReplica = new PostgresPresentationChallengeStore(dataSource, TimeProvider.System);
+        var verifying = new VerifiablePresentationService(
+            verificationDb, new CredentialVerificationService(verificationDb, limiter), limiter,
+            encryption, storeOnVerifierReplica, TimeProvider.System);
+        var accepted = await verifying.VerifyPresentationAsync(
+            verifierContext, proof.PresentationJwt, audience, request.Nonce,
+            TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.True(accepted.IsValid, string.Join(";", accepted.ValidationErrors));
+        Assert.Equal(holder.DidIdentifier, accepted.HolderDid);
+        Assert.Equal(issuer.DidIdentifier, Assert.Single(accepted.IssuerDids!));
+
+        var replay = await signing.VerifyPresentationAsync(
+            verifierContext, proof.PresentationJwt, audience, request.Nonce,
+            TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.False(replay.IsValid);
+        Assert.Null(replay.DisclosedClaims);
+    }
+
     private async Task PrepareTableAsync()
     {
         await using var db = _fixture.CreateDbContext<HeroDbContext>();
@@ -108,6 +179,11 @@ public sealed class PostgresPresentationChallengeStoreIntegrationTests(DatabaseF
         // These tests share a fixture, but each case starts with an empty challenge table.
         await db.Database.ExecuteSqlRawAsync(
             "DELETE FROM presentation_challenges", TestContext.Current.CancellationToken).ConfigureAwait(true);
+    }
+
+    private sealed class TenantContext(Guid tenantId) : ITenantContext
+    {
+        public Guid GetCurrentTenantId() => tenantId;
     }
 
     private sealed class AdjustableClock : TimeProvider
