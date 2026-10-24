@@ -122,7 +122,7 @@ public sealed class PostgresPresentationChallengeStore : IPresentationChallengeS
             """
             SELECT trusted_issuer_did, expires_at
             FROM presentation_challenges
-            WHERE nonce = @nonce AND verifier_tenant_id = @tenant
+            WHERE nonce COLLATE "C" = @nonce AND verifier_tenant_id = @tenant
                 AND audience COLLATE "C" = @audience
                 AND consumed_at IS NULL AND expires_at > @now
             """, connection);
@@ -158,7 +158,7 @@ public sealed class PostgresPresentationChallengeStore : IPresentationChallengeS
         using var command = new NpgsqlCommand(
             """
             UPDATE presentation_challenges SET consumed_at = @now
-            WHERE nonce = @nonce AND verifier_tenant_id = @tenant
+            WHERE nonce COLLATE "C" = @nonce AND verifier_tenant_id = @tenant
                 AND audience COLLATE "C" = @audience
                 AND consumed_at IS NULL AND expires_at > @now
             """, connection);
