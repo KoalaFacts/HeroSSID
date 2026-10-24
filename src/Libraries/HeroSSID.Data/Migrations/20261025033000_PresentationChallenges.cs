@@ -13,6 +13,7 @@ public sealed class PresentationChallenges : Migration
     /// <inheritdoc />
     protected override void Up(MigrationBuilder migrationBuilder)
     {
+        ArgumentNullException.ThrowIfNull(migrationBuilder);
         migrationBuilder.CreateTable(
             name: "presentation_challenges",
             columns: table => new
@@ -44,6 +45,7 @@ public sealed class PresentationChallenges : Migration
     /// <inheritdoc />
     protected override void Down(MigrationBuilder migrationBuilder)
     {
+        ArgumentNullException.ThrowIfNull(migrationBuilder);
         migrationBuilder.DropTable(name: "presentation_challenges");
     }
 }
