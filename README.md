@@ -89,6 +89,8 @@ var result = await presentations.VerifyPresentationAsync(
 
 Issuer, holder and verifier may belong to three different tenants. The verifier retains its own challenge and trusted-issuer policy. Successful verification consumes the challenge once; failed presentations return no disclosed claims or identity fields. Applications still need to evaluate credential type and business-specific claims before granting access.
 
+Outer presentation timestamps support fractional NumericDates so a one-second challenge does not lose nearly its entire lifetime at a second boundary. Old integer timestamps remain accepted. Both proof and credential expiry are rechecked after blocking consumption; rejection after consumption leaves the nonce spent. The original credential timestamp profile is unchanged.
+
 Read [the presentation profile and migration notes](docs/presentation-profile.md) before integrating. This local full-disclosure profile is not SD-JWT or an OpenID4VP implementation.
 
 ## Verification and development
@@ -102,11 +104,11 @@ dotnet test tests/Unit/HeroSSID.Api.Tests --configuration Release
 dotnet test HeroSSID.sln --configuration Release
 ```
 
-The default in-memory operation limiter now reserves permits atomically per tenant and operation. Issuance and presentation creation charge an attempt before costly work, even if it later fails. This protects one process only, not multiple replicas; alternative `IRateLimiter` implementations must provide atomic `TryAcquireAsync`. Legacy `IsAllowedAsync` plus `RecordOperationAsync` is for observation/recording, not enforcement.
+The default in-memory limiter reserves permits atomically per tenant and operation. Challenge creation and presentation verification now also reserve permits before challenge-store I/O, including unknown-nonce attempts. Issuance and presentation creation charge attempts before costly work, even on failure. This protects one process only, not multiple replicas; alternative `IRateLimiter` implementations must provide atomic `TryAcquireAsync`. Legacy `IsAllowedAsync` plus `RecordOperationAsync` is for observation/recording, not enforcement.
 
-The repository currently contains xUnit v2 and v3 projects. The credential suite retains two pre-existing skipped concurrency tests that use a shared DbContext; the new presentation replay test uses separate database scopes and a shared challenge store. PostgreSQL presentation tests also check that verification SQL does not select private-key columns. Test names containing “OpenID4VC” cover existing HTTP contracts and do not certify the unfinished protocols.
+The repository currently contains xUnit v2 and v3 projects. The credential suite retains two pre-existing skipped concurrency tests that use a shared DbContext; the presentation replay test uses separate database scopes and a shared challenge store. PostgreSQL tests exercise real advisory/row-lock waits and check that verification SQL does not select private-key columns. Test names containing “OpenID4VC” cover existing HTTP contracts, not certification. Replacement store objects and connections are not independent-machine restart/failover tests.
 
-A PostgreSQL challenge store is available as an opt-in alternative to the process-local default. Apply the `PresentationChallenges` migration before enabling it, then register the shared data source and challenge store **before** `AddCredentialsServices()`:
+A PostgreSQL challenge store is an opt-in alternative to the process-local default. Apply the `PresentationChallenges` migration explicitly before enabling it, then register the shared data source and store **before** `AddCredentialsServices()`:
 
 ```csharp
 services.AddSingleton(Npgsql.NpgsqlDataSource.Create(postgresConnectionString));
@@ -114,9 +116,11 @@ services.AddSingleton<IPresentationChallengeStore, PostgresPresentationChallenge
 services.AddCredentialsServices();
 ```
 
-Every replica must use the same database and outstanding-capacity setting. Issuance performs the count and insert under one database transaction/advisory lock; successful verification consumes by one conditional SQL update. Both operations fail closed when the database is unavailable. Existing public synchronous `IPresentationChallengeStore` methods perform blocking database I/O; account for this in throughput and thread-pool sizing. This feature does not yet provide distributed rate limiting or an OpenID4VP HTTP protocol.
+Every replica must use the same database and capacity configuration. Defaults are 1,024 globally and 128 per verifier tenant (or the smaller global limit). PostgreSQL counts **all retained rows**, including consumed replay tombstones, until expiry; memory removes consumed entries immediately. Constructors allow an explicit `tenantCapacity`. Admission serializes cleanup, counting and insertion under a transaction/advisory lock. Consumption obtains the matching row lock and performs a fresh-time conditional update. Both operations fail closed on database failure; application and database clocks must be synchronized.
 
-Production readiness still requires durable shared challenge **deployment and operations**, distributed request quotas, complete signing-key and revocation lifecycles, interoperability testing, operational controls and independent security review. No production-readiness or standards-conformance certification is claimed.
+The nonce primary key and audience storage use `C` collation to match ordinal queries. The unreleased migration was amended during review: recreate or explicitly reconcile disposable databases that applied an earlier draft; migration history does not automatically reapply changed definitions. Do not apply or roll back a production migration merely because CI passes. Public synchronous store methods block on PostgreSQL; synchronous challenge creation also waits for limiter admission. Account for thread-pool demand, database timeouts, cleanup and autovacuum. Distributed request quotas and OpenID4VP HTTP remain unfinished.
+
+Production readiness still requires shared challenge deployment and operations, distributed request quotas, complete signing-key and revocation lifecycles, interoperability testing, operational controls and independent security review. No production-readiness or standards-conformance certification is claimed.
 
 ## Documentation
 
@@ -124,6 +128,7 @@ Production readiness still requires durable shared challenge **deployment and op
 - [Presentation profile and migration](docs/presentation-profile.md)
 - [Trust foundation design](docs/superpowers/specs/2026-10-24-credential-trust-design.md)
 - [Implementation and verification plan](docs/superpowers/plans/2026-10-24-credential-trust-foundation.md)
+- [Challenge remediation evidence](docs/verification/2026-10-27-challenge-review.md)
 - [Testing guide](docs/testing-guide.md)
 
 The applicable upstream specifications include [DID Core](https://www.w3.org/TR/did-core/), [VC Data Model](https://www.w3.org/TR/vc-data-model-2.0/), [OpenID4VCI](https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html) and [OpenID4VP](https://openid.net/specs/openid-4-verifiable-presentations-1_0.html). These are implementation targets; linking them is not a conformance assertion.
