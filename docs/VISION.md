@@ -29,7 +29,7 @@ The present trust-foundation delivery implements a local full-disclosure library
 | Milestone | Deliverable | Acceptance evidence |
 |---|---|---|
 | Trust foundation | Authenticated tenant/scopes, issuer-preserving presentation, explicit verifier policy and single-use challenges | Real HTTP isolation tests, distinct real signing keys, malicious signed-envelope regressions, concurrent replay rejection |
-| Operable lifecycle | Public revocation operations/status publication, durable challenge consumption, key rotation and recovery | Multi-instance replay races, crash/restart tests, revoked/rotated-key behavior, recovery and ownership tests |
+| Operable lifecycle | Public revocation operations/status publication, durable challenge consumption, key rotation and recovery | Multi-instance replay races, crash/restart tests, revoked/rotated-key behavior, recovery and ownership tests; optional PostgreSQL backend is an initial step |
 | Independent exchange | A supported OpenID4VCI/OpenID4VP profile integrated with an independent wallet | Versioned conformance/interop cases for issuance and presentation, including rejection and cancellation |
 | Privacy and holder control | A real selective-disclosure format, clear consent and export/migration | Disclosure-binding/tampering tests, independent verification, proof that omitted claims remain undisclosed |
 | Pilot readiness | One institution, one credential type, a usable holder and verifier journey | Task completion, recovery/expiry/revocation outcomes, documented operational limits and external security review |

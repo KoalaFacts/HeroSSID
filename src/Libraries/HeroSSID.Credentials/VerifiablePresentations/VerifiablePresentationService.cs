@@ -48,7 +48,18 @@ public sealed class VerifiablePresentationService : IVerifiablePresentationServi
     public PresentationChallenge CreateChallenge(ITenantContext verifierContext, string audience, string trustedIssuerDid, TimeSpan? lifetime = null)
     {
         ArgumentNullException.ThrowIfNull(verifierContext);
-        return _challenges.Issue(verifierContext.GetCurrentTenantId(), audience, trustedIssuerDid, lifetime);
+        var tenantId = verifierContext.GetCurrentTenantId();
+        PresentationChallengePolicy.Validate(tenantId, audience, trustedIssuerDid, lifetime);
+        // This legacy API is synchronous. Invoke an asynchronous limiter away from the caller's
+        // synchronization context; PostgreSQL store I/O itself remains explicitly synchronous.
+        var admitted = Task.Run(() => _rateLimiter.TryAcquireAsync(tenantId, "PRESENTATION_CHALLENGE_CREATE"))
+            .GetAwaiter().GetResult();
+        if (!admitted)
+        {
+            throw new InvalidOperationException("Rate limit exceeded for presentation challenge creation.");
+        }
+
+        return _challenges.Issue(tenantId, audience, trustedIssuerDid, lifetime);
     }
 
     /// <inheritdoc />
@@ -62,7 +73,7 @@ public sealed class VerifiablePresentationService : IVerifiablePresentationServi
         var now = _timeProvider.GetUtcNow();
         if (string.IsNullOrWhiteSpace(challenge.Audience) || challenge.Audience.Length > 2048 ||
             string.IsNullOrWhiteSpace(challenge.TrustedIssuerDid) || challenge.TrustedIssuerDid.Length > 2048 ||
-            string.IsNullOrEmpty(challenge.Nonce) || challenge.Nonce.Length != 43 ||
+            !PresentationChallengePolicy.IsValidNonce(challenge.Nonce) ||
             challenge.ExpiresAt <= now || challenge.ExpiresAt > now.Add(InMemoryPresentationChallengeStore.MaximumLifetime))
         {
             throw new ArgumentException("A live, bounded verifier challenge is required.", nameof(challenge));
@@ -101,18 +112,20 @@ public sealed class VerifiablePresentationService : IVerifiablePresentationServi
             .SingleOrDefaultAsync(cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException("The holder identity is no longer active.");
         now = _timeProvider.GetUtcNow();
-        var expiresAt = Math.Min(challenge.ExpiresAt.ToUnixTimeSeconds(), credential.ExpiresAt?.ToUnixTimeSeconds() ?? long.MaxValue);
-        if (expiresAt <= now.ToUnixTimeSeconds())
+        var expiresAt = Math.Min(PresentationChallengePolicy.NumericDate(challenge.ExpiresAt),
+            credential.ExpiresAt.HasValue ? PresentationChallengePolicy.NumericDate(credential.ExpiresAt.Value) : decimal.MaxValue);
+        if (expiresAt <= PresentationChallengePolicy.NumericDate(now))
         {
             throw new ArgumentException("The challenge or credential has expired.", nameof(challenge));
         }
 
+        // NumericDate permits fractional seconds. Preserve the store's precision end to end.
         var payload = JsonSerializer.Serialize(new
         {
             iss = holder.DidIdentifier,
             aud = challenge.Audience,
             nonce = challenge.Nonce,
-            iat = now.ToUnixTimeSeconds(),
+            iat = PresentationChallengePolicy.NumericDate(now),
             exp = expiresAt,
             vp = new { verifiableCredential = new[] { credentialJwt } }
         });
@@ -121,6 +134,11 @@ public sealed class VerifiablePresentationService : IVerifiablePresentationServi
         {
             privateKey = _keyEncryptionService.Decrypt(encryptedKey);
             var jwt = Ed25519JwtSigner.CreateSignedJwt(PresentationHeader, payload, privateKey);
+            if (expiresAt <= PresentationChallengePolicy.NumericDate(_timeProvider.GetUtcNow()))
+            {
+                throw new ArgumentException("The challenge or credential expired during signing.", nameof(challenge));
+            }
+
             return new PresentationResult
             {
                 PresentationJwt = jwt,
@@ -143,12 +161,24 @@ public sealed class VerifiablePresentationService : IVerifiablePresentationServi
         string expectedNonce, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(verifierContext);
-        if (string.IsNullOrWhiteSpace(presentationJwt) || string.IsNullOrWhiteSpace(expectedAudience) || string.IsNullOrWhiteSpace(expectedNonce))
+        if (string.IsNullOrWhiteSpace(presentationJwt) || presentationJwt.Length > MaximumPresentationLength ||
+            string.IsNullOrWhiteSpace(expectedAudience) || string.IsNullOrWhiteSpace(expectedNonce))
         {
-            return Failure(PresentationVerificationStatus.MalformedPresentation, "A presentation, expected audience and nonce are required.");
+            return Failure(PresentationVerificationStatus.MalformedPresentation, "A bounded presentation, expected audience and nonce are required.");
         }
 
         var verifierTenantId = verifierContext.GetCurrentTenantId();
+        if (!PresentationChallengePolicy.IsValidLookup(verifierTenantId, expectedAudience, expectedNonce))
+        {
+            return Failure(PresentationVerificationStatus.ChallengeInvalid, "Invalid challenge lookup parameters.");
+        }
+
+        // Reserve the requesting verifier's permit before any challenge lookup, even for unknown nonces.
+        if (!await _rateLimiter.TryAcquireAsync(verifierTenantId, "PRESENTATION_VERIFY", cancellationToken).ConfigureAwait(false))
+        {
+            throw new InvalidOperationException("Rate limit exceeded for presentation verification.");
+        }
+
         var challenge = _challenges.Find(verifierTenantId, expectedAudience, expectedNonce);
         if (challenge == null)
         {
@@ -160,8 +190,8 @@ public sealed class VerifiablePresentationService : IVerifiablePresentationServi
             !StrictJwtReader.TryGetString(payload, "iss", out var holderDid) || holderDid.Length > 2048 ||
             !StrictJwtReader.TryGetString(payload, "aud", out var audience) || audience != expectedAudience ||
             !StrictJwtReader.TryGetString(payload, "nonce", out var nonce) || nonce != expectedNonce ||
-            !StrictJwtReader.TryGetTimestamp(payload, "iat", out var issuedAt) ||
-            !StrictJwtReader.TryGetTimestamp(payload, "exp", out var expiresAt) ||
+            !PresentationChallengePolicy.TryGetNumericDate(payload, "iat", out var issuedAt) ||
+            !PresentationChallengePolicy.TryGetNumericDate(payload, "exp", out var expiresAt) ||
             !payload.TryGetProperty("vp", out var vp) || vp.ValueKind != JsonValueKind.Object || vp.EnumerateObject().Count() != 1 ||
             !vp.TryGetProperty("verifiableCredential", out var credentials) || credentials.ValueKind != JsonValueKind.Array ||
             credentials.GetArrayLength() != 1 || credentials[0].ValueKind != JsonValueKind.String)
@@ -169,9 +199,9 @@ public sealed class VerifiablePresentationService : IVerifiablePresentationServi
             return Failure(PresentationVerificationStatus.MalformedPresentation, "Malformed or unbound full-disclosure presentation.");
         }
 
-        var now = _timeProvider.GetUtcNow().ToUnixTimeSeconds();
+        var now = PresentationChallengePolicy.NumericDate(_timeProvider.GetUtcNow());
         if (issuedAt > now || expiresAt <= now || expiresAt <= issuedAt || expiresAt - issuedAt > 300 ||
-            expiresAt > challenge.ExpiresAt.ToUnixTimeSeconds())
+            expiresAt > PresentationChallengePolicy.NumericDate(challenge.ExpiresAt))
         {
             return Failure(PresentationVerificationStatus.PresentationExpired, "Invalid presentation lifetime.");
         }
@@ -195,9 +225,10 @@ public sealed class VerifiablePresentationService : IVerifiablePresentationServi
             return Failure(PresentationVerificationStatus.CredentialInvalid, "The original credential signature, issuer, holder, state or lifetime is invalid.");
         }
 
-        now = _timeProvider.GetUtcNow().ToUnixTimeSeconds();
-        if (expiresAt <= now || (credential.ExpiresAt.HasValue &&
-            (credential.ExpiresAt.Value.ToUnixTimeSeconds() <= now || expiresAt > credential.ExpiresAt.Value.ToUnixTimeSeconds())))
+        var credentialExpiry = credential.ExpiresAt.HasValue
+            ? PresentationChallengePolicy.NumericDate(credential.ExpiresAt.Value) : decimal.MaxValue;
+        now = PresentationChallengePolicy.NumericDate(_timeProvider.GetUtcNow());
+        if (expiresAt <= now || credentialExpiry <= now || expiresAt > credentialExpiry)
         {
             return Failure(PresentationVerificationStatus.PresentationExpired, "The presentation or credential expired during verification.");
         }
@@ -208,6 +239,15 @@ public sealed class VerifiablePresentationService : IVerifiablePresentationServi
             return Failure(PresentationVerificationStatus.ChallengeInvalid, "The challenge expired or was already consumed.");
         }
 
+        // A durable store can block during consumption. Never disclose verified identity after expiry.
+        // A challenge consumed during that wait stays spent, even when the result is rejected.
+        now = PresentationChallengePolicy.NumericDate(_timeProvider.GetUtcNow());
+        if (expiresAt <= now || credentialExpiry <= now)
+        {
+            return Failure(PresentationVerificationStatus.PresentationExpired, "The presentation or credential expired during challenge consumption.");
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
         return new PresentationVerificationResult
         {
             IsValid = true,
@@ -290,5 +330,4 @@ public sealed class VerifiablePresentationService : IVerifiablePresentationServi
         Status = status,
         ValidationErrors = new[] { message }
     };
-
 }
