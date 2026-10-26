@@ -64,8 +64,9 @@ public sealed class PostgresPresentationChallengeStoreIntegrationTests(DatabaseF
         await PrepareTableAsync().ConfigureAwait(true);
         await using var dataSource = NpgsqlDataSource.Create(_fixture.ConnectionString);
         var tenant = Guid.NewGuid();
-        var first = new PostgresPresentationChallengeStore(dataSource, TimeProvider.System, capacity: 1);
-        var second = new PostgresPresentationChallengeStore(dataSource, TimeProvider.System, capacity: 1);
+        var clock = new AdjustableClock();
+        var first = new PostgresPresentationChallengeStore(dataSource, clock, capacity: 1);
+        var second = new PostgresPresentationChallengeStore(dataSource, clock, capacity: 1);
 
         var admissions = Enumerable.Range(0, 12).Select(index => Task.Run(() =>
         {
@@ -83,7 +84,11 @@ public sealed class PostgresPresentationChallengeStoreIntegrationTests(DatabaseF
         Assert.NotNull(first.Find(tenant, "verifier", issued!.Nonce));
         Assert.Throws<InvalidOperationException>(() => second.Issue(tenant, "verifier", "issuer"));
         Assert.True(second.TryConsume(tenant, "verifier", issued.Nonce));
+        // Retained replay tombstones also count. Consumption must not bypass the physical-row ceiling.
+        Assert.Throws<InvalidOperationException>(() => first.Issue(tenant, "verifier", "issuer"));
+        clock.Advance(TimeSpan.FromMinutes(2));
         Assert.NotNull(first.Issue(tenant, "verifier", "issuer"));
+        Assert.False(second.TryConsume(tenant, "verifier", issued.Nonce));
     }
 
     [Fact]
@@ -176,7 +181,6 @@ public sealed class PostgresPresentationChallengeStoreIntegrationTests(DatabaseF
     {
         await using var db = _fixture.CreateDbContext<HeroDbContext>();
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
-        // These tests share a fixture, but each case starts with an empty challenge table.
         await db.Database.ExecuteSqlRawAsync(
             "DELETE FROM presentation_challenges", TestContext.Current.CancellationToken).ConfigureAwait(true);
     }

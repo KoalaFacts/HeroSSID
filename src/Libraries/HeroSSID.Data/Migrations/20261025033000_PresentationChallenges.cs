@@ -18,9 +18,9 @@ public sealed class PresentationChallenges : Migration
             name: "presentation_challenges",
             columns: table => new
             {
-                nonce = table.Column<string>(type: "character varying(43)", maxLength: 43, nullable: false),
+                nonce = table.Column<string>(type: "character varying(43)", maxLength: 43, nullable: false, collation: "C"),
                 verifier_tenant_id = table.Column<Guid>(type: "uuid", nullable: false),
-                audience = table.Column<string>(type: "character varying(2048)", maxLength: 2048, nullable: false),
+                audience = table.Column<string>(type: "character varying(2048)", maxLength: 2048, nullable: false, collation: "C"),
                 trusted_issuer_did = table.Column<string>(type: "character varying(2048)", maxLength: 2048, nullable: false),
                 expires_at = table.Column<DateTimeOffset>(type: "timestamptz", nullable: false),
                 consumed_at = table.Column<DateTimeOffset>(type: "timestamptz", nullable: true)
