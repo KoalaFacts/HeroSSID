@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -13,20 +13,20 @@
 
   <ItemGroup>
     <!-- Common package versions for dependency management -->
-    <PackageReference Update="Aspire.Hosting.AppHost" Version="9.5.2" />
-    <PackageReference Update="Aspire.Hosting.PostgreSQL" Version="9.5.2" />
-    <PackageReference Update="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.5.2" />
-    <PackageReference Update="Microsoft.Extensions.DependencyInjection" Version="9.0.21" />
-    <PackageReference Update="Microsoft.Extensions.Configuration" Version="9.0.21" />
-    <PackageReference Update="Microsoft.Extensions.Configuration.Json" Version="9.0.21" />
-    <PackageReference Update="Microsoft.Extensions.Configuration.Binder" Version="9.0.21" />
-    <PackageReference Update="Microsoft.Extensions.Caching.Memory" Version="9.0.21" />
-    <PackageReference Update="Microsoft.Extensions.Logging" Version="9.0.21" />
-    <PackageReference Update="Microsoft.EntityFrameworkCore" Version="9.0.21" />
-    <PackageReference Update="Microsoft.EntityFrameworkCore.Design" Version="9.0.21" />
-    <PackageReference Update="Microsoft.EntityFrameworkCore.Tools" Version="9.0.21" />
-    <PackageReference Update="Microsoft.EntityFrameworkCore.InMemory" Version="9.0.21" />
-    <PackageReference Update="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.4" />
+    <PackageReference Update="Aspire.Hosting.AppHost" Version="13.6.4" />
+    <PackageReference Update="Aspire.Hosting.PostgreSQL" Version="13.6.4" />
+    <PackageReference Update="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" Version="13.6.4" />
+    <PackageReference Update="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
+    <PackageReference Update="Microsoft.Extensions.Configuration" Version="10.0.12" />
+    <PackageReference Update="Microsoft.Extensions.Configuration.Json" Version="10.0.12" />
+    <PackageReference Update="Microsoft.Extensions.Configuration.Binder" Version="10.0.12" />
+    <PackageReference Update="Microsoft.Extensions.Caching.Memory" Version="10.0.12" />
+    <PackageReference Update="Microsoft.Extensions.Logging" Version="10.0.12" />
+    <PackageReference Update="Microsoft.EntityFrameworkCore" Version="10.0.12" />
+    <PackageReference Update="Microsoft.EntityFrameworkCore.Design" Version="10.0.12" />
+    <PackageReference Update="Microsoft.EntityFrameworkCore.Tools" Version="10.0.12" />
+    <PackageReference Update="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.12" />
+    <PackageReference Update="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <PackageReference Update="Serilog" Version="4.4.0" />
     <PackageReference Update="Serilog.Extensions.Logging" Version="8.0.0" />
     <PackageReference Update="Serilog.Sinks.File" Version="7.0.0" />
@@ -36,7 +36,7 @@
     <PackageReference Update="xunit.v3" Version="3.2.2" />
     <PackageReference Update="xunit.runner.visualstudio" Version="3.1.5" />
     <PackageReference Update="Microsoft.NET.Test.Sdk" Version="17.14.1" />
-    <PackageReference Update="Microsoft.AspNetCore.DataProtection" Version="9.0.21" />
-    <PackageReference Update="Microsoft.AspNetCore.DataProtection.Extensions" Version="9.0.21" />
+    <PackageReference Update="Microsoft.AspNetCore.DataProtection" Version="10.0.12" />
+    <PackageReference Update="Microsoft.AspNetCore.DataProtection.Extensions" Version="10.0.12" />
   </ItemGroup>
 </Project>

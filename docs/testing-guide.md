@@ -35,16 +35,16 @@ The project follows a three-tier testing strategy:
 ## Prerequisites
 
 ### For Unit Tests
-- .NET 9.0 SDK
+- .NET 10 SDK
 - No external dependencies
 
 ### For Integration Tests
-- .NET 9.0 SDK
+- .NET 10 SDK
 - Docker Desktop (for Testcontainers)
 - Internet connection (to pull PostgreSQL image)
 
 ### For Contract Tests
-- .NET 9.0 SDK
+- .NET 10 SDK
 - Docker Desktop
 - Local Indy pool running (see [Indy Pool Setup](#indy-pool-setup))
 
@@ -386,7 +386,7 @@ jobs:
       - name: Setup .NET 9.0
         uses: actions/setup-dotnet@v3
         with:
-          dotnet-version: '9.0.x'
+          dotnet-version: '10.0.x'
 
       - name: Restore dependencies
         run: dotnet restore
