@@ -88,6 +88,7 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
     private readonly HeroDbContext _dbContext;
     private readonly IRateLimiter _rateLimiter;
     private readonly ILogger<CredentialVerificationService>? _logger;
+    private readonly TimeProvider _timeProvider;
 
     /// <summary>
     /// Initializes a new instance of the CredentialVerificationService
@@ -96,17 +97,30 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
     /// <param name="rateLimiter">Rate limiter for DoS protection</param>
     /// <param name="logger">Optional logger for structured logging</param>
     /// <exception cref="ArgumentNullException">Thrown when required dependencies are null</exception>
+    // Preserve the existing public constructor for already-compiled library consumers.
     public CredentialVerificationService(
         HeroDbContext dbContext,
         IRateLimiter rateLimiter,
         ILogger<CredentialVerificationService>? logger = null)
+        : this(dbContext, rateLimiter, logger, TimeProvider.System)
+    {
+    }
+
+    // The same injected clock can be shared with presentation validation.
+    public CredentialVerificationService(
+        HeroDbContext dbContext,
+        IRateLimiter rateLimiter,
+        ILogger<CredentialVerificationService>? logger,
+        TimeProvider timeProvider)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(rateLimiter);
+        ArgumentNullException.ThrowIfNull(timeProvider);
 
         _dbContext = dbContext;
         _rateLimiter = rateLimiter;
         _logger = logger;
+        _timeProvider = timeProvider;
     }
 
     /// <summary>
@@ -323,6 +337,40 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
                 return result;
             }
 
+            // A genuine issuer signature over arbitrary JWT JSON is not a credential.
+            // These untrusted claims are structural hints only until signature verification succeeds.
+            if (!StrictJwtReader.TryGetString(payloadDocument.RootElement, "sub", out var holderDid) ||
+                holderDid.Length > 2048)
+            {
+                var result = CreateFailedResult(
+                    VerificationStatus.MalformedJwt,
+                    "JWT credential requires a non-empty holder subject");
+                LogVerificationFailure(result.Status);
+                return result;
+            }
+
+            var nowUnix = _timeProvider.GetUtcNow().ToUnixTimeSeconds();
+            if (!StrictJwtReader.TryGetTimestamp(payloadDocument.RootElement, "iat", out var issuedAt) ||
+                issuedAt > nowUnix)
+            {
+                var result = CreateFailedResult(
+                    VerificationStatus.MalformedJwt,
+                    "JWT credential requires a valid, non-future issued-at timestamp");
+                LogVerificationFailure(result.Status);
+                return result;
+            }
+
+            if (payloadDocument.RootElement.TryGetProperty("nbf", out _) &&
+                (!StrictJwtReader.TryGetTimestamp(payloadDocument.RootElement, "nbf", out var notBefore) ||
+                 notBefore > nowUnix))
+            {
+                var result = CreateFailedResult(
+                    VerificationStatus.MalformedJwt,
+                    "JWT credential not-before timestamp is invalid or in the future");
+                LogVerificationFailure(result.Status);
+                return result;
+            }
+
             // Extract expiration date (optional) with overflow protection
             expiresAt = null;
             if (payloadDocument.RootElement.TryGetProperty(ExpirationClaim, out var expElement))
@@ -350,48 +398,56 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
                 }
             }
 
-            // Extract credential subject (optional) with size validation
-            credentialSubject = null;
-            if (payloadDocument.RootElement.TryGetProperty(VerifiableCredentialClaim, out var vcElement))
+            // A supported local vc+jwt must contain a credential type and an object
+            // subject. The holder's id, when present, must agree with the JWT sub.
+            if (!payloadDocument.RootElement.TryGetProperty(VerifiableCredentialClaim, out var vcElement) ||
+                vcElement.ValueKind != JsonValueKind.Object ||
+                !HasLocalCredentialTypes(vcElement))
             {
-                if (vcElement.ValueKind != JsonValueKind.Object)
-                {
-                    var result = CreateFailedResult(
-                        VerificationStatus.MalformedJwt,
-                        "Verifiable credential must be a JSON object");
-                    LogVerificationFailure(result.Status);
-                    return result;
-                }
-                if (vcElement.TryGetProperty(CredentialSubjectClaim, out var csElement))
-                {
-                    var csJson = csElement.GetRawText();
-
-                    // SECURITY: Prevent DoS via extremely large credentialSubject
-                    if (csJson.Length > MaxCredentialSubjectSizeBytes)
-                    {
-                        var result = CreateFailedResult(
-                            VerificationStatus.MalformedJwt,
-                            $"Credential subject exceeds maximum size of {MaxCredentialSubjectSizeBytes} bytes");
-                        LogVerificationFailure(result.Status);
-                        return result;
-                    }
-
-                    // SECURITY: Validate credentialSubject structure
-                    // Must be a JSON object, not an array or primitive
-                    if (csElement.ValueKind != JsonValueKind.Object)
-                    {
-                        var result = CreateFailedResult(
-                            VerificationStatus.MalformedJwt,
-                            "Credential subject must be a JSON object");
-                        LogVerificationFailure(result.Status);
-                        return result;
-                    }
-
-                    credentialSubject = JsonSerializer.Deserialize<Dictionary<string, object>>(csJson);
-                }
+                var result = CreateFailedResult(
+                    VerificationStatus.MalformedJwt,
+                    "JWT payload requires a supported verifiable credential type");
+                LogVerificationFailure(result.Status);
+                return result;
             }
+
+            if (!vcElement.TryGetProperty(CredentialSubjectClaim, out var csElement) ||
+                csElement.ValueKind != JsonValueKind.Object)
+            {
+                var result = CreateFailedResult(
+                    VerificationStatus.MalformedJwt,
+                    "Credential subject must be a JSON object");
+                LogVerificationFailure(result.Status);
+                return result;
+            }
+
+            var csJson = csElement.GetRawText();
+            if (csJson.Length > MaxCredentialSubjectSizeBytes)
+            {
+                var result = CreateFailedResult(
+                    VerificationStatus.MalformedJwt,
+                    $"Credential subject exceeds maximum size of {MaxCredentialSubjectSizeBytes} bytes");
+                LogVerificationFailure(result.Status);
+                return result;
+            }
+
+            if (csElement.TryGetProperty("id", out _) &&
+                (!StrictJwtReader.TryGetString(csElement, "id", out var subjectId) ||
+                 !string.Equals(subjectId, holderDid, StringComparison.Ordinal)))
+            {
+                var result = CreateFailedResult(
+                    VerificationStatus.MalformedJwt,
+                    "Credential subject id must match the holder subject");
+                LogVerificationFailure(result.Status);
+                return result;
+            }
+
+            credentialSubject = JsonSerializer.Deserialize<Dictionary<string, object>>(csJson);
         }
-        catch (Exception ex) when (ex is JsonException or FormatException or ArgumentException)
+        // JSON string escapes are decoded lazily: unpaired surrogates can throw
+        // InvalidOperationException from GetString after JsonDocument.Parse succeeds.
+        // This boundary contains only untrusted payload parsing; database errors remain outside it.
+        catch (Exception ex) when (ex is JsonException or FormatException or ArgumentException or InvalidOperationException)
         {
             if (_logger != null)
             {
@@ -405,7 +461,7 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
         }
 
         // T026: Check expiration
-        if (expiresAt.HasValue && expiresAt.Value <= DateTimeOffset.UtcNow)
+        if (expiresAt.HasValue && expiresAt.Value <= _timeProvider.GetUtcNow())
         {
             var result = CreateFailedResult(
                 VerificationStatus.Expired,
@@ -513,6 +569,40 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
         }
 
         return successResult;
+    }
+
+    private static bool HasLocalCredentialTypes(JsonElement vc)
+    {
+        if (!vc.TryGetProperty("type", out var types) || types.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        var hasBaseType = false;
+        foreach (var type in types.EnumerateArray())
+        {
+            if (type.ValueKind != JsonValueKind.String)
+            {
+                return false;
+            }
+
+            var name = type.GetString();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return false;
+            }
+
+            if (string.Equals(name, "VerifiableCredential", StringComparison.Ordinal))
+            {
+                hasBaseType = true;
+            }
+        }
+
+        // Older signed credentials may contain only the base type. Keep that
+        // existing verification contract while rejecting missing, blank or
+        // non-string type entries. A signature alone is still insufficient:
+        // sub, iat and credentialSubject are independently required.
+        return hasBaseType;
     }
 
     private void LogVerificationFailure(VerificationStatus status)

@@ -11,7 +11,7 @@ namespace HeroSSID.Credentials.Tests;
 public sealed class CredentialVerificationJsonKindTests
 {
     private const string ValidHeader = "{\"typ\":\"vc+jwt\",\"alg\":\"EdDSA\"}";
-    private const string ValidPayload = "{\"iss\":\"did:key:issuer\"}";
+    private const string ValidPayload = "{\"iss\":\"did:key:issuer\",\"sub\":\"did:key:holder\",\"iat\":1700000000,\"vc\":{\"type\":[\"VerifiableCredential\",\"TestCredential\"],\"credentialSubject\":{\"id\":\"did:key:holder\"}}}";
 
     [Theory]
     [InlineData("null")]
@@ -78,7 +78,7 @@ public sealed class CredentialVerificationJsonKindTests
     [InlineData("{}")]
     public async Task NonNumericExpirationIsMalformedBeforeIssuerLookup(string expiration)
     {
-        var payload = $"{{\"iss\":\"did:key:issuer\",\"exp\":{expiration}}}";
+        var payload = ValidPayload[..^1] + ",\"exp\":" + expiration + "}";
         await AssertMalformedAsync(ValidHeader, payload).ConfigureAwait(true);
     }
 
@@ -91,15 +91,15 @@ public sealed class CredentialVerificationJsonKindTests
     [InlineData("[]")]
     public async Task NonObjectCredentialIsMalformedBeforeIssuerLookup(string credential)
     {
-        var payload = $"{{\"iss\":\"did:key:issuer\",\"vc\":{credential}}}";
+        var payload = $"{{\"iss\":\"did:key:issuer\",\"sub\":\"did:key:holder\",\"iat\":1700000000,\"vc\":{credential}}}";
         await AssertMalformedAsync(ValidHeader, payload).ConfigureAwait(true);
     }
 
     [Theory]
-    [InlineData("{\"iss\":\"did:key:issuer\"}")]
-    [InlineData("{\"iss\":\"did:key:issuer\",\"exp\":null}")]
-    [InlineData("{\"iss\":\"did:key:issuer\",\"vc\":{}}")]
-    public async Task ValidOptionalClaimShapesStillReachIssuerLookup(string payload)
+    [InlineData("absent")]
+    [InlineData("null")]
+    [InlineData("future")]
+    public async Task CompleteCredentialWithOptionalExpirationReachesIssuerLookup(string expiration)
     {
         // No provider is configured: valid shapes must reach the real issuer lookup,
         // whose operational failure must not be relabeled as malformed input.
@@ -107,6 +107,13 @@ public sealed class CredentialVerificationJsonKindTests
         using var limiter = new InMemoryRateLimiter(TimeSpan.FromMinutes(1), 100);
         var service = new CredentialVerificationService(context, limiter);
 
+        var payload = expiration switch
+        {
+            "absent" => ValidPayload,
+            "null" => ValidPayload[..^1] + ",\"exp\":null}",
+            "future" => ValidPayload[..^1] + ",\"exp\":1893456000}",
+            _ => throw new ArgumentOutOfRangeException(nameof(expiration))
+        };
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => service.VerifyCredentialAsync(
             new TenantContext(), Token(ValidHeader, payload))).ConfigureAwait(true);
         Assert.Contains("No database provider", exception.Message, StringComparison.Ordinal);
@@ -118,7 +125,7 @@ public sealed class CredentialVerificationJsonKindTests
         using var context = new HeroDbContext(new DbContextOptions<HeroDbContext>());
         using var limiter = new InMemoryRateLimiter(TimeSpan.FromMinutes(1), 100);
         var service = new CredentialVerificationService(context, limiter);
-        const string payload = "{\"iss\":\"did:key:issuer\",\"exp\":0,\"vc\":{\"credentialSubject\":{\"degree\":{\"name\":\"Bachelor\"}}}}";
+        const string payload = "{\"iss\":\"did:key:issuer\",\"sub\":\"did:key:holder\",\"iat\":1700000000,\"exp\":0,\"vc\":{\"type\":[\"VerifiableCredential\",\"TestCredential\"],\"credentialSubject\":{\"degree\":{\"name\":\"Bachelor\"}}}}";
 
         var result = await service.VerifyCredentialAsync(
             new TenantContext(), Token(ValidHeader, payload)).ConfigureAwait(true);

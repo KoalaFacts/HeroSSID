@@ -26,6 +26,7 @@ namespace HeroSSID.Api.Tests;
 public sealed class AuthenticationPipelineTests
 {
     private const string Secret = "HTTP-regression-test-signing-key-with-at-least-32-bytes";
+    private static readonly string[] MembershipCredentialTypes = ["VerifiableCredential", "MembershipCredential"];
     private static readonly Guid TenantA = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     private static readonly Guid TenantB = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
 
@@ -149,6 +150,81 @@ public sealed class AuthenticationPipelineTests
         var verified = await a.PostAsJsonAsync("/api/v1/credentials/verify", new { Credential = credential });
         Assert.Equal(HttpStatusCode.OK, verified.StatusCode);
         Assert.True((await verified.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("isValid").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData(false, HttpStatusCode.BadRequest, false)]
+    [InlineData(true, HttpStatusCode.OK, false)]
+    [InlineData(true, HttpStatusCode.BadRequest, true)]
+    public async Task HttpVerificationSeparatesSignedIssuerStatementFromCredential(
+        bool complete, HttpStatusCode expectedStatus, bool malformedUnicode)
+    {
+        await using var factory = new ApiFactory();
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            Token([new("tenant_id", TenantA.ToString()), new("scope", "credential:verify")]));
+
+        using var key = NSec.Cryptography.Key.Create(NSec.Cryptography.SignatureAlgorithm.Ed25519,
+            new NSec.Cryptography.KeyCreationParameters
+            {
+                ExportPolicy = NSec.Cryptography.KeyExportPolicies.AllowPlaintextExport
+            });
+        const string issuer = "did:example:http-credential-structure-issuer";
+        const string holder = "did:example:http-credential-structure-holder";
+        var publicKey = key.PublicKey.Export(NSec.Cryptography.KeyBlobFormat.RawPublicKey);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HeroDbContext>();
+            db.Dids.Add(new DidEntity
+            {
+                Id = Guid.NewGuid(), TenantId = TenantA, DidIdentifier = issuer,
+                PublicKeyEd25519 = publicKey, KeyFingerprint = SHA256.HashData(publicKey),
+                PrivateKeyEd25519Encrypted = new byte[64], DidDocumentJson = "{}",
+                Status = "active", CreatedAt = DateTimeOffset.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var payload = complete
+            ? JsonSerializer.Serialize(new
+            {
+                iss = issuer, sub = holder, iat = DateTimeOffset.UtcNow.AddMinutes(-1).ToUnixTimeSeconds(),
+                vc = new { type = MembershipCredentialTypes, credentialSubject = new { id = holder, role = "Member" } }
+            })
+            : JsonSerializer.Serialize(new { iss = issuer });
+        if (malformedUnicode)
+        {
+            payload = payload.Replace("\"MembershipCredential\"", "\"\\uD800\"", StringComparison.Ordinal);
+            Assert.Contains("\\uD800", payload, StringComparison.Ordinal);
+        }
+
+        var privateKey = key.Export(NSec.Cryptography.KeyBlobFormat.RawPrivateKey);
+        string credential;
+        try
+        {
+            credential = HeroSSID.Credentials.Utilities.Ed25519JwtSigner.CreateSignedJwt(
+                "{\"typ\":\"vc+jwt\",\"alg\":\"EdDSA\"}", payload, privateKey);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(privateKey);
+        }
+
+        using var response = await client.PostAsJsonAsync("/api/v1/credentials/verify", new { credential });
+        Assert.Equal(expectedStatus, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        if (complete && !malformedUnicode)
+        {
+            Assert.True(body.GetProperty("isValid").GetBoolean());
+            Assert.Equal(issuer, body.GetProperty("issuerDid").GetString());
+            Assert.Equal(holder, body.GetProperty("holderDid").GetString());
+        }
+        else
+        {
+            Assert.False(body.TryGetProperty("isValid", out _));
+            Assert.False(body.TryGetProperty("holderDid", out _));
+            Assert.False(body.TryGetProperty("issuerDid", out _));
+        }
     }
 
     [Theory]

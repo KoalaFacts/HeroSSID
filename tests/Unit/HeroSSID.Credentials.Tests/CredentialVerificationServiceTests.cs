@@ -22,7 +22,7 @@ namespace HeroSSID.Credentials.Tests;
 public sealed class CredentialVerificationServiceTests : IDisposable
 {
     private static readonly string[] W3cVcContext = new[] { "https://www.w3.org/2018/credentials/v1" };
-    private static readonly string[] VerifiableCredentialType = new[] { "VerifiableCredential" };
+    private static readonly string[] VerifiableCredentialType = ["VerifiableCredential"];
     private static readonly string[] TestCredentialType = new[] { "VerifiableCredential", "TestCredential" };
 
     private readonly HeroDbContext _dbContext;
@@ -56,16 +56,13 @@ public sealed class CredentialVerificationServiceTests : IDisposable
     [Fact]
     public async Task VerifyCredentialAsyncValidJwtVcReturnsVerificationResult()
     {
-        // Arrange
-        var service = CreateService();
-        var validJwtVc = "eyJhbGciOiJFZERTQSIsInR5cCI6InZjK2p3dCJ9.eyJpc3MiOiJkaWQ6d2ViOmV4YW1wbGUuY29tOmlzc3VlciIsInN1YiI6ImRpZDp3ZWI6ZXhhbXBsZS5jb206aG9sZGVyIn0.signature";
+        await SeedTestIssuerDidAsync().ConfigureAwait(true);
+        var result = await CreateService().VerifyCredentialAsync(
+            _tenantContext, CreateValidTestJwt()).ConfigureAwait(true);
 
-        // Act
-        var result = await service.VerifyCredentialAsync(_tenantContext, validJwtVc).ConfigureAwait(true);
-
-        // Assert
-        Assert.NotNull(result);
-        Assert.NotNull(result.ValidationErrors);
+        Assert.True(result.IsValid);
+        Assert.Equal(VerificationStatus.Valid, result.Status);
+        Assert.Empty(result.ValidationErrors);
     }
 
     [Fact]
@@ -151,7 +148,16 @@ public sealed class CredentialVerificationServiceTests : IDisposable
         // Arrange
         var service = CreateService();
         // Valid JWT format but issuer DID doesn't exist in database
-        var jwtWithUnknownIssuer = "eyJhbGciOiJFZERTQSIsInR5cCI6InZjK2p3dCJ9.eyJpc3MiOiJkaWQ6d2ViOmV4YW1wbGUuY29tOnVua25vd24ifQ.signature";
+        var jwtWithUnknownIssuer = Ed25519JwtSigner.CreateSignedJwt(
+            JsonSerializer.Serialize(new { typ = "vc+jwt", alg = "EdDSA" }),
+            JsonSerializer.Serialize(new
+            {
+                iss = "did:web:example.com:unknown",
+                sub = "did:web:example.com:holder",
+                iat = DateTimeOffset.UtcNow.AddMinutes(-1).ToUnixTimeSeconds(),
+                vc = new { type = TestCredentialType, credentialSubject = new { name = "Test User" } }
+            }),
+            _testPrivateKey);
 
         // Act
         var result = await service.VerifyCredentialAsync(_tenantContext,jwtWithUnknownIssuer).ConfigureAwait(true);
@@ -174,11 +180,9 @@ public sealed class CredentialVerificationServiceTests : IDisposable
         var result = await service.VerifyCredentialAsync(_tenantContext,validJwt).ConfigureAwait(true);
 
         // Assert
-        if (result.CredentialSubject != null)
-        {
-            Assert.NotNull(result.CredentialSubject);
-            Assert.IsType<Dictionary<string, object>>(result.CredentialSubject);
-        }
+        Assert.True(result.IsValid);
+        Assert.IsType<Dictionary<string, object>>(result.CredentialSubject);
+        Assert.Equal("Test User", Assert.IsType<JsonElement>(result.CredentialSubject["name"]).GetString());
     }
 
     [Fact]
@@ -193,8 +197,8 @@ public sealed class CredentialVerificationServiceTests : IDisposable
         var result = await service.VerifyCredentialAsync(_tenantContext,validJwt).ConfigureAwait(true);
 
         // Assert
-        Assert.NotNull(result.IssuerDid);
-        Assert.StartsWith("did:", result.IssuerDid, StringComparison.Ordinal);
+        Assert.True(result.IsValid);
+        Assert.Equal("did:web:example.com:issuer", result.IssuerDid);
     }
 
     [Fact]
@@ -209,11 +213,9 @@ public sealed class CredentialVerificationServiceTests : IDisposable
         var result = await service.VerifyCredentialAsync(_tenantContext,jwtWithExpiration).ConfigureAwait(true);
 
         // Assert
-        if (result.Status == VerificationStatus.Valid && result.ExpiresAt.HasValue)
-        {
-            Assert.NotNull(result.ExpiresAt);
-            Assert.True(result.ExpiresAt.Value > DateTimeOffset.UtcNow);
-        }
+        Assert.True(result.IsValid);
+        Assert.NotNull(result.ExpiresAt);
+        Assert.True(result.ExpiresAt.Value > DateTimeOffset.UtcNow);
     }
 
     [Fact]
@@ -228,8 +230,9 @@ public sealed class CredentialVerificationServiceTests : IDisposable
         var result = await service.VerifyCredentialAsync(_tenantContext,jwtWithoutExpiration).ConfigureAwait(true);
 
         // Assert
-        // ExpiresAt should be null if no expiration date in JWT
-        // (actual behavior depends on implementation)
+        Assert.True(result.IsValid);
+        Assert.Equal(VerificationStatus.Valid, result.Status);
+        Assert.Null(result.ExpiresAt);
     }
 
     [Fact]
@@ -244,11 +247,9 @@ public sealed class CredentialVerificationServiceTests : IDisposable
         var result = await service.VerifyCredentialAsync(_tenantContext,validJwt).ConfigureAwait(true);
 
         // Assert
-        if (result.Status == VerificationStatus.Valid)
-        {
-            Assert.True(result.IsValid);
-            Assert.Empty(result.ValidationErrors);
-        }
+        Assert.True(result.IsValid);
+        Assert.Equal(VerificationStatus.Valid, result.Status);
+        Assert.Empty(result.ValidationErrors);
     }
 
     [Fact]
@@ -401,6 +402,7 @@ public sealed class CredentialVerificationServiceTests : IDisposable
             vc = new
             {
                 context = W3cVcContext,
+                // Previously accepted singleton base-type credentials remain valid.
                 type = VerifiableCredentialType,
                 credentialSubject = new { test = "data" }
             }

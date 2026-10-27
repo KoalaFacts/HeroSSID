@@ -29,6 +29,7 @@ public sealed class VerifiablePresentationServiceTests : IDisposable
     private const string VpHeader = "{\"alg\":\"EdDSA\",\"typ\":\"vp+jwt\"}";
     private static readonly string[] _malformedSubject = ["Alice"];
     private static readonly string[] _nameClaims = ["name"];
+    private static readonly string[] _credentialTypes = ["VerifiableCredential", "MembershipCredential"];
     private static readonly byte[] _invalidUtf8 = [0xc3, 0x28];
     private readonly DbContextOptions<HeroDbContext> _options;
     private readonly HeroDbContext _db;
@@ -521,7 +522,7 @@ public sealed class VerifiablePresentationServiceTests : IDisposable
             ["iss"] = IssuerDid, ["sub"] = HolderDid,
             ["iat"] = _clock.GetUtcNow().ToUnixTimeSeconds() - 1,
             ["exp"] = _clock.GetUtcNow().AddHours(1).ToUnixTimeSeconds(),
-            ["vc"] = new { credentialSubject = new { id = HolderDid, name = "Alice", role = "member" } }
+            ["vc"] = new { type = _credentialTypes, credentialSubject = new { id = HolderDid, name = "Alice", role = "member" } }
         };
         edit?.Invoke(payload);
         return Ed25519JwtSigner.CreateSignedJwt("{\"alg\":\"EdDSA\",\"typ\":\"vc+jwt\"}", JsonSerializer.Serialize(payload), signingKey ?? _issuerKey);

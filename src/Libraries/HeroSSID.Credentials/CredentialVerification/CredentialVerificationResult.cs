@@ -6,7 +6,7 @@ namespace HeroSSID.Credentials.CredentialVerification;
 public sealed class CredentialVerificationResult
 {
     /// <summary>
-    /// Indicates whether issuer, signature, expiration and local revocation checks succeeded.
+    /// Indicates whether the supported local VC structure, issuer signature, time policy and local revocation checks succeeded.
     /// </summary>
     public required bool IsValid { get; init; }
 

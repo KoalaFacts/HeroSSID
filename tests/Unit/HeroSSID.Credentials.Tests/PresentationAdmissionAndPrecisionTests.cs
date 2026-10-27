@@ -16,6 +16,7 @@ namespace HeroSSID.Credentials.Tests;
 public sealed class PresentationAdmissionAndPrecisionTests : IDisposable
 {
     private const string Audience = "https://verifier.example/precision";
+    private static readonly string[] CredentialTypes = ["VerifiableCredential"];
     private readonly HeroDbContext _db;
     private readonly InMemoryRateLimiter _limiter = new();
     private readonly Tenant _issuerTenant = new(Guid.NewGuid());
@@ -113,7 +114,7 @@ public sealed class PresentationAdmissionAndPrecisionTests : IDisposable
     }
 
     private VerifiablePresentationService Service(IRateLimiter? limiter = null) => new(
-        _db, new CredentialVerificationService(_db, limiter ?? _limiter), limiter ?? _limiter,
+        _db, new CredentialVerificationService(_db, limiter ?? _limiter, null, _clock), limiter ?? _limiter,
         new CopyEncryption(), _store, _clock);
 
     private string Credential(int lifetimeSeconds = 120) => Ed25519JwtSigner.CreateSignedJwt(
@@ -121,9 +122,11 @@ public sealed class PresentationAdmissionAndPrecisionTests : IDisposable
         JsonSerializer.Serialize(new
         {
             iss = _issuer.DidIdentifier, sub = _holder.DidIdentifier,
-            iat = _clock.GetUtcNow().ToUnixTimeSeconds(),
+            // Credential issuance follows the real clock; the injected future clock tests
+            // challenge/proof precision, not a future-dated original credential.
+            iat = DateTimeOffset.UtcNow.AddMinutes(-1).ToUnixTimeSeconds(),
             exp = _clock.GetUtcNow().AddSeconds(lifetimeSeconds).ToUnixTimeSeconds(),
-            vc = new { credentialSubject = new { id = _holder.DidIdentifier, role = "member" } }
+            vc = new { type = CredentialTypes, credentialSubject = new { id = _holder.DidIdentifier, role = "member" } }
         }), _issuerKey);
 
     private static (DidEntity Identity, byte[] Key) Identity(ITenantContext tenant, string did)
