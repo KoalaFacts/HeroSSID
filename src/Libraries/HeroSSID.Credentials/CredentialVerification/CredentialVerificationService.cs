@@ -97,19 +97,30 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
     /// <param name="rateLimiter">Rate limiter for DoS protection</param>
     /// <param name="logger">Optional logger for structured logging</param>
     /// <exception cref="ArgumentNullException">Thrown when required dependencies are null</exception>
+    // Preserve the existing public constructor for already-compiled library consumers.
     public CredentialVerificationService(
         HeroDbContext dbContext,
         IRateLimiter rateLimiter,
-        ILogger<CredentialVerificationService>? logger = null,
-        TimeProvider? timeProvider = null)
+        ILogger<CredentialVerificationService>? logger = null)
+        : this(dbContext, rateLimiter, logger, TimeProvider.System)
+    {
+    }
+
+    // The same injected clock can be shared with presentation validation.
+    public CredentialVerificationService(
+        HeroDbContext dbContext,
+        IRateLimiter rateLimiter,
+        ILogger<CredentialVerificationService>? logger,
+        TimeProvider timeProvider)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(rateLimiter);
+        ArgumentNullException.ThrowIfNull(timeProvider);
 
         _dbContext = dbContext;
         _rateLimiter = rateLimiter;
         _logger = logger;
-        _timeProvider = timeProvider ?? TimeProvider.System;
+        _timeProvider = timeProvider;
     }
 
     /// <summary>
