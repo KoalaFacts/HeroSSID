@@ -22,7 +22,6 @@ namespace HeroSSID.Credentials.Tests;
 public sealed class CredentialVerificationServiceTests : IDisposable
 {
     private static readonly string[] W3cVcContext = new[] { "https://www.w3.org/2018/credentials/v1" };
-    private static readonly string[] VerifiableCredentialType = new[] { "VerifiableCredential" };
     private static readonly string[] TestCredentialType = new[] { "VerifiableCredential", "TestCredential" };
 
     private readonly HeroDbContext _dbContext;
@@ -402,7 +401,7 @@ public sealed class CredentialVerificationServiceTests : IDisposable
             vc = new
             {
                 context = W3cVcContext,
-                type = VerifiableCredentialType,
+                type = TestCredentialType,
                 credentialSubject = new { test = "data" }
             }
         });
