@@ -70,6 +70,39 @@ public sealed class CredentialMinimumStructureTests : IDisposable
     }
 
     [Theory]
+    [InlineData("issuer")]
+    [InlineData("holder")]
+    [InlineData("type")]
+    [InlineData("subject-id")]
+    public async Task UnpairedEscapedSurrogatesFailClosedWithoutPublishingIdentity(string malformedClaim)
+    {
+        await EnrollIssuerAsync().ConfigureAwait(true);
+        var valid = CompletePayload().ToJsonString();
+        var malformed = malformedClaim switch
+        {
+            "issuer" => valid.Replace("\"iss\":\"" + IssuerDid + "\"", "\"iss\":\"\\uD800\"", StringComparison.Ordinal),
+            "holder" => valid.Replace("\"sub\":\"" + HolderDid + "\"", "\"sub\":\"\\uD800\"", StringComparison.Ordinal),
+            "type" => valid.Replace("\"RoleCredential\"", "\"\\uD800\"", StringComparison.Ordinal),
+            "subject-id" => valid.Replace("\"id\":\"" + HolderDid + "\"", "\"id\":\"\\uD800\"", StringComparison.Ordinal),
+            _ => throw new ArgumentOutOfRangeException(nameof(malformedClaim))
+        };
+
+        Assert.NotEqual(valid, malformed);
+        Assert.Contains("\\uD800", malformed, StringComparison.Ordinal);
+
+        // The issuer key genuinely signs the raw JSON with an invalid deferred string escape.
+        // Invalid Unicode is malformed user input, not a database or runtime failure.
+        var credential = Sign(malformed);
+        var verifier = new CredentialVerificationService(_db, _limiter);
+        var local = await verifier.VerifyCredentialAsync(new TenantContext(IssuerTenant), credential).ConfigureAwait(true);
+        var crossTenant = await verifier.VerifyCredentialFromIssuerAsync(
+            new TenantContext(RequesterTenant), IssuerTenant, credential).ConfigureAwait(true);
+
+        AssertMalformedAndUndisclosed(local);
+        AssertMalformedAndUndisclosed(crossTenant);
+    }
+
+    [Theory]
     [InlineData("absent")]
     [InlineData("null")]
     [InlineData("future")]
