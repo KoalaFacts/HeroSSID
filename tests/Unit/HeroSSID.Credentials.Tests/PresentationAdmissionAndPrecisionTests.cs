@@ -113,7 +113,7 @@ public sealed class PresentationAdmissionAndPrecisionTests : IDisposable
     }
 
     private VerifiablePresentationService Service(IRateLimiter? limiter = null) => new(
-        _db, new CredentialVerificationService(_db, limiter ?? _limiter), limiter ?? _limiter,
+        _db, new CredentialVerificationService(_db, limiter ?? _limiter, timeProvider: _clock), limiter ?? _limiter,
         new CopyEncryption(), _store, _clock);
 
     private string Credential(int lifetimeSeconds = 120) => Ed25519JwtSigner.CreateSignedJwt(
