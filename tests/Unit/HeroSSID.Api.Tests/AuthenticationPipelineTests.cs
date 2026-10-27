@@ -153,9 +153,11 @@ public sealed class AuthenticationPipelineTests
     }
 
     [Theory]
-    [InlineData(false, HttpStatusCode.BadRequest)]
-    [InlineData(true, HttpStatusCode.OK)]
-    public async Task HttpVerificationSeparatesSignedIssuerStatementFromCredential(bool complete, HttpStatusCode expectedStatus)
+    [InlineData(false, HttpStatusCode.BadRequest, false)]
+    [InlineData(true, HttpStatusCode.OK, false)]
+    [InlineData(true, HttpStatusCode.BadRequest, true)]
+    public async Task HttpVerificationSeparatesSignedIssuerStatementFromCredential(
+        bool complete, HttpStatusCode expectedStatus, bool malformedUnicode)
     {
         await using var factory = new ApiFactory();
         using var client = factory.CreateClient();
@@ -190,6 +192,12 @@ public sealed class AuthenticationPipelineTests
                 vc = new { type = MembershipCredentialTypes, credentialSubject = new { id = holder, role = "Member" } }
             })
             : JsonSerializer.Serialize(new { iss = issuer });
+        if (malformedUnicode)
+        {
+            payload = payload.Replace("\"MembershipCredential\"", "\"\\uD800\"", StringComparison.Ordinal);
+            Assert.Contains("\\uD800", payload, StringComparison.Ordinal);
+        }
+
         var privateKey = key.Export(NSec.Cryptography.KeyBlobFormat.RawPrivateKey);
         string credential;
         try
@@ -205,7 +213,7 @@ public sealed class AuthenticationPipelineTests
         using var response = await client.PostAsJsonAsync("/api/v1/credentials/verify", new { credential });
         Assert.Equal(expectedStatus, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        if (complete)
+        if (complete && !malformedUnicode)
         {
             Assert.True(body.GetProperty("isValid").GetBoolean());
             Assert.Equal(issuer, body.GetProperty("issuerDid").GetString());
