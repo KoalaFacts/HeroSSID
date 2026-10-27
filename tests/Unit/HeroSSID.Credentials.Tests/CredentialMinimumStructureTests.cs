@@ -114,7 +114,8 @@ public sealed class CredentialMinimumStructureTests : IDisposable
         await EnrollIssuerAsync().ConfigureAwait(true);
         var issuer = await _db.Dids.SingleAsync(d => d.DidIdentifier == IssuerDid).ConfigureAwait(true);
 
-        using var holderKey = Key.Create(SignatureAlgorithm.Ed25519);
+        using var holderKey = Key.Create(SignatureAlgorithm.Ed25519,
+            new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
         var holderPublicKey = holderKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
         var holder = new DidEntity
         {
