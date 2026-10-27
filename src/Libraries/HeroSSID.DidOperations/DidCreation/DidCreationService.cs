@@ -335,10 +335,9 @@ public sealed class DidCreationService(
     /// </remarks>
     private static (byte[] publicKey, byte[] privateKey) GenerateEd25519KeyPair()
     {
-        // SECURITY: Validate system has sufficient entropy before generating keys
-        // This protects against weak key generation on fresh VMs or containers with poor entropy
-        ValidateSystemEntropy();
-
+        // NSec's cryptographic provider owns key-generation randomness and must
+        // report its own failures. A separate 256-byte chi-square/uniqueness
+        // sample can reject a healthy CSPRNG and cannot prove its entropy.
         // Use NSec's Ed25519 signature algorithm
         SignatureAlgorithm algorithm = SignatureAlgorithm.Ed25519;
 
@@ -360,94 +359,40 @@ public sealed class DidCreationService(
         // Note: Ed25519 private key is actually a 32-byte seed from which the keypair is derived
         byte[] privateKey = key.Export(KeyBlobFormat.RawPrivateKey);
 
-        // SECURITY: Validate generated keys are not all zeros (indicates failed generation)
-        if (publicKey.All(b => b == 0) || privateKey.All(b => b == 0))
-        {
-            throw new CryptographicException("Key generation produced invalid all-zero keys - insufficient entropy or generation failure");
-        }
-
-        // SECURITY: Validate key pair by performing test signature/verification
-        // This ensures the keys are mathematically valid and work correctly
-        ValidateKeyPair(algorithm, publicKey, privateKey);
-
-        return (publicKey, privateKey);
+        return FinishGeneratedKeyPair(algorithm, publicKey, privateKey);
     }
 
     /// <summary>
-    /// Validates that the system has sufficient entropy for secure key generation.
-    /// SECURITY: This is a critical defense against weak key generation on systems with poor entropy sources.
-    /// Uses statistical tests with mathematically realistic thresholds to avoid false positives.
+    /// Fail closed on malformed key exports or a failed real Ed25519
+    /// sign/verify self-check. Scrub exported key buffers on any failure.
     /// </summary>
-    /// <exception cref="CryptographicException">Thrown if entropy validation fails</exception>
-    private static void ValidateSystemEntropy()
+    private static (byte[] publicKey, byte[] privateKey) FinishGeneratedKeyPair(
+        SignatureAlgorithm algorithm, byte[] publicKey, byte[] privateKey)
     {
-        // Use larger sample for more reliable entropy testing
-        const int sampleSize = 256;
-        byte[] entropyTest = new byte[sampleSize];
-        using (RandomNumberGenerator rng = RandomNumberGenerator.Create())
+        bool validated = false;
+        try
         {
-            rng.GetBytes(entropyTest);
+            if (publicKey.Length != 32 || privateKey.Length != 32)
+            {
+                throw new CryptographicException("Generated Ed25519 key pair has invalid length");
+            }
+
+            if (publicKey.All(value => value == 0) || privateKey.All(value => value == 0))
+            {
+                throw new CryptographicException("Generated Ed25519 key pair contains all-zero key material");
+            }
+
+            ValidateKeyPair(algorithm, publicKey, privateKey);
+            validated = true;
+            return (publicKey, privateKey);
         }
-
-        ValidateEntropySample(entropyTest);
-    }
-
-    // ValidateSystemEntropy supplies exactly 256 bytes. Keep sample validation
-    // separate so its existing boundaries can be characterized deterministically.
-    private static void ValidateEntropySample(byte[] entropyTest)
-    {
-        const int sampleSize = 256;
-
-        // Check for obvious patterns indicating poor entropy:
-        // 1. All bytes are the same (complete failure)
-        if (entropyTest.All(b => b == entropyTest[0]))
+        finally
         {
-            throw new CryptographicException("CRITICAL: System RNG failed entropy test - all bytes identical. Key generation aborted.");
-        }
-
-        // 2. All bytes are zero (common failure mode)
-        if (entropyTest.All(b => b == 0))
-        {
-            throw new CryptographicException("CRITICAL: System RNG returned all zeros - insufficient entropy. Key generation aborted.");
-        }
-
-        // 3. All bytes are 0xFF (another common failure mode)
-        if (entropyTest.All(b => b == 0xFF))
-        {
-            throw new CryptographicException("CRITICAL: System RNG returned all 0xFF - insufficient entropy. Key generation aborted.");
-        }
-
-        // 4. Check for sufficient unique values
-        // MATH: With 256 possible byte values and 256 samples, expected unique ≈ 160-165 due to birthday paradox
-        // A good RNG should have at least 128 unique values (50% is a realistic minimum)
-        // 75% unique (192/256) was mathematically unrealistic and caused false positives
-        int uniqueBytes = entropyTest.Distinct().Count();
-        int minUniqueBytes = sampleSize / 2; // 128 of 256 (50% - realistic for random data)
-        if (uniqueBytes < minUniqueBytes)
-        {
-            throw new CryptographicException($"CRITICAL: System RNG has insufficient entropy - only {uniqueBytes} unique values in {sampleSize} bytes (minimum: {minUniqueBytes}). Key generation aborted.");
-        }
-
-        // 5. Chi-square test for uniform distribution
-        // Divide byte range (0-255) into 16 buckets of 16 values each
-        int[] buckets = new int[16];
-        foreach (byte b in entropyTest)
-        {
-            buckets[b / 16]++;
-        }
-
-        // Calculate chi-square statistic
-        double expectedCount = sampleSize / 16.0; // 256 / 16 = 16 samples per bucket expected
-        double chiSquare = buckets.Sum(count => Math.Pow(count - expectedCount, 2) / expectedCount);
-
-        // Chi-square critical value for 15 degrees of freedom
-        // Using 40.0 (between 99.9% confidence at 37.7 and 99.99% at 40.6)
-        // This allows normal statistical variation while still catching severely non-uniform distributions
-        // A good RNG can occasionally produce values up to ~37, so we use 40 as a practical threshold
-        const double chiSquareCriticalValue = 40.0;
-        if (chiSquare > chiSquareCriticalValue)
-        {
-            throw new CryptographicException($"CRITICAL: System RNG failed distribution test (chi-square: {chiSquare:F2} > {chiSquareCriticalValue}). Key generation aborted.");
+            if (!validated)
+            {
+                SecureZeroMemory(privateKey);
+                SecureZeroMemory(publicKey);
+            }
         }
     }
 
