@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using HeroSSID.Core.TenantManagement;
 using HeroSSID.Credentials.CredentialIssuance;
+using HeroSSID.Credentials.CredentialRevocation;
 using HeroSSID.Credentials.CredentialVerification;
 using HeroSSID.Credentials.Utilities;
 using HeroSSID.Credentials.VerifiablePresentations;
@@ -85,10 +86,22 @@ public sealed class VerifiablePresentationIntegrationTests(DatabaseFixture fixtu
         Assert.Null(replay.DisclosedClaims);
         var secondChallenge = service.CreateChallenge(verifierContext, audience, issuer.DidIdentifier);
         var secondPresentation = await service.CreatePresentationAsync(holderContext, original, holder.Id, secondChallenge, cancellationToken).ConfigureAwait(true);
-        var record = await db.VerifiableCredentials.SingleAsync(vc => vc.CredentialJwt == original, cancellationToken).ConfigureAwait(true);
-        Assert.Equal(issuerContext.GetCurrentTenantId(), record.TenantId);
-        record.Status = "revoked";
-        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(true);
+        // Revoke through the same issuer operation used by the HTTP API, not
+        // by a privileged test-only database edit. The verifier is not the issuer.
+        var revocation = new IssuedCredentialRevocationService(db, limiter);
+        Assert.False(await revocation.RevokeAsync(verifierContext, original, cancellationToken).ConfigureAwait(true));
+        Assert.False(await revocation.RevokeAsync(issuerContext, "unissued.jwt.token", cancellationToken).ConfigureAwait(true));
+        Assert.True(await revocation.RevokeAsync(issuerContext, original, cancellationToken).ConfigureAwait(true));
+        var revokedRecord = await db.VerifiableCredentials.AsNoTracking()
+            .SingleAsync(vc => vc.CredentialJwt == original, cancellationToken).ConfigureAwait(true);
+        Assert.Equal(issuerContext.GetCurrentTenantId(), revokedRecord.TenantId);
+        Assert.Equal("revoked", revokedRecord.Status);
+        Assert.NotNull(revokedRecord.RevokedAt);
+        Assert.True(await revocation.RevokeAsync(issuerContext, original, cancellationToken).ConfigureAwait(true));
+        var repeated = await db.VerifiableCredentials.AsNoTracking()
+            .SingleAsync(vc => vc.CredentialJwt == original, cancellationToken).ConfigureAwait(true);
+        Assert.Equal(revokedRecord.RevokedAt, repeated.RevokedAt);
+        Assert.Equal(revokedRecord.UpdatedAt, repeated.UpdatedAt);
         var revoked = await service.VerifyPresentationAsync(verifierContext, secondPresentation.PresentationJwt, audience, secondChallenge.Nonce, cancellationToken).ConfigureAwait(true);
         Assert.False(revoked.IsValid);
         Assert.Null(revoked.DisclosedClaims);
