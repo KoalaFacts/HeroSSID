@@ -26,6 +26,7 @@ namespace HeroSSID.Api.Tests;
 public sealed class AuthenticationPipelineTests
 {
     private const string Secret = "HTTP-regression-test-signing-key-with-at-least-32-bytes";
+    private static readonly string[] MembershipCredentialTypes = ["VerifiableCredential", "MembershipCredential"];
     private static readonly Guid TenantA = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     private static readonly Guid TenantB = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
 
@@ -186,7 +187,7 @@ public sealed class AuthenticationPipelineTests
             ? JsonSerializer.Serialize(new
             {
                 iss = issuer, sub = holder, iat = DateTimeOffset.UtcNow.AddMinutes(-1).ToUnixTimeSeconds(),
-                vc = new { type = new[] { "VerifiableCredential", "MembershipCredential" }, credentialSubject = new { id = holder, role = "Member" } }
+                vc = new { type = MembershipCredentialTypes, credentialSubject = new { id = holder, role = "Member" } }
             })
             : JsonSerializer.Serialize(new { iss = issuer });
         var privateKey = key.Export(NSec.Cryptography.KeyBlobFormat.RawPrivateKey);
