@@ -11,6 +11,7 @@ using HeroSSID.DidOperations.DidCreation;
 using HeroSSID.DidOperations.DidResolution;
 using HeroSSID.DidOperations.DidMethods;
 using HeroSSID.Credentials.CredentialIssuance;
+using HeroSSID.Credentials.CredentialRevocation;
 using HeroSSID.Credentials.CredentialVerification;
 using HeroSSID.Api.Features.Dids;
 using HeroSSID.Api.Features.Credentials;
@@ -54,6 +55,7 @@ builder.Services.AddScoped<IDidResolutionService, DidResolutionService>();
 
 // Register Credential services
 builder.Services.AddScoped<ICredentialIssuanceService, CredentialIssuanceService>();
+builder.Services.AddScoped<IIssuedCredentialRevocationService, IssuedCredentialRevocationService>();
 builder.Services.AddScoped<ICredentialVerificationService, CredentialVerificationService>();
 builder.Services.AddScoped<ICredentialDidLookup, CredentialDidLookup>();
 
@@ -194,7 +196,9 @@ builder.Services.AddAuthorizationBuilder()
     .AddPolicy(CredentialIssueRequirement.PolicyName, policy => policy.RequireAuthenticatedUser()
         .AddRequirements(new CredentialIssueRequirement()))
     .AddPolicy(OperationScopes.CredentialVerify, policy => policy.RequireAuthenticatedUser()
-        .RequireAssertion(context => OperationScopes.HasScope(context.User, OperationScopes.CredentialVerify)));
+        .RequireAssertion(context => OperationScopes.HasScope(context.User, OperationScopes.CredentialVerify)))
+    .AddPolicy(OperationScopes.CredentialRevoke, policy => policy.RequireAuthenticatedUser()
+        .RequireAssertion(context => OperationScopes.HasScope(context.User, OperationScopes.CredentialRevoke)));
 
 // Configure HSTS (HIGH-2)
 builder.Services.AddHsts(options =>

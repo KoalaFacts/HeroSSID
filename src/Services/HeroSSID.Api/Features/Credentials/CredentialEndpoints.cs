@@ -2,6 +2,7 @@ using System.Text.Json;
 using HeroSSID.Api.Authentication;
 using HeroSSID.Core.TenantManagement;
 using HeroSSID.Credentials.CredentialIssuance;
+using HeroSSID.Credentials.CredentialRevocation;
 using HeroSSID.Credentials.CredentialVerification;
 using HeroSSID.Credentials.Utilities;
 using Microsoft.AspNetCore.Mvc;
@@ -35,6 +36,18 @@ public static class CredentialEndpoints
             .Produces<VerifyCredentialResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+
+        credentials.MapPost("/revoke", RevokeAsync)
+            .RequireAuthorization(OperationScopes.CredentialRevoke)
+            .WithName("RevokeCredential")
+            .WithSummary("Revoke an exact, locally issued credential with issuer revocation scope")
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
@@ -138,6 +151,42 @@ public static class CredentialEndpoints
 #pragma warning restore CA1031
         {
             logger.LogError(exception, "Credential verification failed");
+            return InternalError();
+        }
+    }
+
+    internal static async Task<IResult> RevokeAsync(
+        [FromBody] RevokeCredentialRequest request,
+        [FromServices] IIssuedCredentialRevocationService revocationService,
+        [FromServices] ITenantContext tenantContext,
+        [FromServices] ILogger<Program> logger,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Credential))
+        {
+            return InvalidRequest("Credential is required.");
+        }
+
+        try
+        {
+            var revoked = await revocationService.RevokeAsync(
+                tenantContext, request.Credential, cancellationToken).ConfigureAwait(false);
+            // Never distinguish a nonexistent credential from one issued by another tenant.
+            return revoked ? Results.NoContent() : Results.NotFound();
+        }
+        catch (ArgumentException)
+        {
+            return InvalidRequest("The credential revocation request is invalid.");
+        }
+        catch (InvalidOperationException exception) when (exception.Message == "Rate limit exceeded for credential revocation")
+        {
+            return RateLimitExceeded();
+        }
+#pragma warning disable CA1031 // Translate unexpected failures without leaking stored credential data.
+        catch (Exception exception) when (exception is not OperationCanceledException)
+#pragma warning restore CA1031
+        {
+            logger.LogError(exception, "Credential revocation failed");
             return InternalError();
         }
     }

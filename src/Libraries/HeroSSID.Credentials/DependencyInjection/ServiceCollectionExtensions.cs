@@ -32,7 +32,10 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IPresentationChallengeStore, InMemoryPresentationChallengeStore>();
         services.AddScoped<IVerifiablePresentationService, VerifiablePresentationService>();
 
-        // Register credential revocation service (placeholder - throws NotImplementedException)
+        // Local, issuer-owned persisted revocation; remote status-list checking remains separate.
+        services.AddScoped<IIssuedCredentialRevocationService, IssuedCredentialRevocationService>();
+
+        // Register legacy external status-list lookup placeholder (not used for local revocation).
         services.AddScoped<ICredentialRevocationService, CredentialRevocationService>();
 
         return services;

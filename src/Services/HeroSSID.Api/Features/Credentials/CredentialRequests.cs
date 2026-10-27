@@ -14,3 +14,9 @@ public sealed class VerifyCredentialRequest
 {
     public string? Credential { get; init; }
 }
+
+/// <summary>Exact signed credential JWT previously issued by the authenticated issuer tenant.</summary>
+public sealed class RevokeCredentialRequest
+{
+    public string? Credential { get; init; }
+}
