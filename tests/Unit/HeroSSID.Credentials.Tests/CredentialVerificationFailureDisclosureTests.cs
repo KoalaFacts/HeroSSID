@@ -141,8 +141,13 @@ public sealed class CredentialVerificationFailureDisclosureTests : IDisposable
         var header = JsonSerializer.Serialize(new { typ = "vc+jwt", alg = "EdDSA" });
         var payload = JsonSerializer.Serialize(new
         {
-            iss = IssuerDid, sub = "did:example:holder", exp = expiration,
-            vc = new { credentialSubject = new { marker = ClaimMarker, degree = new { name = "Bachelor" } } }
+            iss = IssuerDid, sub = "did:example:holder",
+            iat = DateTimeOffset.UtcNow.AddMinutes(-1).ToUnixTimeSeconds(), exp = expiration,
+            vc = new
+            {
+                type = new[] { "VerifiableCredential", "TestCredential" },
+                credentialSubject = new { marker = ClaimMarker, degree = new { name = "Bachelor" } }
+            }
         });
         var privateKey = _issuerKey.Export(KeyBlobFormat.RawPrivateKey);
         try
