@@ -444,7 +444,10 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
 
             credentialSubject = JsonSerializer.Deserialize<Dictionary<string, object>>(csJson);
         }
-        catch (Exception ex) when (ex is JsonException or FormatException or ArgumentException)
+        // JSON string escapes are decoded lazily: unpaired surrogates can throw
+        // InvalidOperationException from GetString after JsonDocument.Parse succeeds.
+        // This boundary contains only untrusted payload parsing; database errors remain outside it.
+        catch (Exception ex) when (ex is JsonException or FormatException or ArgumentException or InvalidOperationException)
         {
             if (_logger != null)
             {
