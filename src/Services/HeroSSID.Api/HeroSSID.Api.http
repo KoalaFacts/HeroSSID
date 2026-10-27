@@ -6,7 +6,7 @@
 POST {{HeroSSID.Api_HostAddress}}/oauth2/token
 Content-Type: application/x-www-form-urlencoded
 
-grant_type=client_credentials&client_id=test_client&client_secret=test_secret&scope=did:manage credential:issue credential:verify
+grant_type=client_credentials&client_id=test_client&client_secret=test_secret&scope=did:manage credential:issue credential:verify credential:revoke
 
 ### Copy access_token from the response here.
 @accessToken = REPLACE_WITH_ACCESS_TOKEN
@@ -23,6 +23,15 @@ Content-Type: application/json
 
 ### Verification also requires credential:verify and a valid tenant claim
 POST {{HeroSSID.Api_HostAddress}}/api/v1/credentials/verify
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "credential": "REPLACE_WITH_ISSUED_CREDENTIAL"
+}
+
+### Revoke a previously issued credential as its issuer (requires credential:revoke)
+POST {{HeroSSID.Api_HostAddress}}/api/v1/credentials/revoke
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
