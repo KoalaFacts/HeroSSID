@@ -16,8 +16,7 @@ public static class WellKnownEndpoint
         endpoints.MapGet("/.well-known/oauth-authorization-server", GetAuthorizationServerMetadata)
             .AllowAnonymous()
             .WithName("OAuthMetadata")
-            .WithTags("OAuth", ".well-known")
-            .WithOpenApi();
+            .WithTags("OAuth", ".well-known");
 
         return endpoints;
     }
@@ -34,8 +33,11 @@ public static class WellKnownEndpoint
         var baseUrl = $"{httpContext.Request.Scheme}://{httpContext.Request.Host}";
 
         // T069: Log metadata request
-        logger.LogInformation("OAuth authorization server metadata requested from {RemoteIpAddress}",
-            httpContext.Connection.RemoteIpAddress);
+        if (logger.IsEnabled(LogLevel.Information))
+        {
+            logger.LogInformation("OAuth authorization server metadata requested from {RemoteIpAddress}",
+                httpContext.Connection.RemoteIpAddress);
+        }
 
         var metadata = new
         {

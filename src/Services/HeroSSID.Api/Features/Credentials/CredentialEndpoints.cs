@@ -15,8 +15,7 @@ public static class CredentialEndpoints
     public static void MapCredentialEndpoints(this IEndpointRouteBuilder app)
     {
         var credentials = app.MapGroup("/api/v1/credentials")
-            .WithTags("Credentials")
-            .WithOpenApi();
+            .WithTags("Credentials");
 
         credentials.MapPost("/issue", IssueAsync)
             .RequireAuthorization(CredentialIssueRequirement.PolicyName)

@@ -23,8 +23,7 @@ public static class TokenEndpoint
         endpoints.MapPost("/oauth2/token", HandleTokenRequestAsync)
             .AllowAnonymous()
             .WithName("OAuthToken")
-            .WithTags("OAuth")
-            .WithOpenApi();
+            .WithTags("OAuth");
 
         return endpoints;
     }
@@ -151,11 +150,14 @@ public static class TokenEndpoint
         var token = GenerateJwtToken(client, requestedScopes, jwt);
 
         // T069: Log successful token issuance
-        logger.LogInformation(
-            "OAuth access token issued for client {ClientId}, tenant {TenantId}, scopes {Scopes}",
-            clientId,
-            client.TenantId,
-            scope ?? "none");
+        if (logger.IsEnabled(LogLevel.Information))
+        {
+            logger.LogInformation(
+                "OAuth access token issued for client {ClientId}, tenant {TenantId}, scopes {Scopes}",
+                clientId,
+                client.TenantId,
+                scope ?? "none");
+        }
 
         // Return OAuth 2.0 token response
         return Results.Json(new

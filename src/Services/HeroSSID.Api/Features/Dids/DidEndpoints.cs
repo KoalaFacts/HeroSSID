@@ -20,8 +20,7 @@ public static class DidEndpoints
     {
         var dids = app.MapGroup("/api/v1/dids")
             .RequireAuthorization(OperationScopes.DidManage)
-            .WithTags("DIDs")
-            .WithOpenApi();
+            .WithTags("DIDs");
 
         // POST /api/v1/dids - Create a new DID
         dids.MapPost("/", CreateDid)
@@ -89,22 +88,28 @@ public static class DidEndpoints
                 );
             }
 
-            logger.LogInformation(
+            if (logger.IsEnabled(LogLevel.Information))
+            {
+                logger.LogInformation(
                 "Creating DID with method {Method} and key type {KeyType} for tenant {TenantId}",
                 request.Method,
                 request.KeyType,
                 tenantContext.GetCurrentTenantId()
             );
+            }
 
             // Create the DID
             var result = await didCreationService.CreateDidAsync(cancellationToken).ConfigureAwait(false);
 
             if (string.IsNullOrEmpty(result.DidIdentifier))
             {
-                logger.LogError(
+                if (logger.IsEnabled(LogLevel.Error))
+                {
+                    logger.LogError(
                     "Failed to create DID for tenant {TenantId}",
                     tenantContext.GetCurrentTenantId()
                 );
+                }
 
                 return Results.Problem(
                     title: "DID Creation Failed",
@@ -118,11 +123,14 @@ public static class DidEndpoints
 
             if (resolveResult.DidDocument == null)
             {
-                logger.LogError(
+                if (logger.IsEnabled(LogLevel.Error))
+                {
+                    logger.LogError(
                     "Created DID {Did} but failed to resolve it for tenant {TenantId}",
                     result.DidIdentifier,
                     tenantContext.GetCurrentTenantId()
                 );
+                }
 
                 return Results.Problem(
                     title: "DID Resolution Failed",
@@ -131,11 +139,14 @@ public static class DidEndpoints
                 );
             }
 
-            logger.LogInformation(
+            if (logger.IsEnabled(LogLevel.Information))
+            {
+                logger.LogInformation(
                 "Successfully created DID {Did} for tenant {TenantId}",
                 result.DidIdentifier,
                 tenantContext.GetCurrentTenantId()
             );
+            }
 
             // Parse the DID Document JSON string to an object before returning
             var didDocumentObject = System.Text.Json.JsonSerializer.Deserialize<object>(resolveResult.DidDocument!)
@@ -153,11 +164,14 @@ public static class DidEndpoints
         catch (Exception ex)
 #pragma warning restore CA1031
         {
-            logger.LogError(
+            if (logger.IsEnabled(LogLevel.Error))
+            {
+                logger.LogError(
                 ex,
                 "Unexpected error creating DID for tenant {TenantId}",
                 tenantContext.GetCurrentTenantId()
             );
+            }
 
             return Results.Problem(
                 title: "Internal Server Error",
@@ -195,22 +209,28 @@ public static class DidEndpoints
                 );
             }
 
-            logger.LogInformation(
+            if (logger.IsEnabled(LogLevel.Information))
+            {
+                logger.LogInformation(
                 "Resolving DID {Did} for tenant {TenantId}",
                 did,
                 tenantContext.GetCurrentTenantId()
             );
+            }
 
             // Resolve the DID
             var result = await didResolutionService.ResolveAsync(did, cancellationToken).ConfigureAwait(false);
 
             if (result.DidDocument == null)
             {
-                logger.LogWarning(
+                if (logger.IsEnabled(LogLevel.Warning))
+                {
+                    logger.LogWarning(
                     "Failed to resolve DID {Did} for tenant {TenantId}",
                     did,
                     tenantContext.GetCurrentTenantId()
                 );
+                }
 
                 return Results.Problem(
                     title: "DID Not Found",
@@ -219,11 +239,14 @@ public static class DidEndpoints
                 );
             }
 
-            logger.LogInformation(
+            if (logger.IsEnabled(LogLevel.Information))
+            {
+                logger.LogInformation(
                 "Successfully resolved DID {Did} for tenant {TenantId}",
                 did,
                 tenantContext.GetCurrentTenantId()
             );
+            }
 
             // Parse the DID Document JSON string to an object before returning
             // This prevents double-encoding (the string would otherwise be serialized as a JSON string)
@@ -235,12 +258,15 @@ public static class DidEndpoints
         catch (Exception ex)
 #pragma warning restore CA1031
         {
-            logger.LogError(
+            if (logger.IsEnabled(LogLevel.Error))
+            {
+                logger.LogError(
                 ex,
                 "Unexpected error resolving DID {Did} for tenant {TenantId}",
                 did,
                 tenantContext.GetCurrentTenantId()
             );
+            }
 
             return Results.Problem(
                 title: "Internal Server Error",
