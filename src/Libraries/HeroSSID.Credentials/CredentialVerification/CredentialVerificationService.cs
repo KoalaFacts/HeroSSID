@@ -562,7 +562,7 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
         }
 
         var hasBaseType = false;
-        var hasSpecificType = false;
+        var typeCount = 0;
         foreach (var type in types.EnumerateArray())
         {
             if (type.ValueKind != JsonValueKind.String)
@@ -576,17 +576,18 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
                 return false;
             }
 
+            typeCount++;
             if (string.Equals(name, "VerifiableCredential", StringComparison.Ordinal))
             {
                 hasBaseType = true;
             }
-            else
-            {
-                hasSpecificType = true;
-            }
         }
 
-        return hasBaseType && hasSpecificType;
+        // Issuance has always accepted credentialType="VerifiableCredential",
+        // emitting two base-type entries. Requiring a DISTINCT specific type
+        // would reject the issuer's own signed output. Retain the emitted
+        // two-entry minimum while validating every entry as non-blank.
+        return hasBaseType && typeCount >= 2;
     }
 
     private void LogVerificationFailure(VerificationStatus status)
