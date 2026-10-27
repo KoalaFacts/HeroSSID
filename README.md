@@ -11,7 +11,7 @@ HeroSSID is a development-stage .NET foundation for issuing, holding and verifyi
 | Identities | `did:key` creation, Ed25519 keys, locally stored DID resolution | Remote DID resolution, signing-key rotation and recovery are unfinished |
 | REST ownership | Validated bearer `tenant_id`, exact operation scopes, tenant-owned DID creation and issuer lookup | An issuance-scope client can use any issuer DID owned by its tenant; per-client DID grants are future work |
 | Credential issuance | Ed25519-signed JWT credentials and PostgreSQL persistence | Existing payloads use the 2018 credentials context; full VC 2.0 conformance is not established |
-| Credential verification | Issuer signature, optional expiration and local revocation checks | REST verification resolves issuers within the authenticated tenant; direct library callers must inspect `IsValid` before using parsed result fields |
+| Credential verification | Issuer signature, optional expiration and local revocation checks; no identity fields in rejected results | REST verification resolves issuers within the authenticated tenant; relying parties must still require `IsValid` and apply their own trust policy |
 | Presentation library | Original issuer JWT embedded unchanged in a holder-signed `vp+jwt`; subject binding; verifier-owned trusted issuer, audience and single-use challenge | Full disclosure of one credential, local issuer/holder enrollment, process-local challenge storage by default (opt-in PostgreSQL shared store available); no presentation HTTP protocol endpoints |
 | OAuth | Client-credentials tokens with configured HS256 signing and validated tenant/scopes | Full OpenID4VCI issuance and OpenID4VP exchange are unfinished |
 | Key storage | Encrypted private-key storage through ASP.NET Data Protection; plaintext buffers cleared after signing | Managed signer/HSM integration and signing-key lifecycle are unfinished |
@@ -92,6 +92,10 @@ Issuer, holder and verifier may belong to three different tenants. The verifier 
 Outer presentation timestamps support fractional NumericDates so a one-second challenge does not lose nearly its entire lifetime at a second boundary. Old integer timestamps remain accepted. Both proof and credential expiry are rechecked after blocking consumption; rejection after consumption leaves the nonce spent. The original credential timestamp profile is unchanged.
 
 Read [the presentation profile and migration notes](docs/presentation-profile.md) before integrating. This local full-disclosure profile is not SD-JWT or an OpenID4VP implementation.
+
+## Credential verification result safety
+
+`VerifyCredentialAsync` and `VerifyCredentialFromIssuerAsync` return `CredentialSubject`, `IssuerDid` and `ExpiresAt` only for successful verification. Every rejected result leaves those fields null, while preserving `IsValid=false`, its status and diagnostic errors. Expiry errors no longer echo the parsed timestamp. This is an intentional tightening of the library contract: integrations that previously used parsed metadata from rejected results must stop relying on those values. Valid credential results are unchanged; consumers must still check `IsValid` and apply issuer trust and business authorization policy.
 
 ## Verification and development
 

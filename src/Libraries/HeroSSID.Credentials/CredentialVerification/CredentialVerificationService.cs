@@ -409,10 +409,7 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
         {
             var result = CreateFailedResult(
                 VerificationStatus.Expired,
-                $"Credential expired at {expiresAt.Value:O}",
-                issuerDid,
-                expiresAt,
-                credentialSubject);
+                "Credential has expired");
             LogVerificationFailure(result.Status);
             return result;
         }
@@ -429,10 +426,7 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
         {
             var result = CreateFailedResult(
                 VerificationStatus.IssuerNotFound,
-                "Issuer DID not found",
-                issuerDid,
-                expiresAt,
-                credentialSubject);
+                "Issuer DID not found");
             if (_logger != null)
             {
                 _logIssuerNotFound(_logger, issuerDid, issuerTenantId, null);
@@ -446,10 +440,7 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
         {
             var result = CreateFailedResult(
                 VerificationStatus.IssuerNotFound,
-                "Issuer DID is deactivated",
-                issuerDid,
-                expiresAt,
-                credentialSubject);
+                "Issuer DID is deactivated");
             if (_logger != null)
             {
                 _logDeactivatedIssuerAttempt(_logger, issuerDid, null);
@@ -467,10 +458,7 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
         {
             var result = CreateFailedResult(
                 VerificationStatus.SignatureInvalid,
-                "Signature verification failed",
-                issuerDid,
-                expiresAt,
-                credentialSubject);
+                "Signature verification failed");
             if (_logger != null)
             {
                 _logSignatureVerificationFailed(_logger, issuerDid, null);
@@ -499,10 +487,7 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
         {
             var result = CreateFailedResult(
                 VerificationStatus.Revoked,
-                "Credential has been revoked",
-                issuerDid,
-                expiresAt,
-                credentialSubject);
+                "Credential has been revoked");
             if (_logger != null)
             {
                 _logRevokedCredentialAttempt(_logger, credential.Id, null);
@@ -540,19 +525,14 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
 
     private static CredentialVerificationResult CreateFailedResult(
         VerificationStatus status,
-        string errorMessage,
-        string? issuerDid = null,
-        DateTimeOffset? expiresAt = null,
-        Dictionary<string, object>? credentialSubject = null)
+        string errorMessage)
     {
         return new CredentialVerificationResult
         {
             IsValid = false,
             Status = status,
-            ValidationErrors = new[] { errorMessage },
-            IssuerDid = issuerDid,
-            ExpiresAt = expiresAt,
-            CredentialSubject = credentialSubject
+            // A rejected credential never publishes parsed values as verified identity data.
+            ValidationErrors = new[] { errorMessage }
         };
     }
 }

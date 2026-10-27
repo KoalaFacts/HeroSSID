@@ -113,7 +113,7 @@ public sealed class CredentialVerificationJsonKindTests
     }
 
     [Fact]
-    public async Task NumericExpirationPreservesNestedSubjectAfterParsing()
+    public async Task NumericExpirationRejectsExpiredCredentialWithoutIdentityFields()
     {
         using var context = new HeroDbContext(new DbContextOptions<HeroDbContext>());
         using var limiter = new InMemoryRateLimiter(TimeSpan.FromMinutes(1), 100);
@@ -125,11 +125,9 @@ public sealed class CredentialVerificationJsonKindTests
 
         Assert.False(result.IsValid);
         Assert.Equal(VerificationStatus.Expired, result.Status);
-        Assert.Equal(DateTimeOffset.UnixEpoch, result.ExpiresAt);
-        Assert.Equal("did:key:issuer", result.IssuerDid);
-        var subject = Assert.IsType<Dictionary<string, object>>(result.CredentialSubject);
-        var degree = Assert.IsType<JsonElement>(subject["degree"]);
-        Assert.Equal("Bachelor", degree.GetProperty("name").GetString());
+        Assert.Null(result.ExpiresAt);
+        Assert.Null(result.IssuerDid);
+        Assert.Null(result.CredentialSubject);
     }
 
     private static async Task AssertMalformedAsync(string header, string payload)
