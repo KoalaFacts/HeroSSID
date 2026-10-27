@@ -20,6 +20,9 @@ public sealed class CredentialMinimumStructureTests : IDisposable
     private const string IssuerDid = "did:example:minimum-issuer";
     private const string HolderDid = "did:example:minimum-holder";
     private const string Header = "{\"typ\":\"vc+jwt\",\"alg\":\"EdDSA\"}";
+    private static readonly string[] CredentialTypes = ["VerifiableCredential", "RoleCredential"];
+    private static readonly string[] NoBaseType = ["RoleCredential"];
+    private static readonly string[] BlankSpecificType = ["VerifiableCredential", " "];
     private static readonly Guid IssuerTenant = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid RequesterTenant = Guid.Parse("22222222-2222-2222-2222-222222222222");
 
@@ -108,7 +111,7 @@ public sealed class CredentialMinimumStructureTests : IDisposable
         iat = DateTimeOffset.UtcNow.AddMinutes(-2).ToUnixTimeSeconds(),
         vc = new
         {
-            type = new[] { "VerifiableCredential", "RoleCredential" },
+            type = CredentialTypes,
             credentialSubject = new { id = HolderDid, role = "Member" }
         }
     }))!.AsObject();
@@ -132,10 +135,10 @@ public sealed class CredentialMinimumStructureTests : IDisposable
             case "missing-type": payload["vc"]!.AsObject().Remove("type"); break;
             case "scalar-type": payload["vc"]!["type"] = "VerifiableCredential"; break;
             case "missing-base-type":
-                payload["vc"]!["type"] = JsonSerializer.SerializeToNode(new[] { "RoleCredential" });
+                payload["vc"]!["type"] = JsonSerializer.SerializeToNode(NoBaseType);
                 break;
             case "blank-specialised-type":
-                payload["vc"]!["type"] = JsonSerializer.SerializeToNode(new[] { "VerifiableCredential", " " });
+                payload["vc"]!["type"] = JsonSerializer.SerializeToNode(BlankSpecificType);
                 break;
             case "missing-credential-subject": payload["vc"]!.AsObject().Remove("credentialSubject"); break;
             case "nonobject-credential-subject": payload["vc"]!["credentialSubject"] = "not-an-object"; break;
