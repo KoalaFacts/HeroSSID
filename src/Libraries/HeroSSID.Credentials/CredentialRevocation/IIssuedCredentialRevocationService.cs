@@ -14,7 +14,7 @@ public interface IIssuedCredentialRevocationService
     /// revocation and already-revoked credentials (idempotent).
     /// Caller authorization to exercise the revocation business scope is enforced by the API.
     /// </summary>
-    Task<bool> RevokeAsync(
+    public Task<bool> RevokeAsync(
         ITenantContext issuerTenantContext,
         string credentialJwt,
         CancellationToken cancellationToken = default);
