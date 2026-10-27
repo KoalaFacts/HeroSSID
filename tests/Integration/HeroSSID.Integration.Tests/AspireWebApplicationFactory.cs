@@ -14,7 +14,7 @@ namespace HeroSSID.Integration.Tests;
 /// Custom WebApplicationFactory that uses Testcontainers PostgreSQL for testing
 /// </summary>
 #pragma warning disable CA1515 // This is a test fixture used by xUnit
-public sealed class AspireWebApplicationFactory : WebApplicationFactory<Program>, IAsyncLifetime
+public sealed class AspireWebApplicationFactory : WebApplicationFactory<HeroSSID.Api.Features.Dids.CreateDidRequest>, IAsyncLifetime
 #pragma warning restore CA1515
 {
     private readonly PostgreSqlContainer _postgresContainer = new PostgreSqlBuilder("postgres:16-alpine")
