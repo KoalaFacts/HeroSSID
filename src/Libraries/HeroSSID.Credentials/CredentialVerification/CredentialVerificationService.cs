@@ -88,6 +88,7 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
     private readonly HeroDbContext _dbContext;
     private readonly IRateLimiter _rateLimiter;
     private readonly ILogger<CredentialVerificationService>? _logger;
+    private readonly TimeProvider _timeProvider;
 
     /// <summary>
     /// Initializes a new instance of the CredentialVerificationService
@@ -99,7 +100,8 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
     public CredentialVerificationService(
         HeroDbContext dbContext,
         IRateLimiter rateLimiter,
-        ILogger<CredentialVerificationService>? logger = null)
+        ILogger<CredentialVerificationService>? logger = null,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(rateLimiter);
@@ -107,6 +109,7 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
         _dbContext = dbContext;
         _rateLimiter = rateLimiter;
         _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <summary>
@@ -335,7 +338,7 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
                 return result;
             }
 
-            var nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var nowUnix = _timeProvider.GetUtcNow().ToUnixTimeSeconds();
             if (!StrictJwtReader.TryGetTimestamp(payloadDocument.RootElement, "iat", out var issuedAt) ||
                 issuedAt > nowUnix)
             {
@@ -444,7 +447,7 @@ public sealed class CredentialVerificationService : ICredentialVerificationServi
         }
 
         // T026: Check expiration
-        if (expiresAt.HasValue && expiresAt.Value <= DateTimeOffset.UtcNow)
+        if (expiresAt.HasValue && expiresAt.Value <= _timeProvider.GetUtcNow())
         {
             var result = CreateFailedResult(
                 VerificationStatus.Expired,
