@@ -16,6 +16,7 @@ public sealed class CredentialVerificationFailureDisclosureTests : IDisposable
 {
     private const string IssuerDid = "did:example:failure-disclosure-issuer";
     private const string ClaimMarker = "untrusted-identity-must-not-escape";
+    private static readonly string[] TestCredentialTypes = ["VerifiableCredential", "TestCredential"];
     private static readonly Guid IssuerTenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid RequesterTenantId = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private readonly HeroDbContext _dbContext;
@@ -145,7 +146,7 @@ public sealed class CredentialVerificationFailureDisclosureTests : IDisposable
             iat = DateTimeOffset.UtcNow.AddMinutes(-1).ToUnixTimeSeconds(), exp = expiration,
             vc = new
             {
-                type = new[] { "VerifiableCredential", "TestCredential" },
+                type = TestCredentialTypes,
                 credentialSubject = new { marker = ClaimMarker, degree = new { name = "Bachelor" } }
             }
         });
