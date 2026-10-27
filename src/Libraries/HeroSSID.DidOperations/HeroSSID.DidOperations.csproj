@@ -28,7 +28,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.13" />
     <PackageReference Include="NSec.Cryptography" Version="25.4.0" />
     <PackageReference Include="SimpleBase" Version="5.6.4" />
   </ItemGroup>
