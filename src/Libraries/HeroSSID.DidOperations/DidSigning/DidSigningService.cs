@@ -27,6 +27,18 @@ public sealed class DidSigningService(
     private readonly IRateLimiter? _rateLimiter = rateLimiter; // Optional for backward compatibility
     private readonly ILogger<DidSigningService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
+    private static readonly Action<ILogger, string, int, Exception?> s_logSignedMessage =
+        LoggerMessage.Define<string, int>(
+            LogLevel.Information,
+            new EventId(1, nameof(SignAsync)),
+            "Signed message with DID {DidIdentifier}, signature length: {SignatureLength} bytes");
+
+    private static readonly Action<ILogger, string, bool, Exception?> s_logVerifiedSignature =
+        LoggerMessage.Define<string, bool>(
+            LogLevel.Information,
+            new EventId(2, nameof(VerifyAsync)),
+            "Verified signature for DID {DidIdentifier}: {IsValid}");
+
     /// <inheritdoc />
     public async Task<byte[]> SignAsync(string didIdentifier, byte[] message, CancellationToken cancellationToken = default)
     {
@@ -75,8 +87,7 @@ public sealed class DidSigningService(
             // Sign message using Ed25519
             byte[] signature = SignMessage(decryptedPrivateKey, message);
 
-            _logger.LogInformation("Signed message with DID {DidIdentifier}, signature length: {SignatureLength} bytes",
-                didIdentifier, signature.Length);
+            s_logSignedMessage(_logger, didIdentifier, signature.Length, null);
 
             return signature;
         }
@@ -119,7 +130,7 @@ public sealed class DidSigningService(
         // Verify signature using public key
         bool isValid = VerifyWithPublicKey(didEntity.PublicKeyEd25519, message, signature);
 
-        _logger.LogInformation("Verified signature for DID {DidIdentifier}: {IsValid}", didIdentifier, isValid);
+        s_logVerifiedSignature(_logger, didIdentifier, isValid, null);
 
         return isValid;
     }
