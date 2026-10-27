@@ -2,10 +2,12 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using HeroSSID.Core.TenantManagement;
+using HeroSSID.Credentials.CredentialIssuance;
 using HeroSSID.Credentials.CredentialVerification;
 using HeroSSID.Credentials.Utilities;
 using HeroSSID.Data;
 using HeroSSID.Data.Entities;
+using HeroSSID.Infrastructure.KeyEncryption;
 using HeroSSID.Infrastructure.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using NSec.Cryptography;
@@ -104,6 +106,42 @@ public sealed class CredentialMinimumStructureTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData("VerifiableCredential")]
+    [InlineData("MembershipCredential")]
+    public async Task IssuerOutputRoundTripsForEveryPreviouslyAcceptedType(string credentialType)
+    {
+        await EnrollIssuerAsync().ConfigureAwait(true);
+        var issuer = await _db.Dids.SingleAsync(d => d.DidIdentifier == IssuerDid).ConfigureAwait(true);
+
+        using var holderKey = Key.Create(SignatureAlgorithm.Ed25519);
+        var holderPublicKey = holderKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+        var holder = new DidEntity
+        {
+            Id = Guid.NewGuid(), TenantId = RequesterTenant, DidIdentifier = HolderDid,
+            PublicKeyEd25519 = holderPublicKey, KeyFingerprint = SHA256.HashData(holderPublicKey),
+            PrivateKeyEd25519Encrypted = new byte[64], DidDocumentJson = "{}",
+            Status = "active", CreatedAt = DateTimeOffset.UtcNow
+        };
+        _db.Dids.Add(holder);
+        await _db.SaveChangesAsync().ConfigureAwait(true);
+
+        // This uses the actual issuer and verifier with a real enrolled signing key.
+        // It does not establish independent wallet interop or holder-key control.
+        var issuerService = new CredentialIssuanceService(_db, new TestIssuerKeyEncryption(_issuerKey), _limiter);
+        var jwt = await issuerService.IssueCredentialAsync(
+            new TenantContext(IssuerTenant), issuer.Id, holder.Id, credentialType,
+            new Dictionary<string, object> { ["role"] = "member" }).ConfigureAwait(true);
+        var verified = await new CredentialVerificationService(_db, _limiter)
+            .VerifyCredentialAsync(new TenantContext(IssuerTenant), jwt).ConfigureAwait(true);
+
+        Assert.True(verified.IsValid, string.Join("; ", verified.ValidationErrors));
+        Assert.Equal(VerificationStatus.Valid, verified.Status);
+        Assert.Equal(IssuerDid, verified.IssuerDid);
+        Assert.NotNull(verified.CredentialSubject);
+        Assert.Equal("member", Assert.IsType<JsonElement>(verified.CredentialSubject["role"]).GetString());
+    }
+
     private static JsonObject CompletePayload() => JsonNode.Parse(JsonSerializer.Serialize(new
     {
         iss = IssuerDid,
@@ -190,6 +228,14 @@ public sealed class CredentialMinimumStructureTests : IDisposable
         _issuerKey.Dispose();
         _limiter.Dispose();
         _db.Dispose();
+    }
+
+    private sealed class TestIssuerKeyEncryption(Key issuerKey) : IKeyEncryptionService
+    {
+        public byte[] Decrypt(byte[] ciphertext) => issuerKey.Export(KeyBlobFormat.RawPrivateKey);
+        public byte[] Encrypt(byte[] plaintext) => throw new NotSupportedException();
+        public string EncryptString(string plaintext) => throw new NotSupportedException();
+        public string DecryptString(string ciphertext) => throw new NotSupportedException();
     }
 
     private sealed class TenantContext(Guid id) : ITenantContext
