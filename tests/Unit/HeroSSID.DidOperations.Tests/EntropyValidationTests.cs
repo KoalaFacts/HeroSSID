@@ -115,7 +115,7 @@ public sealed class EntropyValidationTests
     private static (byte[] publicKey, byte[] privateKey) FinishGeneratedKeyPair(
         byte[] publicKey, byte[] privateKey)
     {
-        MethodInfo method = Assert.IsType<MethodInfo>(
+        MethodInfo method = Assert.IsAssignableFrom<MethodInfo>(
             typeof(DidCreationService).GetMethod("FinishGeneratedKeyPair",
                 BindingFlags.NonPublic | BindingFlags.Static));
         return ((byte[] publicKey, byte[] privateKey))method.Invoke(
