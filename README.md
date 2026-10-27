@@ -15,7 +15,7 @@ HeroSSID is a development-stage .NET foundation for issuing, holding and verifyi
 | Presentation library | Original issuer JWT embedded unchanged in a holder-signed `vp+jwt`; subject binding; verifier-owned trusted issuer, audience and single-use challenge | Full disclosure of one credential, local issuer/holder enrollment, process-local challenge storage by default (opt-in PostgreSQL shared store available); no presentation HTTP protocol endpoints |
 | OAuth | Client-credentials tokens with configured HS256 signing and validated tenant/scopes | Full OpenID4VCI issuance and OpenID4VP exchange are unfinished |
 | Key storage | Encrypted private-key storage through ASP.NET Data Protection; plaintext buffers cleared after signing | Managed signer/HSM integration and signing-key lifecycle are unfinished |
-| Revocation | Verification rejects locally recorded revoked JWTs, including duplicate records | Revocation service API and interoperable status-list publication are unfinished |
+| Revocation | Issuer-only `POST /api/v1/credentials/revoke` atomically revokes the exact locally issued JWT; subsequent credential and presentation verification reject it | Local issuer database only: no signed/public interoperable status-list publication, independent wallet lookup or external trust policy |
 | Selective disclosure | Legacy calls fail closed; mock SD-JWT implementations are not registered by default | Real selective disclosure and independent interoperability tests are unfinished |
 
 Identity credentials express what an issuer attests. Whether that issuer is trusted for a particular claim, and what business actions a holder may take, remain explicit relying-party decisions. Enrollment alone does not establish a person's real-world identity.
@@ -48,14 +48,14 @@ dotnet run --project src/Services/HeroSSID.Api --no-launch-profile --urls http:/
 
 `Jwt__Secret` is required in every environment. Missing, whitespace, shorter-than-32-byte UTF-8 values, NUL-containing values and the previous placeholder are rejected at startup. Use a stable managed secret outside disposable development; changing it invalidates outstanding access tokens. `Jwt__Issuer` and `Jwt__Audience` must be explicitly configured outside Development. In Development they default to `https://herossid.api`. They identify access-token validation policy, not a requirement that the local HTTP server use that hostname.
 
-Development startup creates `test_client` / `test_secret` with `did:manage credential:issue credential:verify`. These are deliberately public local-development credentials. Existing seed rows are not overwritten: a retained development database needs `did:manage` explicitly granted to its test client. Production client provisioning is a separate operational responsibility.
+Development startup creates `test_client` / `test_secret` with `did:manage credential:issue credential:verify credential:revoke`. These are deliberately public local-development credentials. Existing seed rows are not overwritten: a retained development database needs any new operation scopes explicitly provisioned to its test client; seeding does not elevate existing clients. Production client provisioning is a separate operational responsibility.
 
 ```bash
 curl http://localhost:5139/oauth2/token \
   --data-urlencode 'grant_type=client_credentials' \
   --data-urlencode 'client_id=test_client' \
   --data-urlencode 'client_secret=test_secret' \
-  --data-urlencode 'scope=did:manage credential:issue credential:verify'
+  --data-urlencode 'scope=did:manage credential:issue credential:verify credential:revoke'
 ```
 
 Use the returned `access_token` as `Authorization: Bearer <access_token>` on every identity/credential REST operation. Tokens must contain exactly one scalar JSON string `tenant_id` containing a non-empty GUID; duplicate raw JSON members and tenant arrays are rejected. Missing or invalid bearer identities receive 401; valid identities lacking the operation scope receive 403. Repeated `scope` claims and a space-separated scope claim are accepted with exact, case-sensitive matching.
@@ -66,8 +66,9 @@ Use the returned `access_token` as `Authorization: Bearer <access_token>` on eve
 | `GET /api/v1/dids/{did}` | `did:manage` |
 | `POST /api/v1/credentials/issue` | `credential:issue` |
 | `POST /api/v1/credentials/verify` | `credential:verify` |
+| `POST /api/v1/credentials/revoke` | `credential:revoke` |
 
-DID creation accepts `{"method":"did:key","keyType":"Ed25519"}`. Issuance accepts `issuerDid`, `holderDid`, `credentialType` and a non-empty `claims` object. Verification accepts `{"credential":"<issued JWT>"}`. Both issuer and holder must already be enrolled locally, and issuance uses only an issuer belonging to the token's tenant. See [the HTTP request examples](src/Services/HeroSSID.Api/HeroSSID.Api.http).
+DID creation accepts `{"method":"did:key","keyType":"Ed25519"}`. Issuance accepts `issuerDid`, `holderDid`, `credentialType` and a non-empty `claims` object. Verification and issuer revocation both accept `{"credential":"<issued JWT>"}`. Revocation requires its **own** scope, not simply `credential:issue` or possession of the JWT; only exact credentials stored under the authenticated tenant and its issuer DID can be revoked. It returns `204` on first or repeated revocation, `404` for unknown/foreign credentials without distinguishing them, and `400` on malformed inputs. Revoked credentials fail closed during local direct verification and library presentation; a remote wallet/verifier is **not** independently notified. This operation is not a W3C status list. Verification accepts `{"credential":"<issued JWT>"}`. Both issuer and holder must already be enrolled locally, and issuance uses only an issuer belonging to the token's tenant. See [the HTTP request examples](src/Services/HeroSSID.Api/HeroSSID.Api.http).
 
 ## Full-disclosure presentation library
 
