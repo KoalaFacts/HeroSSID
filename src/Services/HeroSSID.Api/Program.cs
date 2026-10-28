@@ -84,8 +84,12 @@ builder.Services.AddApiVersioning(options =>
     options.ApiVersionReader = new UrlSegmentApiVersionReader();
 });
 
-// Add OpenAPI/Swagger support (T026)
-builder.Services.AddOpenApi();
+// Preserve the existing OpenAPI 3.0 document contract for development SDK generators.
+// ASP.NET Core 10 otherwise changes the default to 3.1 (a breaking schema change).
+builder.Services.AddOpenApi(options =>
+{
+    options.OpenApiVersion = Microsoft.OpenApi.OpenApiSpecVersion.OpenApi3_0;
+});
 
 // Add CORS (T025)
 builder.Services.AddCors(options =>
