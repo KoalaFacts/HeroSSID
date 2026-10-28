@@ -19,15 +19,15 @@ public sealed class OpenApiDocumentContractTests : IClassFixture<AspireWebApplic
     [Fact]
     public async Task DevelopmentOpenApiDocument_PreservesOpenApi30ForExistingConsumers()
     {
-        using var response = await _client.GetAsync("/openapi/v1.json");
+        using var response = await _client.GetAsync("/openapi/v1.json").ConfigureAwait(false);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        await using var stream = await response.Content.ReadAsStreamAsync();
-        using var document = await JsonDocument.ParseAsync(stream);
+        using var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
+        using var document = await JsonDocument.ParseAsync(stream).ConfigureAwait(false);
 
         var version = document.RootElement.GetProperty("openapi").GetString();
         Assert.NotNull(version);
-        Assert.StartsWith("3.0.", version);
+        Assert.StartsWith("3.0.", version, StringComparison.Ordinal);
     }
 }
