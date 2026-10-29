@@ -101,6 +101,8 @@ public static class IssuerRevocationSnapshot
         byte[] trustedIssuerPublicKey,
         DateTimeOffset now)
     {
+        ArgumentNullException.ThrowIfNull(snapshotJwt);
+        ArgumentNullException.ThrowIfNull(credentialJwt);
         if (string.IsNullOrWhiteSpace(trustedIssuerDid) ||
             trustedIssuerPublicKey is null || trustedIssuerPublicKey.Length != 32 ||
             !StrictJwtReader.TryRead(snapshotJwt, SnapshotType, MaxTokenLength, out var snapshot) ||
@@ -160,5 +162,5 @@ public static class IssuerRevocationSnapshot
     }
 
     private static string Digest(string credential) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(credential))).ToLowerInvariant();
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(credential)));
 }
