@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using HeroSSID.DidOperations.DidMethod;
 using HeroSSID.DidOperations.Models;
 using HeroSSID.DidOperations.Helpers;
@@ -14,7 +15,8 @@ public sealed class DidKeyMethod : IDidMethod
 {
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
-        WriteIndented = true
+        WriteIndented = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
     /// <inheritdoc />
@@ -51,8 +53,18 @@ public sealed class DidKeyMethod : IDidMethod
             throw new ArgumentException($"DID identifier is not a valid did:key: {didIdentifier}", nameof(didIdentifier));
         }
 
-        string publicKeyBase58 = SimpleBase.Base58.Bitcoin.Encode(publicKey);
-        string verificationMethodId = $"{didIdentifier}#keys-1";
+        // A did:key is self-certifying: the public key MUST derive this exact DID.
+        // Reject both a differently encoded DID and a mismatched key.
+        string derivedDid = GenerateDidIdentifier(publicKey);
+        if (!string.Equals(didIdentifier, derivedDid, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("DID identifier does not match the supplied Ed25519 public key", nameof(didIdentifier));
+        }
+
+        // did:key Ed25519VerificationKey2020 uses the complete multicodec
+        // multibase value for both the verification method fragment and key.
+        string multibaseKey = didIdentifier["did:key:".Length..];
+        string verificationMethodId = $"{didIdentifier}#{multibaseKey}";
 
         DidDocument didDocument = new DidDocument
         {
@@ -69,10 +81,11 @@ public sealed class DidKeyMethod : IDidMethod
                     Id = verificationMethodId,
                     Type = "Ed25519VerificationKey2020",
                     Controller = didIdentifier,
-                    PublicKeyMultibase = $"z{publicKeyBase58}"
+                    PublicKeyMultibase = multibaseKey
                 }
             },
-            Authentication = new[] { verificationMethodId }
+            Authentication = new[] { verificationMethodId },
+            AssertionMethod = new[] { verificationMethodId }
         };
 
         return JsonSerializer.Serialize(didDocument, _jsonOptions);
