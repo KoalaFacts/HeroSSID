@@ -22,9 +22,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse 9111bf8bc13e04de5e3a79623d0a89886ce42074^{commit})" = "9111bf8bc13e04de5e3a79623d0a89886ce42074"
+          test "$(git rev-parse 66201c0f561233d367a094b904d31da4b3399f28^{commit})" = "66201c0f561233d367a094b904d31da4b3399f28"
           test "$(git rev-parse 48b1e03758164b39f548a5a21b2d9156fcf7aae1^{commit})" = "48b1e03758164b39f548a5a21b2d9156fcf7aae1"
-          test "$(git diff --name-only 48b1e03758164b39f548a5a21b2d9156fcf7aae1 9111bf8bc13e04de5e3a79623d0a89886ce42074 | wc -l)" -eq 7
+          test "$(git diff --name-only 48b1e03758164b39f548a5a21b2d9156fcf7aae1 66201c0f561233d367a094b904d31da4b3399f28 | wc -l)" -eq 9
       - name: Install isolated local review model
         shell: bash
         run: |
@@ -47,7 +47,7 @@ jobs:
           python3 tools/offline_pr32_review.py
           test -s review-1.md
           test -s review-1.json
-          test "$(cat review-head-1.txt)" = "9111bf8bc13e04de5e3a79623d0a89886ce42074"
+          test "$(cat review-head-1.txt)" = "66201c0f561233d367a094b904d31da4b3399f28"
       - name: Retain raw review and model evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -81,16 +81,18 @@ jobs:
         run: |
           set -euo pipefail
           actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/32 --jq '.head.sha')"
-          test "$actual" = "9111bf8bc13e04de5e3a79623d0a89886ce42074"
+          test "$actual" = "66201c0f561233d367a094b904d31da4b3399f28"
           python3 - <<'PY'
           import json
           from pathlib import Path
-          expected_head = "9111bf8bc13e04de5e3a79623d0a89886ce42074"
+          expected_head = "66201c0f561233d367a094b904d31da4b3399f28"
           expected_files = {
               "tests/Contract/HeroSSID.OpenID4VC.Contract.Tests/CanonicalDidDocumentHttpTests.cs",
               "tests/Unit/HeroSSID.DidOperations.Tests/CanonicalDidResolutionTests.cs",
-              "src/Libraries/HeroSSID.DidOperations/DidResolution/IDidResolutionService.cs",
               "src/Libraries/HeroSSID.DidOperations/DidResolution/DidResolutionService.cs",
+              "src/Libraries/HeroSSID.DidOperations/DidResolution/ICanonicalDidResolutionService.cs",
+              "src/Services/HeroSSID.Api/Program.cs",
+              "tests/Unit/HeroSSID.DidOperations.Tests/LegacyDidResolutionInterfaceTests.cs",
               "src/Services/HeroSSID.Api/Features/Dids/DidEndpoints.cs",
               "docs/did-key-profile.md",
               "README.md",
@@ -113,13 +115,13 @@ jobs:
           {
             echo 'Independent local Qwen2.5-Coder 7B automated code review of PR #32.'
             echo
-            echo 'Exact source: 9111bf8bc13e04de5e3a79623d0a89886ce42074. Baseline: 48b1e03758164b39f548a5a21b2d9156fcf7aae1.'
+            echo 'Exact source: 66201c0f561233d367a094b904d31da4b3399f28. Baseline: 48b1e03758164b39f548a5a21b2d9156fcf7aae1.'
             echo 'This is NOT human approval, an external audit or independent wallet conformance.'
             echo 'Investigate every finding against the actual source and tests before merge.'
             echo
             cat review-1.md
           } > /tmp/pr32-review.md
           gh api --method POST repos/KoalaFacts/HeroSSID/pulls/32/reviews \
-            -f event=COMMENT -f commit_id="9111bf8bc13e04de5e3a79623d0a89886ce42074" \
+            -f event=COMMENT -f commit_id="66201c0f561233d367a094b904d31da4b3399f28" \
             -f body="$(cat /tmp/pr32-review.md)" \
             --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
