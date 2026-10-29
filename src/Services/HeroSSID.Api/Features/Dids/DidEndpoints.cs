@@ -22,6 +22,16 @@ public static class DidEndpoints
             .RequireAuthorization(OperationScopes.DidManage)
             .WithTags("DIDs");
 
+        // Read-only, explicitly opted-in DID:key compatibility profile.
+        // The existing resolution path continues to return persisted JSON.
+        dids.MapGet("/{did}/canonical", ResolveCanonicalDidKey)
+            .WithName("ResolveCanonicalDidKey")
+            .WithSummary("Derive a current did:key document from the stored public key without rewriting the database")
+            .Produces<object>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status404NotFound);
+
         // POST /api/v1/dids - Create a new DID
         dids.MapPost("/", CreateDid)
             .WithName("CreateDid")
@@ -37,6 +47,30 @@ public static class DidEndpoints
             .Produces<object>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
+    }
+
+    private static async Task<IResult> ResolveCanonicalDidKey(
+        string did,
+        [FromServices] ICanonicalDidResolutionService didResolutionService,
+        CancellationToken cancellationToken)
+    {
+        // Treat unsupported/malformed identifiers and mismatched stored keys
+        // as unavailable; no credential, tenant or key information is disclosed.
+        if (string.IsNullOrWhiteSpace(did) || did.Length > 256 ||
+            !did.StartsWith("did:key:", StringComparison.Ordinal))
+        {
+            return Results.NotFound();
+        }
+
+        var result = await didResolutionService.ResolveCanonicalDidKeyAsync(
+            did, cancellationToken).ConfigureAwait(false);
+        if (result.DidDocument is null)
+        {
+            return Results.NotFound();
+        }
+
+        using var document = System.Text.Json.JsonDocument.Parse(result.DidDocument);
+        return Results.Ok(document.RootElement.Clone());
     }
 
     private static async Task<IResult> CreateDid(

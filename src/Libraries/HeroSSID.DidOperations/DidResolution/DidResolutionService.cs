@@ -18,7 +18,7 @@ public sealed class DidResolutionService(
     HeroDbContext dbContext,
     ITenantContext tenantContext,
     DidMethodResolver didMethodResolver,
-    ILogger<DidResolutionService> logger) : IDidResolutionService
+    ILogger<DidResolutionService> logger) : IDidResolutionService, ICanonicalDidResolutionService
 {
     private readonly HeroDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     private readonly ITenantContext _tenantContext = tenantContext ?? throw new ArgumentNullException(nameof(tenantContext));
@@ -107,6 +107,75 @@ public sealed class DidResolutionService(
             DidDocument = didEntity.DidDocumentJson,
             Metadata = DidResolutionMetadata.CreateSuccess()
         };
+    }
+
+    /// <summary>
+    /// Explicit, read-only compatibility view for existing did:key documents.
+    /// The historical stored JSON is neither trusted as a public-key source nor rewritten.
+    /// Only tenant-owned active DIDs whose stored public key derives the exact DID qualify.
+    /// </summary>
+    public async Task<DidResolutionResult> ResolveCanonicalDidKeyAsync(
+        string didIdentifier, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(didIdentifier);
+
+        if (!didIdentifier.StartsWith("did:key:", StringComparison.Ordinal) ||
+            !_didMethodResolver.IsMethodSupported("key"))
+        {
+            return new DidResolutionResult
+            {
+                DidIdentifier = didIdentifier,
+                Metadata = DidResolutionMetadata.CreateError("methodNotSupported", "Canonical view supports did:key only")
+            };
+        }
+
+        var method = _didMethodResolver.GetMethod("key");
+        if (!method.IsValid(didIdentifier))
+        {
+            return new DidResolutionResult
+            {
+                DidIdentifier = didIdentifier,
+                Metadata = DidResolutionMetadata.CreateError("invalidDid", "Invalid did:key identifier")
+            };
+        }
+
+        Guid tenantId = _tenantContext.GetCurrentTenantId();
+        var owned = await _dbContext.Dids.AsNoTracking()
+            .Where(did => did.DidIdentifier == didIdentifier && did.TenantId == tenantId)
+            .Select(did => new { did.Status, did.PublicKeyEd25519 })
+            .FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
+
+        // A deactivated DID must not gain an apparently active representation
+        // through the compatibility endpoint.
+        if (owned is null || !string.Equals(owned.Status, "active", StringComparison.Ordinal))
+        {
+            return new DidResolutionResult
+            {
+                DidIdentifier = didIdentifier,
+                Metadata = DidResolutionMetadata.CreateError("notFound", "Active DID not found")
+            };
+        }
+
+        try
+        {
+            // CreateDidDocument verifies that the supplied public key derives this
+            // exact did:key; never convert a mismatched row into an attestation.
+            string canonical = method.CreateDidDocument(didIdentifier, owned.PublicKeyEd25519);
+            return new DidResolutionResult
+            {
+                DidIdentifier = didIdentifier,
+                DidDocument = canonical,
+                Metadata = DidResolutionMetadata.CreateSuccess()
+            };
+        }
+        catch (ArgumentException)
+        {
+            return new DidResolutionResult
+            {
+                DidIdentifier = didIdentifier,
+                Metadata = DidResolutionMetadata.CreateError("invalidDid", "Stored public key does not match DID")
+            };
+        }
     }
 
     /// <summary>
