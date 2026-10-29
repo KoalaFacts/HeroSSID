@@ -8,26 +8,30 @@ permissions: {}
 
 jobs:
   review:
-    name: Separate-model code review (offline inference)
+    name: Independent model pass ${{ matrix.part }}/4
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3, 4]
     permissions:
       contents: read
     steps:
-      - name: Checkout review-only branch and source refs
+      - name: Checkout immutable review helper and candidate refs
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Verify pinned exact candidate is present
+      - name: Verify pinned source and baseline
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse a66011f8ab6f1d52c6fbdc11be2f41f0c0a602fe^{commit})" = "a66011f8ab6f1d52c6fbdc11be2f41f0c0a602fe"
-          git diff --name-only 8e63d4d694cef0ff88363ca47d9928676c1f45fe a66011f8ab6f1d52c6fbdc11be2f41f0c0a602fe > /tmp/pr-files.txt
-          test "$(wc -l < /tmp/pr-files.txt)" -gt 20
+          test "$(git rev-parse 8e63d4d694cef0ff88363ca47d9928676c1f45fe^{commit})" = "8e63d4d694cef0ff88363ca47d9928676c1f45fe"
+          test "$(git diff --name-only 8e63d4d694cef0ff88363ca47d9928676c1f45fe a66011f8ab6f1d52c6fbdc11be2f41f0c0a602fe | wc -l)" -gt 20
 
-      - name: Install isolated local Ollama model
+      - name: Install local independent review model
         shell: bash
         run: |
           set -euo pipefail
@@ -41,26 +45,32 @@ jobs:
           curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null
           ollama pull qwen2.5-coder:7b
 
-      - name: Inspect full pinned diff using separate local model
+      - name: Review complete assigned patch set with constrained JSON
         shell: bash
+        env:
+          REVIEW_PART: ${{ matrix.part }}
         run: |
           set -euo pipefail
           python3 tools/offline_pr30_review.py
-          test -s review.md
-          test -s review-raw.json
+          test -s "review-${REVIEW_PART}.md"
+          test -s "review-${REVIEW_PART}.json"
+          test -s "review-head-${REVIEW_PART}.txt"
 
-      - name: Save independent review output
+      - name: Preserve raw evidence for independent inspection
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: independent-pr30-model-review
+          name: independent-pr30-review-${{ matrix.part }}
           path: |
-            review.md
-            review-raw.json
-            review-head.txt
+            review-${{ matrix.part }}.md
+            review-${{ matrix.part }}.json
+            review-head-${{ matrix.part }}.txt
+            review-model-${{ matrix.part }}.json
+          if-no-files-found: warn
           retention-days: 30
 
   publish:
-    name: Post independent model review to exact PR SHA
+    name: Submit pinned, independent model review
     needs: review
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -68,24 +78,61 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - name: Download completed model review
+      - name: Download all four complete independent passes
         uses: actions/download-artifact@v4
         with:
-          name: independent-pr30-model-review
+          pattern: independent-pr30-review-*
+          merge-multiple: true
 
-      - name: Verify unchanged candidate and publish COMMENTED review
+      - name: Check complete source coverage and unchanged PR head
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           expected=a66011f8ab6f1d52c6fbdc11be2f41f0c0a602fe
-          test "$(cat review-head.txt)" = "$expected"
           actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/30 --jq '.head.sha')"
           test "$actual" = "$expected"
-          test -s review.md
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          expected = "a66011f8ab6f1d52c6fbdc11be2f41f0c0a602fe"
+          seen = []
+          for part in range(1, 5):
+              assert Path(f"review-head-{part}.txt").read_text().strip() == expected
+              assert Path(f"review-{part}.md").stat().st_size > 200
+              payload = json.loads(Path(f"review-{part}.json").read_text())
+              assert payload["part"] == part and payload["head"] == expected
+              assert payload["review"]["verdict"] in (
+                  "no_actionable_findings", "actionable_findings", "inconclusive"
+              )
+              seen.extend(payload["files"])
+          assert len(seen) == 36 and len(set(seen)) == 36, (
+              "Review passes did not cover every one of the 36 changed files"
+          )
+          PY
+
+      - name: Submit a COMMENTED review without pretending to approve
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          expected=a66011f8ab6f1d52c6fbdc11be2f41f0c0a602fe
+          {
+            echo '## Independent model-assisted code review — PR #30'
+            echo
+            echo 'Exact head a66011f8ab6f1d52c6fbdc11be2f41f0c0a602fe against main baseline 8e63d4d694cef0ff88363ca47d9928676c1f45fe.'
+            echo 'Four separate local Qwen2.5-Coder 7B passes inspected all 36 complete changed-file patches, with machine-constrained JSON output. Findings require real-source confirmation before merge.'
+            echo 'This is independent automated model review, NOT a human approval, external security audit, production certification, runtime test or OID4VC interoperability claim.'
+            echo
+            for part in 1 2 3 4; do
+              cat "review-${part}.md"
+              echo
+            done
+          } > /tmp/independent-review.md
           gh api --method POST repos/KoalaFacts/HeroSSID/pulls/30/reviews \
             -f event=COMMENT \
             -f commit_id="$expected" \
-            -f body="$(cat review.md)" \
+            -f body="$(cat /tmp/independent-review.md)" \
             --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
