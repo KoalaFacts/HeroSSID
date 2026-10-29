@@ -30,6 +30,9 @@ public static class Vcdm20JosePresentation
     private const string DataPrefix = "data:application/vc+jwt,";
     private const int MaximumCredentialLength = 65_536;
     private const int MaximumPresentationLength = 131_072;
+    private static readonly string[] BaseContexts = [BaseContext];
+    private static readonly string[] PresentationTypes = ["VerifiablePresentation"];
+    private static readonly string[] EnvelopedTypes = ["EnvelopedVerifiableCredential"];
     private static readonly string[] DateFormats =
     [
         "yyyy-MM-dd'T'HH:mm:ss'Z'",
@@ -85,15 +88,15 @@ public static class Vcdm20JosePresentation
         });
         string payload = JsonSerializer.Serialize(new Dictionary<string, object>(StringComparer.Ordinal)
         {
-            ["@context"] = new[] { BaseContext },
-            ["type"] = new[] { "VerifiablePresentation" },
+            ["@context"] = BaseContexts,
+            ["type"] = PresentationTypes,
             ["holder"] = holderDid,
             ["verifiableCredential"] = new[]
             {
                 new Dictionary<string, object>(StringComparer.Ordinal)
                 {
-                    ["@context"] = new[] { BaseContext },
-                    ["type"] = new[] { "EnvelopedVerifiableCredential" },
+                    ["@context"] = BaseContexts,
+                    ["type"] = EnvelopedTypes,
                     ["id"] = DataPrefix + credentialJwt
                 }
             },
