@@ -15,6 +15,13 @@ public interface IDidResolutionService
     public Task<DidResolutionResult> ResolveAsync(string didIdentifier, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Explicitly derives the current Ed25519 did:key document profile from the
+    /// tenant-owned, active record's public key, without rewriting its stored JSON.
+    /// Fail closed if the stored key does not derive the exact requested DID.
+    /// </summary>
+    public Task<DidResolutionResult> ResolveCanonicalDidKeyAsync(string didIdentifier, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Retrieves a DID by its database ID.
     /// </summary>
     /// <param name="id">Database ID of the DID</param>
