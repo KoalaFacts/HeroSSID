@@ -14,7 +14,8 @@ public sealed class DidKeyDocumentProfileTests
     [Fact]
     public void KnownDidKeyVector_PublishesMatchingMulticodecAndAssertionMethod()
     {
-        byte[] prefixedKey = SimpleBase.Base58.Bitcoin.Decode(KnownDid["did:key:z".Length..]);
+        string knownSuffix = KnownDid.Substring("did:key:z".Length);
+        byte[] prefixedKey = SimpleBase.Base58.Bitcoin.Decode(knownSuffix);
         Assert.Equal(34, prefixedKey.Length);
         Assert.Equal((byte)0xed, prefixedKey[0]);
         Assert.Equal((byte)0x01, prefixedKey[1]);
@@ -78,7 +79,8 @@ public sealed class DidKeyDocumentProfileTests
         Assert.Equal("Ed25519VerificationKey2020", verificationMethod.GetProperty("type").GetString());
         Assert.Equal(expectedMultibase, verificationMethod.GetProperty("publicKeyMultibase").GetString());
 
-        byte[] decoded = SimpleBase.Base58.Bitcoin.Decode(expectedMultibase[1..]);
+        string encodedKey = expectedMultibase.Substring(1);
+        byte[] decoded = SimpleBase.Base58.Bitcoin.Decode(encodedKey);
         Assert.Equal(34, decoded.Length);
         Assert.Equal((byte)0xed, decoded[0]);
         Assert.Equal((byte)0x01, decoded[1]);
