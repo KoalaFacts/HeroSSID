@@ -15,8 +15,8 @@ public class TenantAwareApplicationManager(
     IOpenIddictApplicationCache<TenantAwareOpenIddictApplication> cache,
     ILogger<TenantAwareApplicationManager> logger,
     IOptionsMonitor<OpenIddictCoreOptions> options,
-    IOpenIddictApplicationStoreResolver resolver,
-    ITenantContext tenantContext) : OpenIddictApplicationManager<TenantAwareOpenIddictApplication>(cache, logger, options, resolver)
+    IOpenIddictApplicationStore<TenantAwareOpenIddictApplication> store,
+    ITenantContext tenantContext) : OpenIddictApplicationManager<TenantAwareOpenIddictApplication>(cache, logger, options, store)
 {
     private readonly ITenantContext _tenantContext = tenantContext ?? throw new ArgumentNullException(nameof(tenantContext));
 

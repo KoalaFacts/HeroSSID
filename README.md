@@ -22,7 +22,7 @@ Identity credentials express what an issuer attests. Whether that issuer is trus
 
 ## Local development
 
-Prerequisites: .NET 9 SDK, a reachable PostgreSQL instance, and Docker for the container-backed integration/HTTP contract tests. The examples below bind development services to localhost.
+Prerequisites: .NET 10 SDK (LTS; projects target `net10.0`), a reachable PostgreSQL instance, and Docker for the container-backed integration/HTTP contract tests. The examples below bind development services to localhost.
 
 ```bash
 git clone https://github.com/KoalaFacts/HeroSSID.git
@@ -99,6 +99,8 @@ Read [the presentation profile and migration notes](docs/presentation-profile.md
 A successful direct `vc+jwt` verification now requires signed, non-empty `iss` and `sub`, integer `iat` no later than the verification clock, and an object `vc.credentialSubject`. The `vc.type` array must contain `VerifiableCredential` and every entry must be a non-blank string. Existing signed singleton-base credentials remain valid, as does the issuer API’s duplicate-base output when that credential type is requested. This structural check does not itself establish a specific qualification or business authorization. If the subject has an `id`, it must equal `sub`. A supplied integer `nbf` must not be in the future. Missing or `null` expiration remains supported; a supplied expiration must be a valid integer and must not have passed. Violations return `MalformedJwt`, except expired credentials return `Expired`. These checks establish neither independent wallet compatibility nor the verifier's authorization to act for the holder.
 
 `VerifyCredentialAsync` and `VerifyCredentialFromIssuerAsync` return `CredentialSubject`, `IssuerDid` and `ExpiresAt` only for successful verification. Every rejected result leaves those fields null, while preserving `IsValid=false`, its status and diagnostic errors. Expiry errors no longer echo the parsed timestamp. This is an intentional tightening of the library contract: integrations that previously used parsed metadata from rejected results must stop relying on those values. Valid credential results are unchanged; consumers must still check `IsValid` and apply issuer trust and business authorization policy.
+
+The `.NET 10` retarget changes the required runtime and patched ASP.NET Core, EF Core, Npgsql, Aspire and OpenIddict dependencies. Before upgrading an existing deployment, review runtime/container image compatibility and test the prior database schema and persisted token/credential behaviour in an isolated environment; upgrading a production runtime or applying migrations is not part of the source-code change.
 
 ## Verification and development
 

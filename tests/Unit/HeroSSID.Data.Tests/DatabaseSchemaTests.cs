@@ -177,6 +177,24 @@ public sealed class DatabaseSchemaTests : IDisposable
     }
 
     [Fact]
+    public void CurrentNpgsqlModel_ShouldMatchCommittedMigrationSnapshot()
+    {
+        // Migration compatibility must be checked against the relational provider.
+        // InMemory does not model PostgreSQL column types, indexes or constraints.
+        // This is an offline model/snapshot comparison: it never opens a DB connection.
+        var options = new DbContextOptionsBuilder<HeroDbContext>()
+            .UseNpgsql("Host=localhost;Database=herossid_schema_check;Username=unused;Password=unused")
+            .Options;
+
+        using var context = new HeroDbContext(options);
+
+        Assert.False(
+            context.Database.HasPendingModelChanges(),
+            "The current EF Core/Npgsql model differs from the committed migration snapshot. " +
+            "Review schema changes before approving a runtime-only upgrade.");
+    }
+
+    [Fact]
     public void DbContext_DidDocumentJson_ShouldBeConfigured()
     {
         // Arrange & Act
