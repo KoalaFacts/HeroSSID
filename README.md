@@ -100,6 +100,20 @@ public status endpoint, general non-revocation proof or independent wallet
 conformance result. The database schema is unchanged. See
 [the threat model and verification instructions](docs/revocation-snapshot-profile.md).
 
+## Offline issuer credential and revocation verification
+
+A separate .NET relying party can now call `OfflineCredentialVerifier.Check`
+with its **independently trusted issuer `did:key`**, an original signed
+`vc+jwt`, and a short-lived signed snapshot. It derives the self-certifying
+Ed25519 key from that DID and checks both signatures, credential structure,
+issuance/not-before/expiry, and status without the issuing database.
+Outcomes are `Invalid`, `Revoked`, or `SignedNotListed`; the last
+means **signed and absent from this snapshot**, not registered, unrevoked
+in real time, proof of holder control, or business authorization. See
+[the offline verifier acceptance and limitations](docs/offline-credential-verification.md).
+This remains the HeroSSID private JWT profile, not independent-wallet or
+VC-standard conformance.
+
 ## Full-disclosure presentation library
 
 Register `AddCredentialsServices()` alongside the database, key-encryption and rate-limiter dependencies. It registers a singleton challenge store and `TimeProvider.System`; a host can register its own implementations before this call.
