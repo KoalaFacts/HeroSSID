@@ -11,6 +11,8 @@ public sealed class Vcdm20JoseCredentialTests
     private const string ContextUri = "https://example.org/credentials/membership/v1";
     private const string CredentialType = "MembershipCredential";
     private static readonly Uri Context = new(ContextUri);
+    private static readonly string[] LegacyContexts = ["https://www.w3.org/2018/credentials/v1"];
+    private static readonly string[] LegacyTypes = ["VerifiableCredential", CredentialType];
     private readonly byte[] _issuerSeed;
     private readonly byte[] _holderSeed;
     private readonly string _issuerDid;
@@ -83,8 +85,8 @@ public sealed class Vcdm20JoseCredentialTests
             JsonSerializer.Serialize(new
             {
                 iss = _issuerDid, sub = _holderDid, iat = Now.ToUnixTimeSeconds(),
-                vc = new { context = new[] { "https://www.w3.org/2018/credentials/v1" },
-                    type = new[] { "VerifiableCredential", CredentialType },
+                vc = new { context = LegacyContexts,
+                    type = LegacyTypes,
                     credentialSubject = new { id = _holderDid, membership = "active" } }
             }), _issuerSeed);
         Assert.False(Vcdm20JoseCredential.TryVerify(legacy,
