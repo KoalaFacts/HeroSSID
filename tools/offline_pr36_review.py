@@ -14,6 +14,12 @@ BASE = "448d222d4914ad8a5afa83d522405d50493ee186"
 HEAD = "c1ff7f523375b4178f47125f39c16de829deeeb2"
 MODEL = "qwen2.5-coder:7b"
 PARTS = 2
+CHANGED_FILES = {
+    "README.md",
+    "docs/presentation-profile.md",
+    "src/Libraries/HeroSSID.Credentials/VerifiablePresentations/OfflinePresentationCreator.cs",
+    "tests/Unit/HeroSSID.Credentials.Tests/OfflinePresentationCreatorTests.cs",
+}
 
 SCHEMA = {
     "type": "object",
@@ -100,6 +106,9 @@ def main() -> int:
         "Verify precise changed lines; report only actionable issues, not invented "
         "security exploits. At most four findings, overview under 300 chars, issue "
         "under 350 chars, verification under 180 chars. This is not a human audit. "
+        "For findings cite the EXACT repository-relative path from the diff --git " \
+        "header, never a shortened basename or a file absent from this PR. " \
+        "Distinguish library-level inputs from UI-level consent obligations. " \
         "Output strict JSON matching the schema."
     )
     user = (
@@ -139,8 +148,20 @@ def main() -> int:
             raise RuntimeError("Invalid finding object")
         if finding.get("severity") not in ("blocker", "major", "minor"):
             raise RuntimeError("Invalid finding severity")
-        if finding.get("path") not in files:
-            raise RuntimeError("Finding cites a file outside reviewed patches")
+        model_path = str(finding.get("path", "")).strip()
+        if model_path not in CHANGED_FILES:
+            # Local models sometimes cite an unambiguous basename rather than the
+            # complete diff header. Normalize only when the path matches exactly
+            # one changed file. Preserve the original raw model JSON as evidence.
+            matches = [name for name in CHANGED_FILES
+                       if name.rsplit("/", 1)[-1] == model_path]
+            if len(matches) != 1:
+                raise RuntimeError("Finding cites an unknown or ambiguous changed file: " + model_path)
+            finding["path"] = matches[0]
+            print("Normalized unambiguous model basename:", model_path,
+                  "to", matches[0], flush=True)
+        if finding["path"] not in CHANGED_FILES:
+            raise RuntimeError("Finding cites a file outside the complete pinned diff")
         if not all(str(finding.get(key, "")).strip()
                    for key in ("line_or_hunk", "issue", "verification")):
             raise RuntimeError("Finding lacks evidence or verification")
