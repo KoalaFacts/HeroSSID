@@ -23,8 +23,8 @@ public sealed class OfflinePresentationCreatorTests
     public OfflinePresentationCreatorTests()
     {
         _challenges = new InMemoryPresentationChallengeStore(_clock);
-        (_issuerPrivate, byte[] issuerPublic) = NewKey();
-        (_holderPrivate, byte[] holderPublic) = NewKey();
+        (_issuerPrivate, var issuerPublic) = NewKey();
+        (_holderPrivate, var holderPublic) = NewKey();
         _issuerDid = DidFromKey(issuerPublic);
         _holderDid = DidFromKey(holderPublic);
     }
