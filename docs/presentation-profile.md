@@ -149,6 +149,46 @@ external trust registry status, reality-checked identity or business
 authorization. The new creator is a local HeroSSID `vp+jwt` SDK
 operation, **not OpenID4VP or third-party wallet interoperability**.
 
+## Offline signed verifier requests
+
+A verifier that holds its own Ed25519 `did:key` can sign a verifier-owned
+`PresentationChallenge` with `OfflineSignedPresentationRequest.Create`.
+The verifier MUST first issue and retain the challenge through its own
+`IPresentationChallengeStore`, and must not rely on a request supplied by
+a holder as evidence that a nonce has been stored. The signed request
+contains exactly six properties: `iss` (verifier DID), `aud` (exact expected
+audience), `nonce`, `trustedIssuerDid`, `iat` and `exp`. Header `typ`
+is `herossid-request+jwt`, `alg` is `EdDSA`, and compact request
+length is at most 16,384. This local profile is distinct from an
+OpenID4VP Request Object.
+
+The independently operated holder pins a previously trusted verifier
+`did:key` **and** the expected audience in configuration obtained outside
+the request. `OfflineSignedPresentationRequest.TryRead` authenticates the
+Ed25519 signature with the self-certifying pinned verifier DID, rejects
+unknown properties, ambiguous/corrupt JWT encodings, a mismatched signer,
+modified audience, malformed nonce or issuer DID, future issuance or
+expired/over-five-minute requests, and reconstructs fractional expiry
+without rounding to whole seconds. Its parsed `PresentationChallenge`
+may then be displayed with the exact full credential claims. Only after
+the holder has authenticated the intended recipient **and** explicitly
+consented to full disclosure should it invoke
+`OfflineSignedPresentationRequest.CreatePresentation`, which checks the
+signed request again before generating an ordinary issuer-preserving
+holder-signed `vp+jwt`. This library cannot attest that human consent
+actually happened; the caller is responsible for wallet UX and transport.
+
+The relying verifier must validate the returned proof with its **own**
+stored tenant/audience/nonce/trusted-issuer policy, original issuer JWT
+and fresh issuer-signed revocation snapshot via
+`OfflinePresentationVerifier.Check`. A verifier-signed request is not a
+business permission, verified real-world identity, trust registry, issuer
+registration, hosted request endpoint, anti-phishing UI or OpenID4VP
+interoperability. A `did:key` proves key control only. Request freshness
+does not replace atomic challenge consumption; process-local replay
+storage is unsuitable for multi-replica verification. The signing seed
+belongs to the caller and must be protected and cleared after use.
+
 ## Migration and PostgreSQL operation
 
 The opt-in store uses the separate `presentation_challenges` table. Apply migration `20261025033000_PresentationChallenges` explicitly before registering the store ahead of `AddCredentialsServices()`. It stores only verifier tenant, policy identifiers, random nonce, expiry and consumed timestamp, not credentials or keys. The nonce primary key and audience column use `C` collation to match ordinal SQL comparisons independently of database defaults.

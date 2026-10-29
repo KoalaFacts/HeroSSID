@@ -100,6 +100,32 @@ public status endpoint, general non-revocation proof or independent wallet
 conformance result. The database schema is unchanged. See
 [the threat model and verification instructions](docs/revocation-snapshot-profile.md).
 
+## Authenticated offline verifier request (HeroSSID profile)
+
+A separately operated verifier can issue a verifier-owned challenge using
+`IPresentationChallengeStore.Issue`, and sign its exact nonce, audience, trusted
+issuer DID and fractional expiry with
+`OfflineSignedPresentationRequest.Create(challenge, verifierDid, verifierPrivateSeed, clock)`.
+The resulting `herossid-request+jwt` is verifiable by a holder without contacting
+HeroSSID or the issuer. A holder pins **both** the verifier's `did:key` and
+the expected audience from independently trusted configuration and calls
+`OfflineSignedPresentationRequest.TryRead` before displaying the complete
+credential claims and requesting consent. After consent,
+`CreatePresentation` validates the signed request again and produces the
+existing holder-signed full-disclosure `vp+jwt`. The verifier still checks
+the response using its own retained one-use challenge and a fresh signed issuer
+revocation snapshot; no verifier policy is taken from the holder.
+
+Unlike the previous unauthenticated challenge copy, a modified request or
+impersonating signer is now rejected **before a holder signs or discloses**.
+A syntactically valid self-certifying verifier DID is not proof of a trustworthy
+organisation, real identity or business authority. Verifier trust must be
+established independently; a caller must not trust `iss` copied from the
+request, and a UI/transport must honour the pinned destination and obtain
+full-disclosure consent. This is a HeroSSID-specific offline JWS request
+artifact, **not** OpenID4VP, a hosted exchange endpoint or independent wallet
+interoperability. See [the request threat model](docs/presentation-profile.md#offline-signed-verifier-requests).
+
 ## Offline issuer credential and revocation verification
 
 A separate .NET relying party can now call `OfflineCredentialVerifier.Check`
