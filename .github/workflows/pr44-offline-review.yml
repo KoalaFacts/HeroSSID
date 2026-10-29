@@ -22,9 +22,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse abae80c9cfb50c483a12a71e52c8bd036ef2a9be^{commit})" = "abae80c9cfb50c483a12a71e52c8bd036ef2a9be"
+          test "$(git rev-parse 011608415ceeee8d49b46ac9f1cbbd1bf8eaa6dd^{commit})" = "011608415ceeee8d49b46ac9f1cbbd1bf8eaa6dd"
           test "$(git rev-parse 036e74f433a940d51a236b80b3f31568bfea0ce2^{commit})" = "036e74f433a940d51a236b80b3f31568bfea0ce2"
-          test "$(git diff --name-only 036e74f433a940d51a236b80b3f31568bfea0ce2 abae80c9cfb50c483a12a71e52c8bd036ef2a9be | wc -l)" -eq 7
+          test "$(git diff --name-only 036e74f433a940d51a236b80b3f31568bfea0ce2 011608415ceeee8d49b46ac9f1cbbd1bf8eaa6dd | wc -l)" -eq 7
       - name: Install isolated local review model
         shell: bash
         run: |
@@ -46,7 +46,7 @@ jobs:
             REVIEW_PART="$part" python3 tools/offline_pr44_review.py
             test -s "review-$part.md"
             test -s "review-$part.json"
-            test "$(cat review-head-$part.txt)" = "abae80c9cfb50c483a12a71e52c8bd036ef2a9be"
+            test "$(cat review-head-$part.txt)" = "011608415ceeee8d49b46ac9f1cbbd1bf8eaa6dd"
           done
       - name: Retain raw review and model evidence
         if: always()
@@ -81,11 +81,11 @@ jobs:
         run: |
           set -euo pipefail
           actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/44 --jq '.head.sha')"
-          test "$actual" = "abae80c9cfb50c483a12a71e52c8bd036ef2a9be"
+          test "$actual" = "011608415ceeee8d49b46ac9f1cbbd1bf8eaa6dd"
           python3 - <<'PY'
           import json
           from pathlib import Path
-          expected_head = "abae80c9cfb50c483a12a71e52c8bd036ef2a9be"
+          expected_head = "011608415ceeee8d49b46ac9f1cbbd1bf8eaa6dd"
           expected_files = {
               "README.md",
               "docs/vcdm20-presentation-http-profile.md",
@@ -119,7 +119,7 @@ jobs:
           {
             echo 'Independent local Qwen2.5-Coder 7B automated code review of PR #44.'
             echo
-            echo 'Exact source: abae80c9cfb50c483a12a71e52c8bd036ef2a9be. Baseline: 036e74f433a940d51a236b80b3f31568bfea0ce2.'
+            echo 'Exact source: 011608415ceeee8d49b46ac9f1cbbd1bf8eaa6dd. Baseline: 036e74f433a940d51a236b80b3f31568bfea0ce2.'
             echo 'This is NOT human approval, an external audit or independent wallet conformance.'
             echo 'Investigate every finding against the actual source and tests before merge.'
             echo
@@ -129,6 +129,6 @@ jobs:
             echo
           } > /tmp/pr44-review.md
           gh api --method POST repos/KoalaFacts/HeroSSID/pulls/44/reviews \
-            -f event=COMMENT -f commit_id="abae80c9cfb50c483a12a71e52c8bd036ef2a9be" \
+            -f event=COMMENT -f commit_id="011608415ceeee8d49b46ac9f1cbbd1bf8eaa6dd" \
             -f body="$(cat /tmp/pr44-review.md)" \
             --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
