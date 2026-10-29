@@ -51,7 +51,7 @@ public static class DidEndpoints
 
     private static async Task<IResult> ResolveCanonicalDidKey(
         string did,
-        [FromServices] IDidResolutionService didResolutionService,
+        [FromServices] ICanonicalDidResolutionService didResolutionService,
         CancellationToken cancellationToken)
     {
         // Treat unsupported/malformed identifiers and mismatched stored keys

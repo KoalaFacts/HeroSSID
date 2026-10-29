@@ -18,7 +18,7 @@ public sealed class DidResolutionService(
     HeroDbContext dbContext,
     ITenantContext tenantContext,
     DidMethodResolver didMethodResolver,
-    ILogger<DidResolutionService> logger) : IDidResolutionService
+    ILogger<DidResolutionService> logger) : IDidResolutionService, ICanonicalDidResolutionService
 {
     private readonly HeroDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
     private readonly ITenantContext _tenantContext = tenantContext ?? throw new ArgumentNullException(nameof(tenantContext));

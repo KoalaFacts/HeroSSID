@@ -52,6 +52,7 @@ builder.Services.AddScoped<DidMethodResolver>();
 // Register DID services
 builder.Services.AddScoped<IDidCreationService, DidCreationService>();
 builder.Services.AddScoped<IDidResolutionService, DidResolutionService>();
+builder.Services.AddScoped<ICanonicalDidResolutionService, DidResolutionService>();
 
 // Register Credential services
 builder.Services.AddScoped<ICredentialIssuanceService, CredentialIssuanceService>();
