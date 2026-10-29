@@ -16,7 +16,8 @@ namespace HeroSSID.Api.Features.Credentials;
 internal sealed class IssuerRevocationSnapshotService(
     HeroDbContext dbContext,
     IKeyEncryptionService encryption,
-    IRateLimiter rateLimiter)
+    IRateLimiter rateLimiter,
+    TimeProvider clock)
 {
     internal const string RateLimitOperation = "REVOCATION_SNAPSHOT_EXPORT";
     internal const string LimitError = "Revocation snapshot has more entries than the supported complete export limit.";
@@ -82,7 +83,7 @@ internal sealed class IssuerRevocationSnapshotService(
         {
             privateKey = encryption.Decrypt(issuer.PrivateKeyEd25519Encrypted);
             return IssuerRevocationSnapshot.Create(
-                issuerDid, revoked, privateKey, issuer.PublicKeyEd25519, TimeProvider.System.GetUtcNow());
+                issuerDid, revoked, privateKey, issuer.PublicKeyEd25519, clock.GetUtcNow());
         }
         finally
         {
