@@ -5,3 +5,6 @@ public sealed record IssueCredentialResponse(string Credential);
 
 /// <summary>Verification outcome; DID values are populated only for a verified credential.</summary>
 public sealed record VerifyCredentialResponse(bool IsValid, string? IssuerDid, string? HolderDid);
+
+/// <summary>One-minute issuer-signed HeroSSID snapshot; publication is issuer-controlled.</summary>
+public sealed record ExportRevocationSnapshotResponse(string Snapshot);
