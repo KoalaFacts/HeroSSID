@@ -100,6 +100,19 @@ public status endpoint, general non-revocation proof or independent wallet
 conformance result. The database schema is unchanged. See
 [the threat model and verification instructions](docs/revocation-snapshot-profile.md).
 
+## OpenID4VP 1.0 direct_post library subset (not independently interoperable)
+
+Independent verifier and holder apps can exchange a real DID:key/Ed25519-signed
+OpenID4VP 1.0 JAR request and a form-encoded `vp_token` response using
+`OpenId4VpDirectPost`. The verifier stores its own one-use nonce, the holder
+pins its verifier DID and exact HTTPS callback before full-disclosure consent,
+and the verifier checks the issuer, holder, signed status and replay state.
+This is a **development library wire profile** using a deployment-defined
+`herossid_vc_jwt` credential format because existing issuer credentials are
+not conforming `jwt_vc_json`. There is **no hosted HTTP endpoint, no consent
+UI and no independently tested third-party wallet**. See the
+[exact 1.0 exchange and trust boundaries](docs/openid4vp-direct-post-profile.md).
+
 ## Authenticated offline verifier request (HeroSSID profile)
 
 A separately operated verifier can issue a verifier-owned challenge using
