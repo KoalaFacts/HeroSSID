@@ -88,9 +88,11 @@ the original credential's signature, expiry, holder binding, issuer trust
 and business authorization; publication is not automatic.
 
 Snapshots contain a maximum of 256 revoked records; exports above that
-limit fail with HTTP 409 rather than sign a partial list. Snapshots expire
-60 seconds after creation and must be refreshed by the issuer after each
-revocation; old exported copies can remain stale until their expiry. Revoked
+limit fail with HTTP 409 rather than sign a partial list. Snapshots expire at most 60 seconds after the revocation-status read begins,
+not 60 seconds after signing completes. Database and signing delays shorten
+usable lifetime; exports that exceed this budget return HTTP 503 without a
+snapshot. The issuer must refresh after each revocation; old exported copies
+can remain stale until their expiry. Revoked
 JWT digests are linkable by parties who possess those JWTs, and the count
 is disclosed to recipients. This is a bounded **HeroSSID-specific signing
 and offline-check profile**, not a W3C Bitstring Status List, a hosted

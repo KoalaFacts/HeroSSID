@@ -22,6 +22,8 @@ internal sealed class IssuerRevocationSnapshotService(
     internal const string RateLimitOperation = "REVOCATION_SNAPSHOT_EXPORT";
     internal const string LimitError = "Revocation snapshot has more entries than the supported complete export limit.";
     internal const string RateLimitError = "Rate limit exceeded for revocation snapshot export";
+    internal const string StaleObservationError = "The revocation observation expired before export could complete.";
+    private static readonly TimeSpan MaximumSnapshotAge = TimeSpan.FromSeconds(60);
 
     internal async Task<string?> ExportAsync(
         ITenantContext context, string issuerDid, CancellationToken cancellationToken)
@@ -65,6 +67,11 @@ internal sealed class IssuerRevocationSnapshotService(
             return null;
         }
 
+        // Record the earliest possible status observation, not the later signing time.
+        // A concurrent revocation after the query begins must not get a fresh
+        // sixty-second omission window merely because DB/key work was slow.
+        var observedAt = clock.GetUtcNow();
+        var deadline = observedAt.Add(MaximumSnapshotAge);
         var revoked = await dbContext.VerifiableCredentials.AsNoTracking()
             .Where(item => item.TenantId == tenantId && item.IssuerDidId == issuer.Id && item.Status == "revoked")
             .OrderBy(item => item.Id)
@@ -82,8 +89,21 @@ internal sealed class IssuerRevocationSnapshotService(
         try
         {
             privateKey = encryption.Decrypt(issuer.PrivateKeyEd25519Encrypted);
-            return IssuerRevocationSnapshot.Create(
-                issuerDid, revoked, privateKey, issuer.PublicKeyEd25519, clock.GetUtcNow());
+            if (clock.GetUtcNow() >= deadline)
+            {
+                throw new InvalidOperationException(StaleObservationError);
+            }
+
+            string snapshot = IssuerRevocationSnapshot.Create(
+                issuerDid, revoked, privateKey, issuer.PublicKeyEd25519, observedAt);
+            // Signing itself can take time. Never return a snapshot whose
+            // complete observation-to-expiry budget has already elapsed.
+            if (clock.GetUtcNow() >= deadline)
+            {
+                throw new InvalidOperationException(StaleObservationError);
+            }
+
+            return snapshot;
         }
         finally
         {

@@ -50,6 +50,7 @@ public static class CredentialEndpoints
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         credentials.MapPost("/revoke", RevokeAsync)
@@ -237,6 +238,13 @@ public static class CredentialEndpoints
                 title: "Snapshot Capacity Exceeded",
                 detail: "The complete revoked set exceeds the maximum supported export. No partial snapshot was signed.",
                 statusCode: StatusCodes.Status409Conflict);
+        }
+        catch (InvalidOperationException exception) when (exception.Message == IssuerRevocationSnapshotService.StaleObservationError)
+        {
+            return Results.Problem(
+                title: "Revocation Snapshot Unavailable",
+                detail: "The status observation expired during export. Retry for a fresh snapshot.",
+                statusCode: StatusCodes.Status503ServiceUnavailable);
         }
 #pragma warning disable CA1031 // Fail closed on unexpected export errors without leaking signing keys or stored credentials.
         catch (Exception exception) when (exception is not OperationCanceledException)
