@@ -1,8 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
-using HeroSSID.Api.Authentication;
 using HeroSSID.Core.TenantManagement;
-using HeroSSID.Credentials.CredentialVerification;
 using HeroSSID.Credentials.Vcdm20;
 using HeroSSID.Data;
 using HeroSSID.DidOperations.DidMethods;
@@ -50,22 +48,26 @@ internal static class Vcdm20CredentialIssuanceEndpoint
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(clock);
 
+        string issuerDid = request.IssuerDid ?? string.Empty;
+        string holderDid = request.HolderDid ?? string.Empty;
+        string credentialType = request.CredentialType ?? string.Empty;
         Uri? context = request.SubjectContextUri;
-        if (string.IsNullOrWhiteSpace(request.IssuerDid) ||
-            request.IssuerDid.Length > 255 ||
-            !request.IssuerDid.StartsWith("did:key:", StringComparison.Ordinal) ||
-            string.IsNullOrWhiteSpace(request.HolderDid) ||
-            request.HolderDid.Length > 255 ||
-            !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(request.HolderDid, out _) ||
-            string.IsNullOrWhiteSpace(request.CredentialType) ||
-            request.CredentialType.Length > 128 ||
+        DateTimeOffset validUntil = request.ValidUntil ?? DateTimeOffset.MinValue;
+        if (string.IsNullOrWhiteSpace(issuerDid) ||
+            issuerDid.Length > 255 ||
+            !issuerDid.StartsWith("did:key:", StringComparison.Ordinal) ||
+            string.IsNullOrWhiteSpace(holderDid) ||
+            holderDid.Length > 255 ||
+            !holderDid.StartsWith("did:key:", StringComparison.Ordinal) ||
+            string.IsNullOrWhiteSpace(credentialType) ||
+            credentialType.Length > 128 ||
             context is null || !context.IsAbsoluteUri ||
             context.Scheme != Uri.UriSchemeHttps ||
             !string.IsNullOrEmpty(context.UserInfo) ||
             !string.IsNullOrEmpty(context.Fragment) ||
             context.AbsoluteUri.Length > 2048 ||
             request.CredentialSubject.ValueKind != JsonValueKind.Object ||
-            request.ValidUntil is null)
+            validUntil == DateTimeOffset.MinValue)
         {
             return InvalidRequest();
         }
@@ -89,7 +91,7 @@ internal static class Vcdm20CredentialIssuanceEndpoint
 
             var issuer = await dbContext.Dids.AsNoTracking()
                 .Where(did => did.TenantId == tenantId &&
-                    did.DidIdentifier == request.IssuerDid && did.Status == "active")
+                    did.DidIdentifier == issuerDid && did.Status == "active")
                 .Select(did => new { did.PublicKeyEd25519, did.PrivateKeyEd25519Encrypted })
                 .FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
 
@@ -100,13 +102,13 @@ internal static class Vcdm20CredentialIssuanceEndpoint
 
             // Never let a historical corrupt or mismatched key sign as a tenant DID.
             if (!string.Equals(new DidKeyMethod().GenerateDidIdentifier(
-                issuer.PublicKeyEd25519), request.IssuerDid, StringComparison.Ordinal))
+                issuer.PublicKeyEd25519), issuerDid, StringComparison.Ordinal))
             {
                 return Results.NotFound();
             }
 
             DateTimeOffset now = clock.GetUtcNow();
-            TimeSpan lifetime = request.ValidUntil.Value - now;
+            TimeSpan lifetime = validUntil - now;
             if (lifetime <= TimeSpan.Zero || lifetime > MaximumLifetime)
             {
                 return InvalidRequest();
@@ -117,12 +119,12 @@ internal static class Vcdm20CredentialIssuanceEndpoint
             {
                 privateKey = encryption.Decrypt(issuer.PrivateKeyEd25519Encrypted);
                 string jwt = Vcdm20JoseCredential.Create(
-                    request.IssuerDid, request.HolderDid, request.CredentialType,
+                    issuerDid, holderDid, credentialType,
                     context, request.CredentialSubject, privateKey, now,
-                    request.ValidUntil.Value);
+                    validUntil);
 
                 // No stale assertion should be returned after a slow signing operation.
-                if (clock.GetUtcNow() >= request.ValidUntil.Value)
+                if (clock.GetUtcNow() >= validUntil)
                 {
                     return Results.Problem(title: "Credential Issuance Unavailable",
                         detail: "The requested credential lifetime elapsed during issuance.",
