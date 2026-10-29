@@ -89,7 +89,7 @@ public sealed class Vcdm20PresentationEndpointTests
         var (challenge, presentation, snapshot) = CreatePresentation(store);
         var parts = presentation.Split('.');
         parts[1] = Base64UrlEncoder.Encode(Ed25519JwtSigner.ExtractPayload(presentation)
-            .Replace("member", "administrator", StringComparison.Ordinal));
+            .Replace("https://verifier.example/present", "https://attacker.example/present", StringComparison.Ordinal));
         string forged = string.Join('.', parts);
         var (_, forgedResult) = await JsonAsync(Vcdm20PresentationEndpoints.Verify(
             Request(challenge, forged, snapshot), store, _tenant, _clock)).ConfigureAwait(true);
