@@ -11,9 +11,9 @@ import sys
 from urllib.request import Request, urlopen
 
 BASE = "249883503b76c48559ff70c8a6e3265a05eef11a"
-HEAD = "c482bc467a7a312d51c7f201522581f59009444b"
+HEAD = "2612a1f61eb5d5edddc70e1ca35cb7efc03a5d63"
 MODEL = "qwen2.5-coder:7b"
-PARTS = 2
+PARTS = 3
 
 SCHEMA = {
     "type": "object",
@@ -97,7 +97,10 @@ def main() -> int:
         "Each actionable finding must identify the changed file/hunk, reproducible "
         "impact and a specific regression. Do NOT invent standard or wallet "
         "conformance or claim human/external security certification. "
-        "Respond only in the JSON schema."
+        "Keep output compact: overview at most 300 characters; at most four prioritized "
+        "concrete findings, each issue at most 350 characters and verification "
+        "at most 180 characters. Do not summarize unrelated code or copy diffs. "
+        "Never omit a blocking issue to fit this format. Respond only in the JSON schema."
     )
     user = (
         f"HeroSSID PR #33 pinned head {HEAD}, baseline {BASE}, partition "
@@ -111,7 +114,7 @@ def main() -> int:
         "model": MODEL, "stream": False, "format": SCHEMA,
         "messages": [{"role": "system", "content": system},
                      {"role": "user", "content": user}],
-        "options": {"temperature": 0, "num_ctx": 16384, "num_predict": 2200},
+        "options": {"temperature": 0, "num_ctx": 16384, "num_predict": 3400},
     }).encode("utf-8")
     print(f"Independent review part {part}: {len(diff)} characters "
           f"covering {len(files)} file patches.", flush=True)

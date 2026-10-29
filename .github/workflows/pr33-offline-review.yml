@@ -22,9 +22,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse c482bc467a7a312d51c7f201522581f59009444b^{commit})" = "c482bc467a7a312d51c7f201522581f59009444b"
+          test "$(git rev-parse 2612a1f61eb5d5edddc70e1ca35cb7efc03a5d63^{commit})" = "2612a1f61eb5d5edddc70e1ca35cb7efc03a5d63"
           test "$(git rev-parse 249883503b76c48559ff70c8a6e3265a05eef11a^{commit})" = "249883503b76c48559ff70c8a6e3265a05eef11a"
-          test "$(git diff --name-only 249883503b76c48559ff70c8a6e3265a05eef11a c482bc467a7a312d51c7f201522581f59009444b | wc -l)" -eq 11
+          test "$(git diff --name-only 249883503b76c48559ff70c8a6e3265a05eef11a 2612a1f61eb5d5edddc70e1ca35cb7efc03a5d63 | wc -l)" -eq 12
       - name: Install isolated local review model
         shell: bash
         run: |
@@ -42,11 +42,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for part in 1 2; do
+          for part in 1 2 3; do
             REVIEW_PART="$part" python3 tools/offline_pr33_review.py
             test -s "review-$part.md"
             test -s "review-$part.json"
-            test "$(cat review-head-$part.txt)" = "c482bc467a7a312d51c7f201522581f59009444b"
+            test "$(cat review-head-$part.txt)" = "2612a1f61eb5d5edddc70e1ca35cb7efc03a5d63"
           done
       - name: Retain raw review and model evidence
         if: always()
@@ -81,16 +81,17 @@ jobs:
         run: |
           set -euo pipefail
           actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/33 --jq '.head.sha')"
-          test "$actual" = "c482bc467a7a312d51c7f201522581f59009444b"
+          test "$actual" = "2612a1f61eb5d5edddc70e1ca35cb7efc03a5d63"
           python3 - <<'PY'
           import json
           from pathlib import Path
-          expected_head = "c482bc467a7a312d51c7f201522581f59009444b"
+          expected_head = "2612a1f61eb5d5edddc70e1ca35cb7efc03a5d63"
           expected_files = {
               "src/Libraries/HeroSSID.Credentials/CredentialRevocation/IssuerRevocationSnapshot.cs",
               "tests/Unit/HeroSSID.Credentials.Tests/IssuerRevocationSnapshotTests.cs",
               "src/Services/HeroSSID.Api/Features/Credentials/IssuerRevocationSnapshotService.cs",
               "tests/Contract/HeroSSID.OpenID4VC.Contract.Tests/IssuerRevocationSnapshotHttpTests.cs",
+              "tests/Unit/HeroSSID.Api.Tests/RevocationSnapshotFreshnessTests.cs",
               "src/Services/HeroSSID.Api/Features/Credentials/CredentialEndpoints.cs",
               "src/Services/HeroSSID.Api/Features/Credentials/CredentialRequests.cs",
               "src/Services/HeroSSID.Api/Features/Credentials/CredentialResponses.cs",
@@ -100,7 +101,7 @@ jobs:
               "docs/revocation-snapshot-profile.md",
           }
           seen = set()
-          for part in (1, 2):
+          for part in (1, 2, 3):
               payload = json.loads(Path(f"review-{part}.json").read_text())
               assert payload["head"] == expected_head
               assert payload["part"] == part
@@ -123,15 +124,17 @@ jobs:
           {
             echo 'Independent local Qwen2.5-Coder 7B automated code review of PR #33.'
             echo
-            echo 'Exact source: c482bc467a7a312d51c7f201522581f59009444b. Baseline: 249883503b76c48559ff70c8a6e3265a05eef11a.'
+            echo 'Exact source: 2612a1f61eb5d5edddc70e1ca35cb7efc03a5d63. Baseline: 249883503b76c48559ff70c8a6e3265a05eef11a.'
             echo 'This is NOT human approval, an external audit or independent wallet conformance.'
             echo 'Investigate every finding against the actual source and tests before merge.'
             echo
             cat review-1.md
             echo
             cat review-2.md
+            echo
+            cat review-3.md
           } > /tmp/pr33-review.md
           gh api --method POST repos/KoalaFacts/HeroSSID/pulls/33/reviews \
-            -f event=COMMENT -f commit_id="c482bc467a7a312d51c7f201522581f59009444b" \
+            -f event=COMMENT -f commit_id="2612a1f61eb5d5edddc70e1ca35cb7efc03a5d63" \
             -f body="$(cat /tmp/pr33-review.md)" \
             --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
