@@ -113,6 +113,8 @@ public static class Vcdm20RevocationSnapshot
     public static Vcdm20RevocationCheckResult Check(
         string snapshotJwt, string credentialJwt, string trustedIssuerDid, DateTimeOffset now)
     {
+        ArgumentNullException.ThrowIfNull(snapshotJwt);
+        ArgumentNullException.ThrowIfNull(credentialJwt);
         if (!OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(trustedIssuerDid, out var publicKey) ||
             !IsAuthenticDirectVc2(credentialJwt, trustedIssuerDid, publicKey) ||
             !StrictJwtReader.TryRead(snapshotJwt, SnapshotType, MaximumSnapshotLength, out var payload) ||
@@ -173,6 +175,9 @@ public static class Vcdm20RevocationSnapshot
         IPresentationChallengeStore challenges, TimeProvider clock,
         out JsonElement verifiedSubject)
     {
+        ArgumentNullException.ThrowIfNull(presentationJwt);
+        ArgumentNullException.ThrowIfNull(snapshotJwt);
+        ArgumentNullException.ThrowIfNull(expectedContextUri);
         ArgumentNullException.ThrowIfNull(challenges);
         ArgumentNullException.ThrowIfNull(clock);
         verifiedSubject = default;
