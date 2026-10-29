@@ -104,6 +104,51 @@ verifier propagates failure rather than falling back to an accepting path.
 The offline check is a library API, not OpenID4VP or independent-wallet
 interoperability.
 
+## Offline holder-side creation
+
+The `OfflinePresentationCreator.Create(challenge, credentialJwt, holderDid,
+holderPrivateKey, clock)` library API enables a separately operated
+holder with its own Ed25519 seed to generate the **actual** full-disclosure
+`vp+jwt` envelope. This does not require an enrolled HeroSSID holder,
+issuer database, server-held holder private key or an issuer API call.
+The verifier first issues and retains a nonce, audience, trusted issuer
+and expiry with its own `IPresentationChallengeStore`. The holder receives
+a copy of that request, inspects its intended verifier and the **complete**
+claims it will disclose, and explicitly agrees before signing.
+
+Creation rejects a noncanonical nonce, expired or overly distant
+challenge, malformed or unsigned issuer JWT, untrusted *for this request*
+issuer mismatch, wrong signed holder, forged issuer key, invalid `vc`
+subject/type/time, expired credential, incorrectly sized/zero holder seed
+and a private seed whose real Ed25519 signature does not match the
+self-certifying holder DID. The original issuer-signed compact JWT is
+embedded unchanged. The outer `iat` and `exp` use fractional
+NumericDates, and `exp` never exceeds the earlier of the verifier
+challenge and original credential expiry. Expiry is rechecked after
+signing; only a valid bounded token is returned.
+
+The issuer signature and DID self-certification show **key provenance**,
+not that the issuer is approved for a role, the wallet user was
+identified in the real world, or the recipient is trustworthy. The
+request is not itself an OpenID4VP signed request or an authenticated
+HTTP exchange: malicious request modification cannot bypass the
+verifier's retained original, but it can still trick a careless holder
+into disclosing every claim. A wallet UI and transport must authenticate
+or explicitly display the verifier and get informed consent. The
+holder's caller owns the raw seed and is responsible for clearing
+private-key memory; this method does not retain it or erase the
+caller-owned buffer. Verifier and holder must treat untrusted inputs
+as untrusted, and direct callers enforce request rate limits.
+
+An independent verifier still uses `OfflinePresentationVerifier.Check`
+with its own retained challenge, independently chosen issuer,
+original presented credential and fresh issuer-signed status snapshot.
+It atomically consumes the challenge on successful acceptance and
+rejects replay. `SignedNotListed` is not current live issuance,
+external trust registry status, reality-checked identity or business
+authorization. The new creator is a local HeroSSID `vp+jwt` SDK
+operation, **not OpenID4VP or third-party wallet interoperability**.
+
 ## Migration and PostgreSQL operation
 
 The opt-in store uses the separate `presentation_challenges` table. Apply migration `20261025033000_PresentationChallenges` explicitly before registering the store ahead of `AddCredentialsServices()`. It stores only verifier tenant, policy identifiers, random nonce, expiry and consumed timestamp, not credentials or keys. The nonce primary key and audience column use `C` collation to match ordinal SQL comparisons independently of database defaults.
