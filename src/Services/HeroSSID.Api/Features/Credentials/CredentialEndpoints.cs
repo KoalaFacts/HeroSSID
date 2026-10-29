@@ -53,6 +53,8 @@ public static class CredentialEndpoints
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
+        Vcdm20CredentialVerificationEndpoint.Map(credentials);
+
         credentials.MapPost("/revoke", RevokeAsync)
             .RequireAuthorization(OperationScopes.CredentialRevoke)
             .WithName("RevokeCredential")
