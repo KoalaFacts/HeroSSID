@@ -25,7 +25,7 @@ public sealed class CanonicalDidResolutionTests
         string legacy = entity.DidDocumentJson;
         var service = CreateService(db, entity.TenantId);
 
-        var current = await service.ResolveCanonicalDidKeyAsync(did).ConfigureAwait(true);
+        var current = await service.ResolveCanonicalDidKeyAsync(did, TestContext.Current.CancellationToken).ConfigureAwait(true);
         Assert.True(current.IsSuccess);
         Assert.NotNull(current.DidDocument);
         using var parsed = JsonDocument.Parse(current.DidDocument);
@@ -37,10 +37,10 @@ public sealed class CanonicalDidResolutionTests
         Assert.Equal(methodId, parsed.RootElement.GetProperty("authentication")[0].GetString());
         Assert.Equal(methodId, parsed.RootElement.GetProperty("assertionMethod")[0].GetString());
 
-        var old = await service.ResolveAsync(did).ConfigureAwait(true);
+        var old = await service.ResolveAsync(did, TestContext.Current.CancellationToken).ConfigureAwait(true);
         Assert.Equal(legacy, old.DidDocument);
         Assert.Equal(legacy, entity.DidDocumentJson);
-        Assert.Empty(db.ChangeTracker.Entries().Where(entry => entry.State == EntityState.Modified));
+        Assert.DoesNotContain(db.ChangeTracker.Entries(), entry => entry.State == EntityState.Modified);
     }
 
     [Fact]
@@ -49,9 +49,9 @@ public sealed class CanonicalDidResolutionTests
         await using var db = CreateDatabase();
         var (did, entity) = AddRecord(db);
         entity.PublicKeyEd25519 = new byte[32];
-        await db.SaveChangesAsync().ConfigureAwait(true);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
 
-        var result = await CreateService(db, entity.TenantId).ResolveCanonicalDidKeyAsync(did).ConfigureAwait(true);
+        var result = await CreateService(db, entity.TenantId).ResolveCanonicalDidKeyAsync(did, TestContext.Current.CancellationToken).ConfigureAwait(true);
         Assert.False(result.IsSuccess);
         Assert.Null(result.DidDocument);
         Assert.Equal("invalidDid", result.Metadata.Error);
@@ -62,7 +62,7 @@ public sealed class CanonicalDidResolutionTests
     {
         await using var db = CreateDatabase();
         var (did, entity) = AddRecord(db);
-        var result = await CreateService(db, Guid.NewGuid()).ResolveCanonicalDidKeyAsync(did).ConfigureAwait(true);
+        var result = await CreateService(db, Guid.NewGuid()).ResolveCanonicalDidKeyAsync(did, TestContext.Current.CancellationToken).ConfigureAwait(true);
         Assert.False(result.IsSuccess);
         Assert.Null(result.DidDocument);
         Assert.Equal("notFound", result.Metadata.Error);
@@ -75,8 +75,8 @@ public sealed class CanonicalDidResolutionTests
         await using var db = CreateDatabase();
         var (did, entity) = AddRecord(db);
         entity.Status = "deactivated";
-        await db.SaveChangesAsync().ConfigureAwait(true);
-        var result = await CreateService(db, entity.TenantId).ResolveCanonicalDidKeyAsync(did).ConfigureAwait(true);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
+        var result = await CreateService(db, entity.TenantId).ResolveCanonicalDidKeyAsync(did, TestContext.Current.CancellationToken).ConfigureAwait(true);
         Assert.False(result.IsSuccess);
         Assert.Null(result.DidDocument);
         Assert.Equal("notFound", result.Metadata.Error);
