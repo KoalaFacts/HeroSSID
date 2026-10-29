@@ -158,6 +158,47 @@ restart and cannot prevent cross-process replay. See
 [the presentation profile](docs/presentation-profile.md) and
 [offline issuer verification limits](docs/offline-credential-verification.md).
 
+## Offline holder-side presentation creation
+
+A holder with its **own Ed25519 private seed** can now create the
+full-disclosure HeroSSID `vp+jwt` proof *without a HeroSSID account,
+holder-key escrow, issuer database or network call*. This closes the
+previous library-only-verifier gap: the separately controlled holder
+can actually sign a response to the verifier's retained challenge.
+
+```csharp
+// The verifier independently chooses its trusted issuer and issues the
+// challenge from its own IPresentationChallengeStore.
+PresentationChallenge request = verifierChallenges.Issue(
+    verifierTenantId, verifierAudience, trustedIssuerDid);
+
+// The holder MUST examine and consent to the destination, requested issuer
+// and disclosure of every claim in originalCredentialJwt.
+string presentationJwt = OfflinePresentationCreator.Create(
+    request, originalCredentialJwt, holderDid, holderOwnedEd25519Seed,
+    TimeProvider.System);
+
+// Transfer the unchanged issuer-signed credential inside the holder proof.
+// The relying party validates with OfflinePresentationVerifier.Check and its
+// OWN stored request, trusted issuer policy and fresh signed status snapshot.
+```
+
+The creator checks the original credential's actual issuer signature,
+holder/issuer DID binding, credential timestamps, the challenge nonce and
+expiry, and that the holder's seed really controls its `did:key`. It
+preserves the **exact original credential** and fractional challenge
+expiry. The caller owns the private-key buffer and must clear it after
+use; the creator neither persists it nor wipes caller-owned memory.
+The verifier still checks all signatures, status and atomic replay
+protection independently. The challenge object by itself is **not a
+signed request or authenticated verifier**; a wallet must confirm
+recipient and full-claim disclosure out of band.
+
+This is a C# library profile, **not OpenID4VP**, SD-JWT, third-party
+wallet interoperability, live revocation proof, identity verification
+or business authorization. See [holder-side and verifier
+boundaries](docs/presentation-profile.md#offline-holder-side-creation).
+
 ## Full-disclosure presentation library
 
 Register `AddCredentialsServices()` alongside the database, key-encryption and rate-limiter dependencies. It registers a singleton challenge store and `TimeProvider.System`; a host can register its own implementations before this call.
