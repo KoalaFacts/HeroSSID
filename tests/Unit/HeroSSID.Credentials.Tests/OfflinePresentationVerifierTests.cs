@@ -114,6 +114,22 @@ public sealed class OfflinePresentationVerifierTests
             Check(Envelope(credential, challenge), Snapshot(), challenge));
     }
 
+    [Fact]
+    public void StatusExpiryDuringAtomicConsumptionStillRejectsAndSpendsNonce()
+    {
+        var challenge = NewChallenge();
+        var credential = Credential();
+        var presentation = Envelope(credential, challenge);
+        var snapshot = Snapshot();
+        var slowStore = new AdvancingConsumeStore(_challenges, _clock, TimeSpan.FromSeconds(61));
+
+        Assert.Equal(OfflinePresentationCheckResult.Invalid,
+            OfflinePresentationVerifier.Check(presentation, snapshot, VerifierTenant, Audience,
+                challenge.Nonce, slowStore, _clock));
+        Assert.Equal(OfflinePresentationCheckResult.Invalid,
+            Check(presentation, Snapshot(), challenge));
+    }
+
     private PresentationChallenge NewChallenge() => _challenges.Issue(VerifierTenant, Audience, _issuerDid);
 
     private OfflinePresentationCheckResult Check(string presentation, string snapshot, PresentationChallenge challenge) =>
@@ -166,6 +182,23 @@ public sealed class OfflinePresentationVerifierTests
         var parameters = new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport };
         using var key = Key.Create(SignatureAlgorithm.Ed25519, parameters);
         return (key.Export(KeyBlobFormat.RawPrivateKey), key.PublicKey.Export(KeyBlobFormat.RawPublicKey));
+    }
+
+    private sealed class AdvancingConsumeStore(
+        IPresentationChallengeStore inner, MutableClock clock, TimeSpan delay) : IPresentationChallengeStore
+    {
+        public PresentationChallenge Issue(Guid tenant, string audience, string issuer, TimeSpan? lifetime = null) =>
+            inner.Issue(tenant, audience, issuer, lifetime);
+
+        public PresentationChallenge? Find(Guid tenant, string audience, string nonce) =>
+            inner.Find(tenant, audience, nonce);
+
+        public bool TryConsume(Guid tenant, string audience, string nonce)
+        {
+            bool consumed = inner.TryConsume(tenant, audience, nonce);
+            clock.Advance(delay);
+            return consumed;
+        }
     }
 
     private sealed class MutableClock(DateTimeOffset initial) : TimeProvider
