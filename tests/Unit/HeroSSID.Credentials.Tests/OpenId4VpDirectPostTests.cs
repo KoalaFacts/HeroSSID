@@ -12,6 +12,7 @@ public sealed class OpenId4VpDirectPostTests
     private static readonly Guid VerifierTenant = Guid.Parse("f54331e6-bcf7-4ba9-bf5b-ac41cc241f51");
     private static readonly Uri ResponseUri = new("https://verifier.example/openid4vp/response");
     private static readonly string[] CredentialTypes = ["VerifiableCredential", "MembershipCredential"];
+    private static readonly string[] W3cContext = ["https://www.w3.org/2018/credentials/v1"];
     private readonly Clock _clock = new(Now);
     private readonly InMemoryPresentationChallengeStore _store;
     private readonly byte[] _verifierSeed;
@@ -190,7 +191,7 @@ public sealed class OpenId4VpDirectPostTests
                 iat = Now.ToUnixTimeSeconds(), exp = Now.AddMinutes(15).ToUnixTimeSeconds(),
                 vc = new
                 {
-                    context = new[] { "https://www.w3.org/2018/credentials/v1" },
+                    context = W3cContext,
                     type = CredentialTypes,
                     credentialSubject = new { id = _holderDid, membership = "active" }
                 }

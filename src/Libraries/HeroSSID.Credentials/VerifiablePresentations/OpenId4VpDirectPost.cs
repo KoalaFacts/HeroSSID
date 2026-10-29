@@ -36,6 +36,7 @@ public static class OpenId4VpDirectPost
         ArgumentNullException.ThrowIfNull(challenge);
         ArgumentNullException.ThrowIfNull(verifierDid);
         ArgumentNullException.ThrowIfNull(verifierPrivateKey);
+        ArgumentNullException.ThrowIfNull(responseUri);
         ArgumentNullException.ThrowIfNull(clock);
 
         var now = clock.GetUtcNow();
@@ -94,6 +95,8 @@ public static class OpenId4VpDirectPost
     public static bool TryReadSignedRequest(string requestJwt, string expectedVerifierDid,
         Uri expectedResponseUri, TimeProvider clock, out OpenId4VpDirectPostRequest? request)
     {
+        ArgumentNullException.ThrowIfNull(requestJwt);
+        ArgumentNullException.ThrowIfNull(expectedResponseUri);
         ArgumentNullException.ThrowIfNull(clock);
         request = null;
         if (!OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(expectedVerifierDid, out var verifierKey) ||
@@ -236,7 +239,7 @@ public static class OpenId4VpDirectPost
         var entries = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var pair in form.Split('&'))
         {
-            int equal = pair.IndexOf('=');
+            int equal = pair.IndexOf('=', StringComparison.Ordinal);
             if (equal < 1 || !entries.TryAdd(
                     WebUtility.UrlDecode(pair[..equal]), WebUtility.UrlDecode(pair[(equal + 1)..])))
             {
