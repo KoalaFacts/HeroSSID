@@ -18,6 +18,8 @@ HeroSSID is a development-stage .NET foundation for issuing, holding and verifyi
 | Revocation | Issuer-only `POST /api/v1/credentials/revoke` atomically revokes the exact locally issued JWT; subsequent credential and presentation verification reject it | Local issuer database only: no signed/public interoperable status-list publication, independent wallet lookup or external trust policy |
 | Selective disclosure | Legacy calls fail closed; mock SD-JWT implementations are not registered by default | Real selective disclosure and independent interoperability tests are unfinished |
 
+New `did:key` documents use the [Ed25519VerificationKey2020 document profile](docs/did-key-profile.md), including a multicodec-prefixed key and `assertionMethod`. Already persisted documents are **not** rewritten; inspect the documented legacy compatibility boundary before independently resolving them.
+
 Identity credentials express what an issuer attests. Whether that issuer is trusted for a particular claim, and what business actions a holder may take, remain explicit relying-party decisions. Enrollment alone does not establish a person's real-world identity.
 
 ## Local development
