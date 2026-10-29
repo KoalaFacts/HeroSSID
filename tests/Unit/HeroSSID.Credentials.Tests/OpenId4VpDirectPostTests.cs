@@ -10,7 +10,7 @@ public sealed class OpenId4VpDirectPostTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 30, 10, 0, 0, TimeSpan.Zero);
     private static readonly Guid VerifierTenant = Guid.Parse("f54331e6-bcf7-4ba9-bf5b-ac41cc241f51");
-    private const string ResponseUri = "https://verifier.example/openid4vp/response";
+    private static readonly Uri ResponseUri = new("https://verifier.example/openid4vp/response");
     private static readonly string[] CredentialTypes = ["VerifiableCredential", "MembershipCredential"];
     private readonly Clock _clock = new(Now);
     private readonly InMemoryPresentationChallengeStore _store;
@@ -72,7 +72,7 @@ public sealed class OpenId4VpDirectPostTests
         Assert.False(OpenId4VpDirectPost.TryReadSignedRequest(valid, _issuerDid, ResponseUri, _clock, out _));
         var parts = valid.Split('.');
         string payload = Ed25519JwtSigner.ExtractPayload(valid);
-        parts[1] = Base64UrlEncoder.Encode(payload.Replace(ResponseUri,
+        parts[1] = Base64UrlEncoder.Encode(payload.Replace(ResponseUri.OriginalString,
             "https://attacker.example/collect", StringComparison.Ordinal));
         Assert.False(OpenId4VpDirectPost.TryReadSignedRequest(
             string.Join('.', parts), _verifierDid, ResponseUri, _clock, out _));
@@ -85,7 +85,7 @@ public sealed class OpenId4VpDirectPostTests
     {
         string requestJwt = Request(_store.Issue(VerifierTenant, ClientId, _issuerDid));
         Assert.False(OpenId4VpDirectPost.TryReadSignedRequest(requestJwt, _verifierDid,
-            "https://attacker.example/collect", _clock, out _));
+            new Uri("https://attacker.example/collect"), _clock, out _));
         Assert.Throws<ArgumentException>(() => OpenId4VpDirectPost.CreateHolderResponseForm(
             requestJwt, _verifierDid, ResponseUri, Credential(signingKey: _holderSeed),
             _holderDid, _holderSeed, _clock));
@@ -95,7 +95,7 @@ public sealed class OpenId4VpDirectPostTests
             _holderDid, attackerSeed, _clock));
         Assert.Throws<ArgumentException>(() => OpenId4VpDirectPost.CreateSignedRequest(
             _store.Issue(VerifierTenant, ClientId, _issuerDid), _verifierDid,
-            _verifierSeed, "http://verifier.example/collect", _clock));
+            _verifierSeed, new Uri("http://verifier.example/collect"), _clock));
     }
 
     [Fact]
