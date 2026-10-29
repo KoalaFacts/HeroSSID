@@ -151,7 +151,7 @@ public sealed class OfflinePresentationCreatorTests
 
     private static byte[] DecodePublic(string did)
     {
-        var decoded = SimpleBase.Base58.Bitcoin.Decode(did["did:key:z".Length..]);
+        var decoded = SimpleBase.Base58.Bitcoin.Decode(did.AsSpan("did:key:z".Length));
         return decoded.AsSpan(2).ToArray();
     }
 
