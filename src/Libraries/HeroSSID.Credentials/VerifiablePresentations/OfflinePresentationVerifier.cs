@@ -79,7 +79,7 @@ public static class OfflinePresentationVerifier
             !PresentationChallengePolicy.TryGetNumericDate(envelope, "iat", out var issuedAt) ||
             !PresentationChallengePolicy.TryGetNumericDate(envelope, "exp", out var expiresAt) ||
             !envelope.TryGetProperty("vp", out var vp) || vp.ValueKind != JsonValueKind.Object ||
-            vp.EnumerateObject().Count() != 1 ||
+            !HasSupportedPresentationShape(vp, holderDid) ||
             !vp.TryGetProperty("verifiableCredential", out var credentials) ||
             credentials.ValueKind != JsonValueKind.Array || credentials.GetArrayLength() != 1 ||
             credentials[0].ValueKind != JsonValueKind.String)
@@ -147,5 +147,34 @@ public static class OfflinePresentationVerifier
         }
 
         return OfflinePresentationCheckResult.SignedNotListed;
+    }
+
+    // The original one-property HeroSSID profile stays backward-compatible.
+    // The jwt_vc_json OpenID4VP 1.0 response uses the VC Data Model 2018 VP
+    // context/type/holder as well; never accept an arbitrary signed VP shape.
+    private static bool HasSupportedPresentationShape(JsonElement vp, string holderDid)
+    {
+        int count = vp.EnumerateObject().Count();
+        if (count == 1)
+        {
+            return true;
+        }
+
+        if (count != 4 ||
+            !vp.TryGetProperty("@context", out var context) ||
+            context.ValueKind != JsonValueKind.Array || context.GetArrayLength() != 1 ||
+            context[0].ValueKind != JsonValueKind.String ||
+            context[0].GetString() != "https://www.w3.org/2018/credentials/v1" ||
+            !vp.TryGetProperty("type", out var types) ||
+            types.ValueKind != JsonValueKind.Array || types.GetArrayLength() != 1 ||
+            types[0].ValueKind != JsonValueKind.String ||
+            types[0].GetString() != "VerifiablePresentation" ||
+            !StrictJwtReader.TryGetString(vp, "holder", out var signedHolder) ||
+            !string.Equals(signedHolder, holderDid, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return true;
     }
 }
