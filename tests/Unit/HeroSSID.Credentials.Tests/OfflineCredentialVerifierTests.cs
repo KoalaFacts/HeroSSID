@@ -84,7 +84,7 @@ public sealed class OfflineCredentialVerifierTests
         long? issuedAt = null,
         long? expiresAt = null,
         long? notBefore = null,
-        string? subjectId = HolderDid,
+        string? subjectId = null,
         bool includeBaseType = true,
         bool includeSubject = true)
     {
@@ -104,7 +104,7 @@ public sealed class OfflineCredentialVerifierTests
         vc["type"] = includeBaseType ? new[] { "VerifiableCredential", "MembershipCredential" } : new[] { "MembershipCredential" };
         if (includeSubject)
         {
-            vc["credentialSubject"] = new { id = subjectId, role = "member" };
+            vc["credentialSubject"] = new { id = subjectId ?? sub, role = "member" };
         }
 
         payload["vc"] = vc;
