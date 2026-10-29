@@ -24,7 +24,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse 41e14f99583c8fbf22dcc07cb5bd810d801a2605^{commit})" = "41e14f99583c8fbf22dcc07cb5bd810d801a2605"
           test "$(git rev-parse 6c0126465d1c36ebf8a71a3fb0f9b9fa79fb8e43^{commit})" = "6c0126465d1c36ebf8a71a3fb0f9b9fa79fb8e43"
-          test "$(git diff --name-only 6c0126465d1c36ebf8a71a3fb0f9b9fa79fb8e43 41e14f99583c8fbf22dcc07cb5bd810d801a2605 | wc -l)" -eq 5
+          test "$(git diff --name-only 6c0126465d1c36ebf8a71a3fb0f9b9fa79fb8e43 41e14f99583c8fbf22dcc07cb5bd810d801a2605 | wc -l)" -eq 4
       - name: Install isolated local review model
         shell: bash
         run: |
