@@ -38,3 +38,13 @@ Content-Type: application/json
 {
   "credential": "REPLACE_WITH_ISSUED_CREDENTIAL"
 }
+
+### Export the issuer's one-minute signed snapshot after revocation (credential:revoke)
+# The resulting snapshot is not published automatically; verifiers must trust the issuer key.
+POST {{HeroSSID.Api_HostAddress}}/api/v1/credentials/revocation-snapshot
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "issuerDid": "REPLACE_WITH_YOUR_ISSUER_DID"
+}

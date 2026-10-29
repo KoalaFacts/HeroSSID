@@ -39,6 +39,19 @@ public static class CredentialEndpoints
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
+        credentials.MapPost("/revocation-snapshot", ExportRevocationSnapshotAsync)
+            .RequireAuthorization(OperationScopes.CredentialRevoke)
+            .WithName("ExportIssuerRevocationSnapshot")
+            .WithSummary("Export a short-lived issuer-signed revocation snapshot (HeroSSID profile)")
+            .Produces<ExportRevocationSnapshotResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+
         credentials.MapPost("/revoke", RevokeAsync)
             .RequireAuthorization(OperationScopes.CredentialRevoke)
             .WithName("RevokeCredential")
@@ -186,6 +199,50 @@ public static class CredentialEndpoints
 #pragma warning restore CA1031
         {
             logger.LogError(exception, "Credential revocation failed");
+            return InternalError();
+        }
+    }
+
+    internal static async Task<IResult> ExportRevocationSnapshotAsync(
+        [FromBody] ExportRevocationSnapshotRequest request,
+        [FromServices] IssuerRevocationSnapshotService exportService,
+        [FromServices] ITenantContext tenantContext,
+        [FromServices] ILogger<Program> logger,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.IssuerDid) ||
+            request.IssuerDid.Length > 255 ||
+            !request.IssuerDid.StartsWith("did:key:", StringComparison.Ordinal))
+        {
+            return InvalidRequest("A did:key issuer DID is required.");
+        }
+
+        try
+        {
+            var snapshot = await exportService.ExportAsync(
+                tenantContext, request.IssuerDid, cancellationToken).ConfigureAwait(false);
+            return snapshot is null ? Results.NotFound() : Results.Ok(new ExportRevocationSnapshotResponse(snapshot));
+        }
+        catch (ArgumentException)
+        {
+            return InvalidRequest("The revocation snapshot export request is invalid.");
+        }
+        catch (InvalidOperationException exception) when (exception.Message == IssuerRevocationSnapshotService.RateLimitError)
+        {
+            return RateLimitExceeded();
+        }
+        catch (InvalidOperationException exception) when (exception.Message == IssuerRevocationSnapshotService.LimitError)
+        {
+            return Results.Problem(
+                title: "Snapshot Capacity Exceeded",
+                detail: "The complete revoked set exceeds the maximum supported export. No partial snapshot was signed.",
+                statusCode: StatusCodes.Status409Conflict);
+        }
+#pragma warning disable CA1031 // Fail closed on unexpected export errors without leaking signing keys or stored credentials.
+        catch (Exception exception) when (exception is not OperationCanceledException)
+#pragma warning restore CA1031
+        {
+            logger.LogError(exception, "Issuer revocation snapshot export failed");
             return InternalError();
         }
     }

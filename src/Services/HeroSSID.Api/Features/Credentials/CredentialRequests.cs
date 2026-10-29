@@ -20,3 +20,9 @@ public sealed class RevokeCredentialRequest
 {
     public string? Credential { get; init; }
 }
+
+/// <summary>The tenant's active did:key issuer whose revoked JWTs will be exported.</summary>
+public sealed class ExportRevocationSnapshotRequest
+{
+    public string? IssuerDid { get; init; }
+}

@@ -72,6 +72,32 @@ Use the returned `access_token` as `Authorization: Bearer <access_token>` on eve
 
 DID creation accepts `{"method":"did:key","keyType":"Ed25519"}`. Issuance accepts `issuerDid`, `holderDid`, `credentialType` and a non-empty `claims` object. Verification and issuer revocation both accept `{"credential":"<issued JWT>"}`. Revocation requires its **own** scope, not simply `credential:issue` or possession of the JWT; only exact credentials stored under the authenticated tenant and its issuer DID can be revoked. It returns `204` on first or repeated revocation, `404` for unknown/foreign credentials without distinguishing them, and `400` on malformed inputs. Revoked credentials fail closed during local direct verification and library presentation; a remote wallet/verifier is **not** independently notified. This operation is not a W3C status list. Verification accepts `{"credential":"<issued JWT>"}`. Both issuer and holder must already be enrolled locally, and issuance uses only an issuer belonging to the token's tenant. See [the HTTP request examples](src/Services/HeroSSID.Api/HeroSSID.Api.http).
 
+## Issuer-signed revocation snapshot export (HeroSSID profile)
+
+An issuer with `credential:revoke` scope can call `POST /api/v1/credentials/revocation-snapshot`
+with `{"issuerDid":"did:key:z..."}` after issuing and optionally revoking JWT credentials.
+The API returns a **one-minute Ed25519-signed JWS snapshot** of the complete set
+of revoked credential JWT SHA-256 digests for that active, tenant-owned
+self-certifying issuer DID. It never returns the original JWTs or holder claims.
+An issuer may explicitly distribute the resulting artifact to independent
+verifiers, who can use `IssuerRevocationSnapshot.Check` offline with a previously
+trusted issuer DID/public key and the original credential. `Revoked` means
+that JWT's digest appears in the signed set; `NotListed` is **not**
+proof of valid issuance or active status. Verifiers must separately validate
+the original credential's signature, expiry, holder binding, issuer trust
+and business authorization; publication is not automatic.
+
+Snapshots contain a maximum of 256 revoked records; exports above that
+limit fail with HTTP 409 rather than sign a partial list. Snapshots expire
+60 seconds after creation and must be refreshed by the issuer after each
+revocation; old exported copies can remain stale until their expiry. Revoked
+JWT digests are linkable by parties who possess those JWTs, and the count
+is disclosed to recipients. This is a bounded **HeroSSID-specific signing
+and offline-check profile**, not a W3C Bitstring Status List, a hosted
+public status endpoint, general non-revocation proof or independent wallet
+conformance result. The database schema is unchanged. See
+[the threat model and verification instructions](docs/revocation-snapshot-profile.md).
+
 ## Full-disclosure presentation library
 
 Register `AddCredentialsServices()` alongside the database, key-encryption and rate-limiter dependencies. It registers a singleton challenge store and `TimeProvider.System`; a host can register its own implementations before this call.

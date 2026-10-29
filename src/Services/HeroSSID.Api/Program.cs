@@ -57,6 +57,7 @@ builder.Services.AddScoped<ICanonicalDidResolutionService, DidResolutionService>
 // Register Credential services
 builder.Services.AddScoped<ICredentialIssuanceService, CredentialIssuanceService>();
 builder.Services.AddScoped<IIssuedCredentialRevocationService, IssuedCredentialRevocationService>();
+builder.Services.AddScoped<IssuerRevocationSnapshotService>();
 builder.Services.AddScoped<ICredentialVerificationService, CredentialVerificationService>();
 builder.Services.AddScoped<ICredentialDidLookup, CredentialDidLookup>();
 
