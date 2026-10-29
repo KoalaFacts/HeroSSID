@@ -61,6 +61,49 @@ Presentation creation also reserves `PRESENTATION_CREATE` for the holder. The em
 
 `VerifyCredentialAsync(tenantContext, credentialJwt)` remains tenant-local for data lookup and accounting. The presentation service uses `VerifyCredentialFromIssuerAsync(requesterContext, issuerTenantId, credentialJwt)` only after resolving the enrolled issuer and enforcing verifier trust policy. This grants no authority to act for the issuer. Both tenant identities must be non-empty. HTTP callers cannot select an alternate issuer tenant through the tenant-local REST endpoint.
 
+## Standalone offline verifier
+
+`OfflinePresentationVerifier.Check` accepts an original holder-signed
+`vp+jwt`, an issuer-signed short-lived revocation snapshot JWT, a
+verifier-owned tenant/audience/nonce, an `IPresentationChallengeStore`
+and a `TimeProvider`. It does not use the issuing database or query any
+remote DID resolver. The verifier must decide which issuer it trusts *before*
+issuing the challenge; the retained trusted issuer on that challenge is
+authoritative, not an untrusted presentation claim.
+
+The checks require canonical, bounded JWT encoding, exact six-field
+full-disclosure `vp+jwt` structure, a matching audience/nonce, strict
+fractional NumericDate and bounded expiry, a self-certifying Ed25519
+`did:key` holder signing key with a real verified holder signature, the
+unchanged original issuer `vc+jwt` with its signed `sub` matching the
+holder, and an independently trusted issuer key with both credential
+and revocation-snapshot signatures verified. The envelope cannot outlive
+the challenge or credential. A `SignedNotListed` outcome atomically
+consumes the challenge using the caller's store; its one-use guarantee is
+only as strong as that store's shared configuration. A replay loses.
+After potentially blocking consumption, the verifier rechecks proof,
+credential and snapshot freshness and rejects stale data even though
+the consumed challenge stays spent.
+
+Outcomes are `Invalid`, `Revoked`, and `SignedNotListed` only: no
+signed claim/identity fields are returned on failure. `Revoked` reports a
+digest present in a correctly signed snapshot, not a business policy result.
+`SignedNotListed` reports only that the authenticated issuer snapshot did
+not contain this credential, not live active/registered status, real-world
+identity, delegated authority, or proof of a third-party wallet protocol.
+Snapshots are a bounded private HeroSSID format with a 60-second life and
+256-entry limit, not W3C Bitstring Status Lists. The caller remains
+responsible for trusted issuer selection, business policy, rate limiting,
+secure transport of full disclosures, and fetching fresh snapshots.
+
+The local in-memory challenge store does not survive process restart or
+coordinate replicas. To prevent distributed replay, provision the already
+supported opt-in PostgreSQL store with its approved migration and keep
+database/application clocks synchronized. On a store exception the offline
+verifier propagates failure rather than falling back to an accepting path.
+The offline check is a library API, not OpenID4VP or independent-wallet
+interoperability.
+
 ## Migration and PostgreSQL operation
 
 The opt-in store uses the separate `presentation_challenges` table. Apply migration `20261025033000_PresentationChallenges` explicitly before registering the store ahead of `AddCredentialsServices()`. It stores only verifier tenant, policy identifiers, random nonce, expiry and consumed timestamp, not credentials or keys. The nonce primary key and audience column use `C` collation to match ordinal SQL comparisons independently of database defaults.

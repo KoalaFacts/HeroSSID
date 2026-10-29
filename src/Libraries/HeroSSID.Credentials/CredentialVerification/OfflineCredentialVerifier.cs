@@ -39,7 +39,7 @@ public static class OfflineCredentialVerifier
     {
         if (string.IsNullOrWhiteSpace(credentialJwt) ||
             string.IsNullOrWhiteSpace(snapshotJwt) ||
-            !TryDecodeTrustedIssuerKey(trustedIssuerDid, out byte[] publicKey) ||
+            !TryDecodeDidKeyPublicKey(trustedIssuerDid, out byte[] publicKey) ||
             !StrictJwtReader.TryRead(credentialJwt, ExpectedCredentialType, MaximumCredentialLength, out var credential) ||
             !HasValidLocalCredentialClaims(credential, trustedIssuerDid, now.ToUnixTimeSeconds()))
         {
@@ -58,7 +58,7 @@ public static class OfflineCredentialVerifier
         };
     }
 
-    private static bool TryDecodeTrustedIssuerKey(string? issuerDid, out byte[] publicKey)
+    internal static bool TryDecodeDidKeyPublicKey(string? issuerDid, out byte[] publicKey)
     {
         publicKey = [];
         if (string.IsNullOrWhiteSpace(issuerDid) ||
