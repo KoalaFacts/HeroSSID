@@ -1,0 +1,91 @@
+name: One-off independent offline PR30 review
+on:
+  push:
+    branches:
+      - review/pr30-offline-20261029
+
+permissions: {}
+
+jobs:
+  review:
+    name: Separate-model code review (offline inference)
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout review-only branch and source refs
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify pinned exact candidate is present
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse a66011f8ab6f1d52c6fbdc11be2f41f0c0a602fe^{commit})" = "a66011f8ab6f1d52c6fbdc11be2f41f0c0a602fe"
+          git diff --name-only 8e63d4d694cef0ff88363ca47d9928676c1f45fe a66011f8ab6f1d52c6fbdc11be2f41f0c0a602fe > /tmp/pr-files.txt
+          test "$(wc -l < /tmp/pr-files.txt)" -gt 20
+
+      - name: Install isolated local Ollama model
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location https://ollama.com/install.sh --output /tmp/ollama-install.sh
+          sh /tmp/ollama-install.sh
+          nohup ollama serve >/tmp/ollama-server.log 2>&1 </dev/null &
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null
+          ollama pull qwen2.5-coder:7b
+
+      - name: Inspect full pinned diff using separate local model
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/offline_pr30_review.py
+          test -s review.md
+          test -s review-raw.json
+
+      - name: Save independent review output
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-pr30-model-review
+          path: |
+            review.md
+            review-raw.json
+            review-head.txt
+          retention-days: 30
+
+  publish:
+    name: Post independent model review to exact PR SHA
+    needs: review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Download completed model review
+        uses: actions/download-artifact@v4
+        with:
+          name: independent-pr30-model-review
+
+      - name: Verify unchanged candidate and publish COMMENTED review
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          expected=a66011f8ab6f1d52c6fbdc11be2f41f0c0a602fe
+          test "$(cat review-head.txt)" = "$expected"
+          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/30 --jq '.head.sha')"
+          test "$actual" = "$expected"
+          test -s review.md
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/30/reviews \
+            -f event=COMMENT \
+            -f commit_id="$expected" \
+            -f body="$(cat review.md)" \
+            --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
