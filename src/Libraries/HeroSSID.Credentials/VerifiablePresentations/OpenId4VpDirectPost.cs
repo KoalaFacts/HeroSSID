@@ -7,7 +7,7 @@ namespace HeroSSID.Credentials.VerifiablePresentations;
 
 /// <summary>A verified signed OpenID4VP 1.0 request in the supported single-credential profile.</summary>
 public sealed record OpenId4VpDirectPostRequest(
-    PresentationChallenge Challenge, string ClientId, string ResponseUri);
+    PresentationChallenge Challenge, string ClientId, Uri ResponseUri);
 
 /// <summary>
 /// A deliberately bounded OpenID4VP 1.0 request/response transport profile using
@@ -31,7 +31,7 @@ public static class OpenId4VpDirectPost
     /// The caller owns and must erase the private seed after use.
     /// </summary>
     public static string CreateSignedRequest(PresentationChallenge challenge, string verifierDid,
-        byte[] verifierPrivateKey, string responseUri, TimeProvider clock)
+        byte[] verifierPrivateKey, Uri responseUri, TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(challenge);
         ArgumentNullException.ThrowIfNull(verifierDid);
@@ -59,7 +59,7 @@ public static class OpenId4VpDirectPost
             client_id = clientId,
             response_type = "vp_token",
             response_mode = "direct_post",
-            response_uri = responseUri,
+            response_uri = responseUri.OriginalString,
             nonce = challenge.Nonce,
             state = challenge.Nonce,
             dcql_query = dcql.RootElement,
@@ -92,7 +92,7 @@ public static class OpenId4VpDirectPost
     /// A DID or URL supplied only by the untrusted request is never a trust anchor.
     /// </summary>
     public static bool TryReadSignedRequest(string requestJwt, string expectedVerifierDid,
-        string expectedResponseUri, TimeProvider clock, out OpenId4VpDirectPostRequest? request)
+        Uri expectedResponseUri, TimeProvider clock, out OpenId4VpDirectPostRequest? request)
     {
         ArgumentNullException.ThrowIfNull(clock);
         request = null;
@@ -114,7 +114,7 @@ public static class OpenId4VpDirectPost
             !StrictJwtReader.TryGetString(payload, "response_mode", out var responseMode) ||
             responseMode != "direct_post" ||
             !StrictJwtReader.TryGetString(payload, "response_uri", out var callback) ||
-            !string.Equals(callback, expectedResponseUri, StringComparison.Ordinal) ||
+            !string.Equals(callback, expectedResponseUri.OriginalString, StringComparison.Ordinal) ||
             !StrictJwtReader.TryGetString(payload, "aud", out var audience) ||
             audience != RequestAudience ||
             !StrictJwtReader.TryGetString(payload, "nonce", out var nonce) ||
@@ -151,7 +151,7 @@ public static class OpenId4VpDirectPost
                 ExpiresAt = DateTimeOffset.UnixEpoch.AddTicks((long)(expiresAt * TimeSpan.TicksPerSecond))
             },
             clientId,
-            callback);
+            new Uri(callback, UriKind.Absolute));
         return true;
     }
 
@@ -161,7 +161,7 @@ public static class OpenId4VpDirectPost
     /// this SDK cannot establish human consent. Send only to the verified response URI.
     /// </summary>
     public static string CreateHolderResponseForm(string requestJwt, string expectedVerifierDid,
-        string expectedResponseUri, string credentialJwt, string holderDid, byte[] holderPrivateKey,
+        Uri expectedResponseUri, string credentialJwt, string holderDid, byte[] holderPrivateKey,
         TimeProvider clock)
     {
         if (!TryReadSignedRequest(requestJwt, expectedVerifierDid, expectedResponseUri, clock, out var request) ||
@@ -274,14 +274,13 @@ public static class OpenId4VpDirectPost
         }
     }
 
-    private static bool IsHttpsEndpoint(string? value) =>
-        !string.IsNullOrWhiteSpace(value) &&
-        value.Length <= PresentationChallengePolicy.MaximumIdentifierLength &&
-        Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
-        uri.Scheme == Uri.UriSchemeHttps &&
-        uri.Host.Length > 0 &&
-        uri.UserInfo.Length == 0 &&
-        uri.Fragment.Length == 0;
+    private static bool IsHttpsEndpoint(Uri? value) =>
+        value is { IsAbsoluteUri: true } &&
+        value.OriginalString.Length <= PresentationChallengePolicy.MaximumIdentifierLength &&
+        value.Scheme == Uri.UriSchemeHttps &&
+        value.Host.Length > 0 &&
+        value.UserInfo.Length == 0 &&
+        value.Fragment.Length == 0;
 
     private static bool IsSupportedQuery(JsonElement query)
     {
