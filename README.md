@@ -12,7 +12,7 @@ HeroSSID is a development-stage .NET foundation for issuing, holding and verifyi
 | REST ownership | Validated bearer `tenant_id`, exact operation scopes, tenant-owned DID creation and issuer lookup | An issuance-scope client can use any issuer DID owned by its tenant; per-client DID grants are future work |
 | Credential issuance | Ed25519-signed JWT credentials and PostgreSQL persistence | Existing payloads use the 2018 credentials context; full VC 2.0 conformance is not established |
 | Credential verification | Enrolled issuer signature, required holder/issuance/type/subject structure, optional enforced `nbf`/expiration, local revocation checks; no identity fields on rejection | Local `vc+jwt` profile only; REST lookup is tenant-scoped, not independent issuer trust or business authorization |
-| Presentation library | Original issuer JWT embedded unchanged in a holder-signed `vp+jwt`; subject binding; verifier-owned trusted issuer, audience and single-use challenge | Full disclosure of one credential, local issuer/holder enrollment, process-local challenge storage by default (opt-in PostgreSQL shared store available); no presentation HTTP protocol endpoints |
+| Presentation library | Original issuer JWT embedded unchanged in a holder-signed `vp+jwt`; local and standalone offline Ed25519 holder + issuer signature verification; verifier-owned trusted issuer, audience and single-use challenge | Full disclosure of one credential; offline check needs an independently trusted issuer policy and a verifier-owned replay store; process-local default, opt-in shared PostgreSQL; no presentation HTTP exchange endpoint |
 | OAuth | Client-credentials tokens with configured HS256 signing and validated tenant/scopes | Full OpenID4VCI issuance and OpenID4VP exchange are unfinished |
 | Key storage | Encrypted private-key storage through ASP.NET Data Protection; plaintext buffers cleared after signing | Managed signer/HSM integration and signing-key lifecycle are unfinished |
 | Revocation | Issuer-only `POST /api/v1/credentials/revoke` atomically revokes the exact locally issued JWT; subsequent credential and presentation verification reject it | Local issuer database only: no signed/public interoperable status-list publication, independent wallet lookup or external trust policy |
@@ -113,6 +113,50 @@ in real time, proof of holder control, or business authorization. See
 [the offline verifier acceptance and limitations](docs/offline-credential-verification.md).
 This remains the HeroSSID private JWT profile, not independent-wallet or
 VC-standard conformance.
+
+## Offline holder-signed presentation verification (HeroSSID profile)
+
+A separate .NET verifier can now validate **the actual holder's Ed25519
+signature** over a full-disclosure `vp+jwt`, the *unchanged* issuer-signed
+`vc+jwt` inside it, and a fresh **issuer-signed** revocation snapshot,
+without issuer database access. The verifier first chooses a trusted issuer
+under its own policy and issues an unpredictable single-use challenge:
+
+```csharp
+// The verifier provisions and owns the same challenge store for issuance and checks.
+// Use a shared PostgreSQL implementation for replay protection across replicas.
+var clock = TimeProvider.System;
+IPresentationChallengeStore challenges = new InMemoryPresentationChallengeStore(clock);
+var verifierTenantId = Guid.NewGuid(); // replace with the authenticated verifier tenant
+var request = challenges.Issue(verifierTenantId,
+    "https://verifier.example/check", independentlyTrustedIssuerDid);
+
+// Give request.Audience, request.Nonce and request.ExpiresAt to the holder.
+// Receive a full-disclosure holder-signed vp+jwt and a separately issued
+// short-lived issuer-signed revocation snapshot through a trusted workflow.
+var outcome = OfflinePresentationVerifier.Check(
+    holderPresentationJwt, issuerSignedSnapshotJwt, verifierTenantId,
+    request.Audience, request.Nonce, challenges, clock);
+```
+
+`SignedNotListed` means the **real issuer and holder signatures** and
+challenge binding passed, the revocation snapshot does not list the original
+JWT, and the challenge was consumed **atomically exactly once**. `Revoked`
+means the verified original JWT appears in the authentic snapshot. All other
+errors including forgery, wrong subject/issuer, replay, tampering, expired
+proof/status or mismatched audience fail closed as `Invalid`. No rejected
+claims or holder identifiers are returned. A valid `did:key` is a
+self-certifying public key, **not** evidence that a real-world person was
+enrolled. A relying party still needs issuer trust, claim policy and business
+authorization; `SignedNotListed` is not proof of live issuer status.
+
+This is a **library integration** of the HeroSSID full-disclosure profile,
+not a deployed endpoint, independent third-party wallet test, SD-JWT or
+OpenID4VP implementation. Direct consumers must limit request volume and
+handle challenge-store failures; the memory store loses pending challenges on
+restart and cannot prevent cross-process replay. See
+[the presentation profile](docs/presentation-profile.md) and
+[offline issuer verification limits](docs/offline-credential-verification.md).
 
 ## Full-disclosure presentation library
 
