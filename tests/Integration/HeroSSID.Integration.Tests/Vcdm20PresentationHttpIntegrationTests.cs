@@ -117,8 +117,8 @@ public sealed class Vcdm20PresentationHttpIntegrationTests(DatabaseFixture fixtu
         Assert.Equal(JsonValueKind.Null, repeated.GetProperty("verifiedSubject").ValueKind);
     }
 
-    private WebApplicationFactory<Program> NewHost() =>
-        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+    private WebApplicationFactory<HeroSSID.Api.Features.Dids.CreateDidRequest> NewHost() =>
+        new WebApplicationFactory<HeroSSID.Api.Features.Dids.CreateDidRequest>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Development");
             builder.ConfigureAppConfiguration((_, config) =>
