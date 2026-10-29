@@ -13,6 +13,8 @@ using HeroSSID.DidOperations.DidMethods;
 using HeroSSID.Credentials.CredentialIssuance;
 using HeroSSID.Credentials.CredentialRevocation;
 using HeroSSID.Credentials.CredentialVerification;
+using HeroSSID.Credentials.VerifiablePresentations;
+using Npgsql;
 using HeroSSID.Api.Features.Dids;
 using HeroSSID.Api.Features.Credentials;
 using HeroSSID.Api.Features.OAuth;
@@ -77,6 +79,28 @@ builder.Services.AddDbContext<HeroDbContext>(options =>
     connectionString += $";Password={dbPassword}";
     options.UseNpgsql(connectionString);
 });
+
+// Use the existing migrated presentation_challenges table for all API replicas.
+// Never use the process-local in-memory store in an HTTP verifier: a restart or
+// another instance must not accept the same nonce again.
+builder.Services.AddSingleton<NpgsqlDataSource>(services =>
+{
+    var configuration = services.GetRequiredService<IConfiguration>();
+    var environment = services.GetRequiredService<IHostEnvironment>();
+    var connectionString = configuration.GetConnectionString("HeroDb")
+        ?? throw new InvalidOperationException("Connection string 'HeroDb' not found.");
+    var password = configuration["HEROSSID_DB_PASSWORD"]
+        ?? Environment.GetEnvironmentVariable("HEROSSID_DB_PASSWORD")
+        ?? (environment.IsDevelopment() ? "postgres" : null)
+        ?? throw new InvalidOperationException("Database password not configured.");
+
+    var connection = new NpgsqlConnectionStringBuilder(connectionString) { Password = password };
+    return NpgsqlDataSource.Create(connection.ConnectionString);
+});
+builder.Services.AddSingleton<IPresentationChallengeStore>(services =>
+    new PostgresPresentationChallengeStore(
+        services.GetRequiredService<NpgsqlDataSource>(),
+        services.GetRequiredService<TimeProvider>()));
 
 // Add API versioning (T028)
 builder.Services.AddApiVersioning(options =>
