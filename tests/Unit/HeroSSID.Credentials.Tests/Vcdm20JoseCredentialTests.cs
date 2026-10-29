@@ -10,6 +10,7 @@ public sealed class Vcdm20JoseCredentialTests
     private static readonly DateTimeOffset Now = new(2026, 10, 30, 12, 0, 0, TimeSpan.Zero);
     private const string ContextUri = "https://example.org/credentials/membership/v1";
     private const string CredentialType = "MembershipCredential";
+    private static readonly Uri Context = new(ContextUri);
     private readonly byte[] _issuerSeed;
     private readonly byte[] _holderSeed;
     private readonly string _issuerDid;
@@ -35,7 +36,7 @@ public sealed class Vcdm20JoseCredentialTests
         Assert.Equal(_issuerDid, root.GetProperty("issuer").GetString());
         Assert.Equal(_holderDid, root.GetProperty("credentialSubject").GetProperty("id").GetString());
         Assert.True(Vcdm20JoseCredential.TryVerify(
-            signed, _issuerDid, _holderDid, CredentialType, ContextUri, Now, out var subject));
+            signed, _issuerDid, _holderDid, CredentialType, Context, Now, out var subject));
         Assert.Equal("active", subject.GetProperty("membership").GetString());
     }
 
@@ -44,7 +45,7 @@ public sealed class Vcdm20JoseCredentialTests
     {
         using var subject = Subject();
         Assert.Throws<ArgumentException>(() => Vcdm20JoseCredential.Create(
-            _issuerDid, _holderDid, CredentialType, ContextUri,
+            _issuerDid, _holderDid, CredentialType, Context,
             subject.RootElement, _holderSeed, Now.AddMinutes(-1), Now.AddMinutes(10)));
     }
 
@@ -58,12 +59,12 @@ public sealed class Vcdm20JoseCredentialTests
             payload.Replace(ContextUri, "https://attacker.example/schema",
                 StringComparison.Ordinal), _issuerSeed);
         Assert.False(Vcdm20JoseCredential.TryVerify(foreignContext,
-            _issuerDid, _holderDid, CredentialType, ContextUri, Now, out var denied));
+            _issuerDid, _holderDid, CredentialType, Context, Now, out var denied));
         Assert.Equal(JsonValueKind.Undefined, denied.ValueKind);
         Assert.False(Vcdm20JoseCredential.TryVerify(valid,
-            _issuerDid, _issuerDid, CredentialType, ContextUri, Now, out _));
+            _issuerDid, _issuerDid, CredentialType, Context, Now, out _));
         Assert.False(Vcdm20JoseCredential.TryVerify(valid,
-            _holderDid, _holderDid, CredentialType, ContextUri, Now, out _));
+            _holderDid, _holderDid, CredentialType, Context, Now, out _));
     }
 
     [Fact]
@@ -74,9 +75,9 @@ public sealed class Vcdm20JoseCredentialTests
         parts[1] = Base64UrlEncoder.Encode(
             Ed25519JwtSigner.ExtractPayload(valid).Replace("active", "admin", StringComparison.Ordinal));
         Assert.False(Vcdm20JoseCredential.TryVerify(string.Join('.', parts),
-            _issuerDid, _holderDid, CredentialType, ContextUri, Now, out _));
+            _issuerDid, _holderDid, CredentialType, Context, Now, out _));
         Assert.False(Vcdm20JoseCredential.TryVerify(valid,
-            _issuerDid, _holderDid, CredentialType, ContextUri, Now.AddHours(1), out _));
+            _issuerDid, _holderDid, CredentialType, Context, Now.AddHours(1), out _));
         string legacy = Ed25519JwtSigner.CreateSignedJwt(
             "{\"alg\":\"EdDSA\",\"typ\":\"vc+jwt\"}",
             JsonSerializer.Serialize(new
@@ -87,14 +88,14 @@ public sealed class Vcdm20JoseCredentialTests
                     credentialSubject = new { id = _holderDid, membership = "active" } }
             }), _issuerSeed);
         Assert.False(Vcdm20JoseCredential.TryVerify(legacy,
-            _issuerDid, _holderDid, CredentialType, ContextUri, Now, out _));
+            _issuerDid, _holderDid, CredentialType, Context, Now, out _));
     }
 
     private string Issue()
     {
         using var subject = Subject();
         return Vcdm20JoseCredential.Create(
-            _issuerDid, _holderDid, CredentialType, ContextUri,
+            _issuerDid, _holderDid, CredentialType, Context,
             subject.RootElement, _issuerSeed, Now.AddMinutes(-1), Now.AddMinutes(10));
     }
 
