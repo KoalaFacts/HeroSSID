@@ -80,7 +80,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/31 --jq '.head.sha')"
+          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/32 --jq '.head.sha')"
           test "$actual" = "9111bf8bc13e04de5e3a79623d0a89886ce42074"
           python3 - <<'PY'
           import json
@@ -119,7 +119,7 @@ jobs:
             echo
             cat review-1.md
           } > /tmp/pr32-review.md
-          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/31/reviews \
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/32/reviews \
             -f event=COMMENT -f commit_id="9111bf8bc13e04de5e3a79623d0a89886ce42074" \
             -f body="$(cat /tmp/pr32-review.md)" \
             --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
