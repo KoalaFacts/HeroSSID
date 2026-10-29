@@ -31,7 +31,7 @@ public sealed class IssuerRevocationSnapshotHttpTests(AspireWebApplicationFactor
         string credential = await SetupResponse.ReadRequiredStringAsync(
             issued, HttpStatusCode.Created, "Issue credential for offline status", "credential").ConfigureAwait(true);
 
-        byte[] multicodec = SimpleBase.Base58.Bitcoin.Decode(issuerDid["did:key:z".Length..]);
+        byte[] multicodec = SimpleBase.Base58.Bitcoin.Decode(issuerDid.Substring("did:key:z".Length));
         Assert.Equal(34, multicodec.Length);
         Assert.Equal(0xed, multicodec[0]);
         Assert.Equal(0x01, multicodec[1]);

@@ -100,11 +100,13 @@ public sealed class IssuerRevocationSnapshotTests
             IssuerRevocationSnapshot.Check(duplicate, credential, Issuer, publicKey, Now));
     }
 
+    private static readonly string[] CredentialTypes = ["VerifiableCredential", "MembershipCredential"];
+
     private static string Credential(string issuer, string holder, byte[] key) =>
         Ed25519JwtSigner.CreateSignedJwt(
             "{\"alg\":\"EdDSA\",\"typ\":\"vc+jwt\"}",
             JsonSerializer.Serialize(new { iss = issuer, sub = holder, iat = Now.ToUnixTimeSeconds(),
-                vc = new { type = new[] { "VerifiableCredential", "MembershipCredential" },
+                vc = new { type = CredentialTypes,
                     credentialSubject = new { member = true } } }),
             key);
 
