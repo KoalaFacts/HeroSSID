@@ -11,6 +11,7 @@ public sealed class OfflineSignedPresentationRequestTests
     private static readonly DateTimeOffset Now = new(2026, 10, 30, 10, 0, 0, TimeSpan.Zero);
     private static readonly Guid Tenant = Guid.Parse("43b2da72-460c-474a-a76d-f07e0d2437e4");
     private const string Audience = "https://verifier.example/present";
+    private static readonly string[] CredentialTypes = ["VerifiableCredential", "MembershipCredential"];
     private readonly FixedClock _clock = new(Now);
     private readonly InMemoryPresentationChallengeStore _store;
     private readonly byte[] _verifierPrivate;
@@ -170,7 +171,7 @@ public sealed class OfflineSignedPresentationRequestTests
             {
                 iss = _issuerDid, sub = _holderDid,
                 iat = Now.ToUnixTimeSeconds(), exp = Now.AddMinutes(15).ToUnixTimeSeconds(),
-                vc = new { type = new[] { "VerifiableCredential", "MembershipCredential" },
+                vc = new { type = CredentialTypes,
                     credentialSubject = new { id = _holderDid, membership = "active" } }
             }), signingKey ?? _issuerPrivate);
 
