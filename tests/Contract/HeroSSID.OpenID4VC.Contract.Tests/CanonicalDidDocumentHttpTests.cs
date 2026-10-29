@@ -45,6 +45,18 @@ public sealed class CanonicalDidDocumentHttpTests(AspireWebApplicationFactory fa
         Assert.Equal(legacyMethodId,
             originalJson.RootElement.GetProperty("verificationMethod")[0].GetProperty("id").GetString());
 
+        // PostgreSQL jsonb normalizes whitespace on write. Compare the exact
+        // stored representation before and after the read-only canonical request.
+        string storedBefore;
+        using (var scopeBefore = factory.Services.CreateScope())
+        {
+            var dbBefore = scopeBefore.ServiceProvider.GetRequiredService<HeroDbContext>();
+            storedBefore = await dbBefore.Dids.AsNoTracking()
+                .Where(item => item.DidIdentifier == did)
+                .Select(item => item.DidDocumentJson)
+                .SingleAsync().ConfigureAwait(true);
+        }
+
         using var canonical = await _client.AuthorizedGetAsync(path + "/canonical").ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.OK, canonical.StatusCode);
         using var canonicalJson = JsonDocument.Parse(await canonical.Content.ReadAsStringAsync().ConfigureAwait(true));
@@ -63,6 +75,6 @@ public sealed class CanonicalDidDocumentHttpTests(AspireWebApplicationFactory fa
         var dbAfter = scopeAfter.ServiceProvider.GetRequiredService<HeroDbContext>();
         var persisted = await dbAfter.Dids.AsNoTracking()
             .SingleAsync(item => item.DidIdentifier == did).ConfigureAwait(true);
-        Assert.Equal(legacyJson, persisted.DidDocumentJson);
+        Assert.Equal(storedBefore, persisted.DidDocumentJson);
     }
 }
