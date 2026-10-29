@@ -16,6 +16,45 @@ public sealed class CanonicalDidDocumentHttpTests(AspireWebApplicationFactory fa
     private readonly HttpClient _client = factory.CreateClient();
 
     [Fact]
+    public async Task CanonicalView_RequiresAuthenticationAndRejectsMismatchedOrDeactivatedDid()
+    {
+        using var created = await _client.AuthorizedPostAsJsonAsync(
+            "/api/v1/dids", new { method = "did:key", keyType = "Ed25519" }).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var body = await created.Content.ReadFromJsonAsync<JsonElement>().ConfigureAwait(true);
+        string did = body.GetProperty("did").GetString()!;
+        string path = "/api/v1/dids/" + Uri.EscapeDataString(did) + "/canonical";
+
+        using var anonymous = await _client.GetAsync(path).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+
+        byte[] originalPublicKey;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HeroDbContext>();
+            var record = await db.Dids.SingleAsync(item => item.DidIdentifier == did).ConfigureAwait(true);
+            originalPublicKey = (byte[])record.PublicKeyEd25519.Clone();
+            record.PublicKeyEd25519 = new byte[32];
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        using var mismatched = await _client.AuthorizedGetAsync(path).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, mismatched.StatusCode);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HeroDbContext>();
+            var record = await db.Dids.SingleAsync(item => item.DidIdentifier == did).ConfigureAwait(true);
+            record.PublicKeyEd25519 = originalPublicKey;
+            record.Status = "deactivated";
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        using var deactivated = await _client.AuthorizedGetAsync(path).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, deactivated.StatusCode);
+    }
+
+    [Fact]
     public async Task LegacyStoredDid_CanBeReadAsCanonicalEd25519DocumentWithoutRewritingIt()
     {
         using var created = await _client.AuthorizedPostAsJsonAsync(
