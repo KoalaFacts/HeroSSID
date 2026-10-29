@@ -1,6 +1,6 @@
 using System.Text.Json;
 using HeroSSID.Core.TenantManagement;
-using HeroSSID.Credentials.CredentialVerification;
+using HeroSSID.DidOperations.DidMethods;
 using HeroSSID.Credentials.Vcdm20;
 using HeroSSID.Credentials.VerifiablePresentations;
 using Microsoft.AspNetCore.Builder;
@@ -59,7 +59,9 @@ internal static class Vcdm20PresentationEndpoints
         ArgumentNullException.ThrowIfNull(tenantContext);
 
         if (!ValidAudience(request.Audience) ||
-            !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(request.TrustedIssuerDid!, out _) ||
+            string.IsNullOrWhiteSpace(request.TrustedIssuerDid) ||
+            request.TrustedIssuerDid.Length > 255 ||
+            !new DidKeyMethod().IsValid(request.TrustedIssuerDid) ||
             request.LifetimeSeconds is < 1 or > 300)
         {
             return BadChallenge();
