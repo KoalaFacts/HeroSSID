@@ -118,17 +118,23 @@ public sealed class Vcdm20PresentationHttpIntegrationTests(DatabaseFixture fixtu
     }
 
     private WebApplicationFactory<HeroSSID.Api.Features.Dids.CreateDidRequest> NewHost() =>
-        new WebApplicationFactory<HeroSSID.Api.Features.Dids.CreateDidRequest>().WithWebHostBuilder(builder =>
+        new ConfiguredHost(_fixture.ConnectionString);
+
+    private sealed class ConfiguredHost(string connectionString)
+        : WebApplicationFactory<HeroSSID.Api.Features.Dids.CreateDidRequest>
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Development");
             builder.ConfigureAppConfiguration((_, config) =>
                 config.AddInMemoryCollection(new Dictionary<string, string?>
                 {
-                    ["ConnectionStrings:HeroDb"] = _fixture.ConnectionString,
+                    ["ConnectionStrings:HeroDb"] = connectionString,
                     ["HEROSSID_DB_PASSWORD"] = "test_password",
                     ["Jwt:Secret"] = "isolated-VC2-HTTP-test-secret-with-more-than-32-bytes"
                 }));
-        });
+        }
+    }
 
     private static string DidFromKey(Key key)
     {
