@@ -11,7 +11,7 @@ public sealed record OpenId4VpDirectPostRequest(
 
 /// <summary>
 /// A deliberately bounded OpenID4VP 1.0 request/response transport profile using
-/// signed JAR, decentralized_identifier:did:key, jwt_vc_json and direct_post.
+/// signed JAR, decentralized_identifier:did:key, herossid_vc_jwt and direct_post.
 /// It does not implement discovery, request_uri, encryption, DCQL alternatives or
 /// third-party wallet interoperability. Signatures do not establish business authority.
 /// </summary>
@@ -21,8 +21,8 @@ public static class OpenId4VpDirectPost
     private const int MaximumResponseLength = 180_000;
     private const string RequestAudience = "https://self-issued.me/v2";
     private const string CredentialQueryId = "herossid_vc";
-    private const string DcqlJson = "{\"credentials\":[{\"id\":\"herossid_vc\",\"format\":\"jwt_vc_json\",\"require_cryptographic_holder_binding\":true,\"meta\":{\"type_values\":[[\"VerifiableCredential\"]]}}]}";
-    private const string MetadataJson = "{\"vp_formats_supported\":{\"jwt_vc_json\":{\"alg_values\":[\"EdDSA\"]}}}";
+    private const string DcqlJson = "{\"credentials\":[{\"id\":\"herossid_vc\",\"format\":\"herossid_vc_jwt\",\"require_cryptographic_holder_binding\":true,\"meta\":{\"type_values\":[[\"VerifiableCredential\"]]}}]}";
+    private const string MetadataJson = "{\"vp_formats_supported\":{\"herossid_vc_jwt\":{\"alg_values\":[\"EdDSA\"]}}}";
     private const string PresentationHeader = "{\"alg\":\"EdDSA\",\"typ\":\"vp+jwt\"}";
 
     /// <summary>
@@ -180,8 +180,9 @@ public static class OpenId4VpDirectPost
             throw new ArgumentException("The signed holder presentation is invalid.", nameof(credentialJwt));
         }
 
-        // Unlike the original private VP wrapper, this includes the 2018 VC
-        // Data Model VP context/type/holder required for jwt_vc_json.
+        // Keep the existing issuer JWT unchanged (its vc.context spelling is a
+        // non-standard legacy profile), but add a W3C-shaped holder envelope.
+        // The enclosing OpenID4VP protocol does not certify VC conformance.
         var vp = new Dictionary<string, object>(StringComparer.Ordinal)
         {
             ["@context"] = new[] { "https://www.w3.org/2018/credentials/v1" },
@@ -265,7 +266,18 @@ public static class OpenId4VpDirectPost
                 return OfflinePresentationCheckResult.Invalid;
             }
 
-            return OfflinePresentationVerifier.Check(array[0].GetString()!, snapshotJwt,
+            // This transport requires the expanded VP wrapper. A legacy private
+            // HeroSSID VP must not be presented as a conforming OpenID4VP response.
+            string presented = array[0].GetString()!;
+            if (!StrictJwtReader.TryRead(presented, "vp+jwt", 131_072, out var payload) ||
+                !payload.TryGetProperty("vp", out var vp) ||
+                vp.ValueKind != JsonValueKind.Object || vp.EnumerateObject().Count() != 4 ||
+                !vp.TryGetProperty("@context", out _))
+            {
+                return OfflinePresentationCheckResult.Invalid;
+            }
+
+            return OfflinePresentationVerifier.Check(presented, snapshotJwt,
                 verifierTenantId, expectedClientId, expectedNonce, challenges, clock);
         }
         catch (JsonException)
@@ -295,7 +307,7 @@ public static class OpenId4VpDirectPost
         if (credential.ValueKind != JsonValueKind.Object ||
             credential.EnumerateObject().Count() != 4 ||
             !StrictJwtReader.TryGetString(credential, "id", out var id) || id != CredentialQueryId ||
-            !StrictJwtReader.TryGetString(credential, "format", out var format) || format != "jwt_vc_json" ||
+            !StrictJwtReader.TryGetString(credential, "format", out var format) || format != "herossid_vc_jwt" ||
             !credential.TryGetProperty("require_cryptographic_holder_binding", out var binding) ||
             binding.ValueKind != JsonValueKind.True ||
             !credential.TryGetProperty("meta", out var meta) ||
@@ -317,7 +329,7 @@ public static class OpenId4VpDirectPost
         if (metadata.ValueKind != JsonValueKind.Object || metadata.EnumerateObject().Count() != 1 ||
             !metadata.TryGetProperty("vp_formats_supported", out var formats) ||
             formats.ValueKind != JsonValueKind.Object || formats.EnumerateObject().Count() != 1 ||
-            !formats.TryGetProperty("jwt_vc_json", out var format) ||
+            !formats.TryGetProperty("herossid_vc_jwt", out var format) ||
             format.ValueKind != JsonValueKind.Object || format.EnumerateObject().Count() != 1 ||
             !format.TryGetProperty("alg_values", out var algorithms) ||
             algorithms.ValueKind != JsonValueKind.Array || algorithms.GetArrayLength() != 1)

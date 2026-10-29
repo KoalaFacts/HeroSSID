@@ -49,7 +49,7 @@ public sealed class OpenId4VpDirectPostTests
         {
             Assert.Equal("vp_token", request.RootElement.GetProperty("response_type").GetString());
             Assert.Equal("direct_post", request.RootElement.GetProperty("response_mode").GetString());
-            Assert.Equal("jwt_vc_json", request.RootElement.GetProperty("dcql_query")
+            Assert.Equal("herossid_vc_jwt", request.RootElement.GetProperty("dcql_query")
                 .GetProperty("credentials")[0].GetProperty("format").GetString());
         }
 
@@ -143,6 +143,35 @@ public sealed class OpenId4VpDirectPostTests
                 ClientId, issued.Nonce, _store, _clock));
     }
 
+
+    [Fact]
+    public void HolderRejectsSignedUnsupportedCredentialFormat()
+    {
+        string valid = Request(_store.Issue(VerifierTenant, ClientId, _issuerDid));
+        string modified = Ed25519JwtSigner.ExtractPayload(valid).Replace(
+            "herossid_vc_jwt", "dc+sd-jwt", StringComparison.Ordinal);
+        string signedByRealVerifier = Ed25519JwtSigner.CreateSignedJwt(
+            Ed25519JwtSigner.ExtractHeader(valid), modified, _verifierSeed);
+        Assert.False(OpenId4VpDirectPost.TryReadSignedRequest(
+            signedByRealVerifier, _verifierDid, ResponseUri, _clock, out _));
+    }
+
+    [Fact]
+    public void DirectPostRejectsLegacyPrivateVpShapeEvenWithGenuineHolderSignature()
+    {
+        var issued = _store.Issue(VerifierTenant, ClientId, _issuerDid);
+        string legacy = OfflinePresentationCreator.Create(issued, Credential(),
+            _holderDid, _holderSeed, _clock);
+        string serializedToken = JsonSerializer.Serialize(new Dictionary<string, string[]>(
+            StringComparer.Ordinal) { ["herossid_vc"] = [legacy] });
+        string form = "vp_token=" + Uri.EscapeDataString(serializedToken) +
+            "&state=" + Uri.EscapeDataString(issued.Nonce);
+        Assert.Equal(OfflinePresentationCheckResult.Invalid,
+            OpenId4VpDirectPost.CheckResponseForm(form, Snapshot(), VerifierTenant,
+                ClientId, issued.Nonce, _store, _clock));
+        Assert.NotNull(_store.Find(VerifierTenant, ClientId, issued.Nonce));
+    }
+
     private string ClientId => "decentralized_identifier:" + _verifierDid;
 
     private string Request(PresentationChallenge challenge) =>
@@ -161,7 +190,7 @@ public sealed class OpenId4VpDirectPostTests
                 iat = Now.ToUnixTimeSeconds(), exp = Now.AddMinutes(15).ToUnixTimeSeconds(),
                 vc = new
                 {
-                    @context = new[] { "https://www.w3.org/2018/credentials/v1" },
+                    context = new[] { "https://www.w3.org/2018/credentials/v1" },
                     type = CredentialTypes,
                     credentialSubject = new { id = _holderDid, membership = "active" }
                 }
