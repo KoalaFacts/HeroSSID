@@ -37,6 +37,10 @@ An independent holder can now use its own Ed25519 key to sign a direct VC2 `vp+j
 
 The issuer can use `Vcdm20RevocationSnapshot.Create` with its own Ed25519 seed, a **complete externally maintained set** of revoked direct VC2 JWTs and the clock time recorded *before* the external status read. This signs an issuer-bound, at-most-60-second, at-most-256-entry digest snapshot. The independently configured verifier may call `Check` for the original credential or `CheckPresentation` to combine holder signature, one-use verifier challenge, the authentic original issuer VC2 and signed status, releasing claims only on `SignedNotListed`. The library has **no VC2 database revocation workflow or automatic publication**, so upstream completeness and issuer authorization remain essential. This is a HeroSSID-specific proof and **not** a standard W3C status-list mechanism. See [the full status, trust and privacy limits](docs/vcdm20-revocation-snapshot-profile.md).
 
+## Authenticated HTTP verification of direct VC2 JWTs (opt-in)
+
+Non-.NET clients may now POST to `/api/v1/credentials/vcdm20/verify` with `credential:verify` scope, the original issuer-signed direct VC2 JWT and **independently pinned** expected issuer DID, subject DID, credential type and HTTPS claim vocabulary. Only authentic signed claims are returned with status `SignedButStatusUnchecked`; malformed/tampered/expired/foreign credentials fail without disclosing unverified claims. This verifies an issuer **statement only**: no holder proof, consent, active status, identity vetting, authorization or independent wallet interoperability is implied. See [the HTTP request and response contract](docs/vcdm20-http-verify-profile.md).
+
 ## Local development
 
 Prerequisites: .NET 10 SDK (LTS; projects target `net10.0`), a reachable PostgreSQL instance, and Docker for the container-backed integration/HTTP contract tests. The examples below bind development services to localhost.

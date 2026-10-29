@@ -86,7 +86,15 @@ public sealed class Vcdm20CredentialVerificationEndpointTests
     public async Task MissingCredentialReturnsBadRequest(string? token)
     {
         var fixture = CreateCredential();
-        var (status, _) = await InvokeAsync(Copy(fixture.Request, credential: token)).ConfigureAwait(true);
+        var request = new VerifyVcdm20CredentialRequest
+        {
+            Credential = token,
+            TrustedIssuerDid = fixture.Request.TrustedIssuerDid,
+            ExpectedHolderDid = fixture.Request.ExpectedHolderDid,
+            ExpectedCredentialType = fixture.Request.ExpectedCredentialType,
+            SubjectContextUri = fixture.Request.SubjectContextUri
+        };
+        var (status, _) = await InvokeAsync(request).ConfigureAwait(true);
         Assert.Equal(StatusCodes.Status400BadRequest, status);
     }
 
