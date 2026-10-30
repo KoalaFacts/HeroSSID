@@ -58,7 +58,7 @@ public sealed class OpenId4VpJwtVcJsonDirectPostTests
         string form = OpenId4VpJwtVcJsonDirectPost.CreateHolderResponseForm(
             request, _verifier.Did, ResponseUri, CredentialType, SubjectContext,
             credential, _holder.Did, _holder.Seed, _clock);
-        string formToken = WebUtility.UrlDecode(form.Split('&')[0]["vp_token=".Length..]);
+        string formToken = WebUtility.UrlDecode(form.Split('&')[0]["vp_token=".Length..])!;
         using (var responseDocument = JsonDocument.Parse(formToken))
         {
             var vp = responseDocument.RootElement.GetProperty("jwt_vc_json_credential");
