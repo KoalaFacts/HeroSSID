@@ -22,9 +22,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse 843410188f17c5d2d0d262875fe362db6de8bde1^{commit})" = "843410188f17c5d2d0d262875fe362db6de8bde1"
+          test "$(git rev-parse 85b884d709304a6c4e1d364b4e88fdb2e549632d^{commit})" = "85b884d709304a6c4e1d364b4e88fdb2e549632d"
           test "$(git rev-parse 99f69d6892cf58488e6b14de56358f0c954d964e^{commit})" = "99f69d6892cf58488e6b14de56358f0c954d964e"
-          test "$(git diff --name-only 99f69d6892cf58488e6b14de56358f0c954d964e 843410188f17c5d2d0d262875fe362db6de8bde1 | wc -l)" -eq 5
+          test "$(git diff --name-only 99f69d6892cf58488e6b14de56358f0c954d964e 85b884d709304a6c4e1d364b4e88fdb2e549632d | wc -l)" -eq 5
       - name: Install isolated local review model
         shell: bash
         run: |
@@ -46,7 +46,7 @@ jobs:
             REVIEW_PART="$part" python3 tools/offline_pr55_review.py
             test -s "review-$part.md"
             test -s "review-$part.json"
-            test "$(cat review-head-$part.txt)" = "843410188f17c5d2d0d262875fe362db6de8bde1"
+            test "$(cat review-head-$part.txt)" = "85b884d709304a6c4e1d364b4e88fdb2e549632d"
           done
       - name: Retain raw review and model evidence
         if: always()
@@ -81,11 +81,11 @@ jobs:
         run: |
           set -euo pipefail
           actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/55 --jq '.head.sha')"
-          test "$actual" = "843410188f17c5d2d0d262875fe362db6de8bde1"
+          test "$actual" = "85b884d709304a6c4e1d364b4e88fdb2e549632d"
           python3 - <<'PY'
           import json
           from pathlib import Path
-          expected_head = "843410188f17c5d2d0d262875fe362db6de8bde1"
+          expected_head = "85b884d709304a6c4e1d364b4e88fdb2e549632d"
           expected_files = {"README.md", "docs/jwt-vc-json-openid4vp-direct-post-profile.md", "src/Libraries/HeroSSID.Credentials/JwtVcJson/JwtVcJsonPresentation.cs", "src/Libraries/HeroSSID.Credentials/VerifiablePresentations/OpenId4VpJwtVcJsonDirectPost.cs", "tests/Unit/HeroSSID.Credentials.Tests/OpenId4VpJwtVcJsonDirectPostTests.cs"}
           seen = set()
           for part in (1,):
@@ -111,7 +111,7 @@ jobs:
           {
             echo 'Independent local Qwen2.5-Coder 7B CI security code review of PR #55.'
             echo
-            echo 'Exact source: 843410188f17c5d2d0d262875fe362db6de8bde1. Baseline: 99f69d6892cf58488e6b14de56358f0c954d964e.'
+            echo 'Exact source: 85b884d709304a6c4e1d364b4e88fdb2e549632d. Baseline: 99f69d6892cf58488e6b14de56358f0c954d964e.'
             echo 'This automated review is NOT human approval or an external security audit.'
             echo 'Investigate every finding against the actual source and tests before merge.'
             echo
@@ -120,6 +120,6 @@ jobs:
             echo
           } > /tmp/pr55-review.md
           gh api --method POST repos/KoalaFacts/HeroSSID/pulls/55/reviews \
-            -f event=COMMENT -f commit_id="843410188f17c5d2d0d262875fe362db6de8bde1" \
+            -f event=COMMENT -f commit_id="85b884d709304a6c4e1d364b4e88fdb2e549632d" \
             -f body="$(cat /tmp/pr55-review.md)" \
             --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
