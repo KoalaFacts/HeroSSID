@@ -3,6 +3,8 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using HeroSSID.Credentials.Vcdm20;
+using HeroSSID.Credentials.Utilities;
+using HeroSSID.Credentials.VerifiablePresentations;
 using HeroSSID.Data;
 using HeroSSID.Integration.Tests.TestInfrastructure;
 using Microsoft.AspNetCore.Hosting;
@@ -192,6 +194,26 @@ public sealed class IssuerSuccessorHttpIntegrationTests(DatabaseFixture fixture)
         Assert.Equal(previousDid, body.GetProperty("trustedPreviousIssuerDid").GetString());
         Assert.Equal(3, signed.Split('.').Length);
         string nonce = body.GetProperty("nonce").GetString()!;
+        Assert.True(IssuerSuccessorVerifierRequest.TryRead(signed, verifierDid,
+            Audience, previousDid, TimeProvider.System, out var verifiedChallenge));
+        Assert.NotNull(verifiedChallenge);
+        Assert.Equal(nonce, verifiedChallenge.Nonce);
+        Assert.Equal(previousDid, verifiedChallenge.TrustedIssuerDid);
+        Assert.False(IssuerSuccessorVerifierRequest.TryRead(signed, successorDid,
+            Audience, previousDid, TimeProvider.System, out _));
+        Assert.False(IssuerSuccessorVerifierRequest.TryRead(signed, verifierDid,
+            "https://different.example/issuer-successor", previousDid, TimeProvider.System, out _));
+        Assert.False(IssuerSuccessorVerifierRequest.TryRead(signed, verifierDid,
+            Audience, successorDid, TimeProvider.System, out _));
+        Assert.False(OfflineSignedPresentationRequest.TryRead(signed, verifierDid,
+            Audience, TimeProvider.System, out _));
+        string[] manipulated = signed.Split('.');
+        manipulated[1] = Base64UrlEncoder.Encode(
+            Ed25519JwtSigner.ExtractPayload(signed).Replace(
+                Audience, "https://evil.example/issuer-successor", StringComparison.Ordinal));
+        Assert.False(IssuerSuccessorVerifierRequest.TryRead(
+            string.Join('.', manipulated), verifierDid, Audience,
+            previousDid, TimeProvider.System, out _));
         string attestation = IssuerKeySuccessorAttestation.Create(previousDid,
             successorDid, previous.Export(KeyBlobFormat.RawPrivateKey),
             successor.Export(KeyBlobFormat.RawPrivateKey),
