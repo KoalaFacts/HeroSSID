@@ -38,6 +38,46 @@ an invalid issuer DID/HTTPS audience/lifetime **400**, retained challenge
 capacity exhaustion **429**, and a store outage **503**. The audience must be
 canonical HTTPS without userinfo or URL fragment; lifetime is 1–300 seconds.
 
+## Optional: verifier-authenticated signed successor challenge
+
+When the verifier manages an active tenant-owned Ed25519 `did:key` in HeroSSID,
+it can request a **signed** one-use challenge rather than independently
+signing the unsigned response. This additional route requires both
+`credential:verify` and `did:manage` permissions, and never accepts a
+signing seed from the HTTP caller:
+
+```http
+POST /api/v1/credentials/issuer-successor/signed-challenge
+Authorization: Bearer <credential:verify and did:manage scoped token>
+Content-Type: application/json
+
+{"verifierDid":"did:key:z...","audience":"https://verifier.example/issuer-successor","previousIssuerDid":"did:key:z...","lifetimeSeconds":120}
+```
+
+**201 Created** returns `signedRequestJwt`, `verifierDid`, exact public
+`audience`, `nonce`, `trustedPreviousIssuerDid` and `expiresAt`.
+The server signs `herossid-issuer-successor-request+jwt` with the real
+active verifier DID's Ed25519 key. JWT claims bind `iss`, `aud`,
+`previousIssuerDid`, `nonce`, `iat`, `exp` and the fixed
+`purpose: issuer-key-successor`. The separate internal PostgreSQL audience
+prefix is never included in the public signed payload. Its nonce is still
+atomically consumed by the same existing `/issuer-successor/verify` endpoint.
+
+**Each old and new issuer key controller must first independently authenticate
+and pin the expected verifier DID, exact HTTPS audience and previous issuer
+DID**, then call `IssuerSuccessorVerifierRequest.TryRead` with those pinned
+values and the JWT. Neither a valid signature nor a `did:key` taken from
+the untrusted JWT proves verifier legitimacy, domain control or the
+business right to migrate an issuer. Each controller must explicitly decide
+whether to sign. This is a private HeroSSID format, **not** OpenID4VP,
+wallet interoperability, recovery or automatic trust promotion.
+
+Missing authentication is **401**, missing either permission **403**, invalid
+inputs **400**, foreign/inactive/nonmatching verifier DID **404**,
+challenge capacity **429**, and storage/key-signing failure **503**.
+The verifier signing key remains server-side and decrypted seed buffers are
+zeroed after use. This path introduces no new database tables or migration.
+
 ## 2. Old and new issuer keys sign the same statement
 
 The two controllers create a single `IssuerKeySuccessorAttestation.Create`

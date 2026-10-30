@@ -3,6 +3,8 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using HeroSSID.Credentials.Vcdm20;
+using HeroSSID.Credentials.Utilities;
+using HeroSSID.Credentials.VerifiablePresentations;
 using HeroSSID.Data;
 using HeroSSID.Integration.Tests.TestInfrastructure;
 using Microsoft.AspNetCore.Hosting;
@@ -156,6 +158,110 @@ public sealed class IssuerSuccessorHttpIntegrationTests(DatabaseFixture fixture)
             new { attestation = "not-a-dual-signature", audience = Audience, nonce = "short" },
             token).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
+    }
+
+
+    [Fact]
+    public async Task SignedVerifierChallengeAuthenticatesDestinationAndDrivesTwoKeyProofAcrossHosts()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        await using var firstHost = NewHost();
+        await using var secondHost = NewHost();
+        using var first = firstHost.CreateClient();
+        using var second = secondHost.CreateClient();
+        string token = await GetTokenAsync(first, "credential:verify did:manage").ConfigureAwait(true);
+        using var created = await PostAsync(first, "/api/v1/dids",
+            new { method = "did:key", keyType = "Ed25519" }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var didBody = await created.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        string verifierDid = didBody.GetProperty("did").GetString()!;
+        using var previous = NewKey();
+        using var successor = NewKey();
+        string previousDid = DidFromKey(previous);
+        string successorDid = DidFromKey(successor);
+
+        using var issued = await PostAsync(first,
+            "/api/v1/credentials/issuer-successor/signed-challenge",
+            new { verifierDid, audience = Audience, previousIssuerDid = previousDid, lifetimeSeconds = 120 },
+            token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Created, issued.StatusCode);
+        var body = await issued.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        string signed = body.GetProperty("signedRequestJwt").GetString()!;
+        Assert.Equal(verifierDid, body.GetProperty("verifierDid").GetString());
+        Assert.Equal(Audience, body.GetProperty("audience").GetString());
+        Assert.Equal(previousDid, body.GetProperty("trustedPreviousIssuerDid").GetString());
+        Assert.Equal(3, signed.Split('.').Length);
+        string nonce = body.GetProperty("nonce").GetString()!;
+        Assert.True(IssuerSuccessorVerifierRequest.TryRead(signed, verifierDid,
+            Audience, previousDid, TimeProvider.System, out var verifiedChallenge));
+        Assert.NotNull(verifiedChallenge);
+        Assert.Equal(nonce, verifiedChallenge.Nonce);
+        Assert.Equal(previousDid, verifiedChallenge.TrustedIssuerDid);
+        Assert.False(IssuerSuccessorVerifierRequest.TryRead(signed, successorDid,
+            Audience, previousDid, TimeProvider.System, out _));
+        Assert.False(IssuerSuccessorVerifierRequest.TryRead(signed, verifierDid,
+            "https://different.example/issuer-successor", previousDid, TimeProvider.System, out _));
+        Assert.False(IssuerSuccessorVerifierRequest.TryRead(signed, verifierDid,
+            Audience, successorDid, TimeProvider.System, out _));
+        Assert.False(OfflineSignedPresentationRequest.TryRead(signed, verifierDid,
+            Audience, TimeProvider.System, out _));
+        string[] manipulated = signed.Split('.');
+        manipulated[1] = Base64UrlEncoder.Encode(
+            Ed25519JwtSigner.ExtractPayload(signed).Replace(
+                Audience, "https://evil.example/issuer-successor", StringComparison.Ordinal));
+        Assert.False(IssuerSuccessorVerifierRequest.TryRead(
+            string.Join('.', manipulated), verifierDid, Audience,
+            previousDid, TimeProvider.System, out _));
+        string attestation = IssuerKeySuccessorAttestation.Create(previousDid,
+            successorDid, previous.Export(KeyBlobFormat.RawPrivateKey),
+            successor.Export(KeyBlobFormat.RawPrivateKey),
+            new Uri(Audience), nonce, TimeProvider.System);
+        string secondToken = await GetTokenAsync(second, "credential:verify").ConfigureAwait(true);
+        var proof = new { attestation, audience = Audience, nonce };
+        using var accepted = await PostAsync(second, VerifyRoute, proof, secondToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        var success = await accepted.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal("ValidKeyContinuity", success.GetProperty("status").GetString());
+        Assert.Equal(successorDid, success.GetProperty("successorIssuerDid").GetString());
+        using var replay = await PostAsync(first, VerifyRoute, proof, token).ConfigureAwait(true);
+        var replayBody = await replay.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal("Invalid", replayBody.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task SignedVerifierChallengeRejectsAnonymousMissingScopesAndUnownedSigner()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        await using var host = NewHost();
+        using var client = host.CreateClient();
+        using var foreign = NewKey();
+        string foreignDid = DidFromKey(foreign);
+        var request = new
+        {
+            verifierDid = foreignDid, audience = Audience,
+            previousIssuerDid = foreignDid, lifetimeSeconds = 120
+        };
+        const string route = "/api/v1/credentials/issuer-successor/signed-challenge";
+        using var anonymous = await client.PostAsJsonAsync(route, request,
+            TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        string verifyOnly = await GetTokenAsync(client, "credential:verify").ConfigureAwait(true);
+        using var noSigner = await PostAsync(client, route, request, verifyOnly).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, noSigner.StatusCode);
+        string manageOnly = await GetTokenAsync(client, "did:manage").ConfigureAwait(true);
+        using var noVerify = await PostAsync(client, route, request, manageOnly).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, noVerify.StatusCode);
+        string both = await GetTokenAsync(client, "credential:verify did:manage").ConfigureAwait(true);
+        using var unowned = await PostAsync(client, route, request, both).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, unowned.StatusCode);
+        using var invalid = await PostAsync(client, route,
+            new { verifierDid = foreignDid, audience = "http://insecure.example",
+                previousIssuerDid = foreignDid, lifetimeSeconds = 120 }, both).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
     }
 
     private async Task EnsureMigratedAsync()
