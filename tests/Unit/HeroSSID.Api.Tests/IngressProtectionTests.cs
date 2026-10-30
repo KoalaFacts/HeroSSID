@@ -93,7 +93,8 @@ public sealed class IngressProtectionTests
     [Fact]
     public async Task TrustedProxySeparatesActualClientsAndPreservesForwardedHttps()
     {
-        await using var server = await NewServerAsync(trustProxy: true).ConfigureAwait(true);
+        var server = await NewServerAsync(trustProxy: true).ConfigureAwait(true);
+        await using var disposal = server.ConfigureAwait(true);
         using var client = server.GetTestClient();
 
         var first = await ProbeAsync(client, "192.0.2.15", "198.51.100.10", "https").ConfigureAwait(true);
@@ -112,7 +113,8 @@ public sealed class IngressProtectionTests
     [Fact]
     public async Task UntrustedPeerCannotSpoofForwardedAddressOrHttps()
     {
-        using var server = NewServer(trustProxy: true);
+        var server = await NewServerAsync(trustProxy: true).ConfigureAwait(true);
+        await using var disposal = server.ConfigureAwait(true);
         using var client = server.GetTestClient();
 
         var first = await ProbeAsync(client, "203.0.113.40", "198.51.100.10", "https").ConfigureAwait(true);
@@ -128,7 +130,8 @@ public sealed class IngressProtectionTests
     [Fact]
     public async Task DirectPeersUseRealAddressesEvenWithSpoofedHeaders()
     {
-        await using var server = await NewServerAsync(trustProxy: false).ConfigureAwait(true);
+        var server = await NewServerAsync(trustProxy: false).ConfigureAwait(true);
+        await using var disposal = server.ConfigureAwait(true);
         using var client = server.GetTestClient();
 
         var first = await ProbeAsync(client, "203.0.113.40", "198.51.100.10", "https").ConfigureAwait(true);
@@ -146,7 +149,8 @@ public sealed class IngressProtectionTests
     [Fact]
     public async Task TwoValidatedClientsRemainIndependentBehindSharedAddress()
     {
-        using var server = NewServer(trustProxy: true);
+        var server = await NewServerAsync(trustProxy: true).ConfigureAwait(true);
+        await using var disposal = server.ConfigureAwait(true);
         using var client = server.GetTestClient();
 
         var first = await ProbeAsync(client, "192.0.2.15", "198.51.100.10", "https", "alice").ConfigureAwait(true);
@@ -163,7 +167,8 @@ public sealed class IngressProtectionTests
     [Fact]
     public async Task ProcessWideBudgetStillBlocksChangingClientIdentifiers()
     {
-        await using var server = await NewServerAsync(trustProxy: false, aggregatePermitLimit: 3).ConfigureAwait(true);
+        var server = await NewServerAsync(trustProxy: false, aggregatePermitLimit: 3).ConfigureAwait(true);
+        await using var disposal = server.ConfigureAwait(true);
         using var client = server.GetTestClient();
 
         Assert.Equal(HttpStatusCode.OK,
