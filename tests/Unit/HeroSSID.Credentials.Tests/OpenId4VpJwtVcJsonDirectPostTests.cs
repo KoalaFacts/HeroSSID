@@ -124,10 +124,19 @@ public sealed class OpenId4VpJwtVcJsonDirectPostTests
         string request = Request(challenge);
         Assert.Throws<ArgumentException>(() => OpenId4VpJwtVcJsonDirectPost.CreateHolderResponseForm(
             request, _verifier.Did, ResponseUri, CredentialType, SubjectContext,
-            Credential(_other.Seed), _holder.Did, _holder.Seed, _clock));
+            Credential(_other), _holder.Did, _holder.Seed, _clock));
         Assert.Throws<ArgumentException>(() => OpenId4VpJwtVcJsonDirectPost.CreateHolderResponseForm(
             request, _verifier.Did, ResponseUri, CredentialType, SubjectContext,
             Credential(), _holder.Did, _other.Seed, _clock));
+
+        string authentic = Credential();
+        var parts = authentic.Split('.');
+        parts[1] = Base64UrlEncoder.Encode(Ed25519JwtSigner.ExtractPayload(authentic)
+            .Replace("active", "admin", StringComparison.Ordinal));
+        string forged = string.Join('.', parts);
+        Assert.Throws<ArgumentException>(() => OpenId4VpJwtVcJsonDirectPost.CreateHolderResponseForm(
+            request, _verifier.Did, ResponseUri, CredentialType, SubjectContext,
+            forged, _holder.Did, _holder.Seed, _clock));
 
     }
 
@@ -167,12 +176,13 @@ public sealed class OpenId4VpJwtVcJsonDirectPostTests
         OpenId4VpJwtVcJsonDirectPost.CreateSignedRequest(
             challenge, _verifier.Did, _verifier.Seed, ResponseUri, CredentialType, SubjectContext, _clock);
 
-    private string Credential(byte[]? seed = null)
+    private string Credential((byte[] Seed, string Did)? signer = null)
     {
         using var doc = JsonDocument.Parse(JsonSerializer.Serialize(
             new { id = _holder.Did, membership = "active" }));
-        return JwtVcJsonCredential.Create(_issuer.Did, _holder.Did, CredentialType,
-            SubjectContext, doc.RootElement, seed ?? _issuer.Seed,
+        var issuer = signer ?? _issuer;
+        return JwtVcJsonCredential.Create(issuer.Did, _holder.Did, CredentialType,
+            SubjectContext, doc.RootElement, issuer.Seed,
             _clock.GetUtcNow().AddSeconds(-5), _clock.GetUtcNow().AddMinutes(5));
     }
 
