@@ -1,4 +1,5 @@
 using System.Text.Json;
+using HeroSSID.Credentials.JwtVcJson;
 using HeroSSID.Credentials.Utilities;
 using HeroSSID.Credentials.Vcdm20;
 using NSec.Cryptography;
