@@ -4,6 +4,7 @@ using System.Text.Json;
 using HeroSSID.Credentials.CredentialRevocation;
 using HeroSSID.Credentials.CredentialVerification;
 using HeroSSID.Credentials.Utilities;
+using HeroSSID.Credentials.VerifiablePresentations;
 
 namespace HeroSSID.Credentials.JwtVcJson;
 
@@ -148,6 +149,89 @@ public static class JwtVcJsonRevocationSnapshot
         }
 
         return found ? RevocationSnapshotCheckResult.Revoked : RevocationSnapshotCheckResult.NotListed;
+    }
+
+    /// <summary>
+    /// Verify a real holder-signed VC1.1 VP, its unchanged issuer-signed JWT,
+    /// a verifier-owned one-use challenge AND same-issuer signed status.
+    /// Status is checked only against the original credential INSIDE the
+    /// authenticated VP; rejected proofs never disclose subject claims.
+    /// Consuming a challenge precedes the status check, so even a revoked or
+    /// invalid snapshot cannot be retried under that nonce. This private status
+    /// profile does not establish live non-revocation or business authority.
+    /// </summary>
+    public static RevocationSnapshotCheckResult CheckPresentation(
+        string presentationJwt, string snapshotJwt, Guid verifierTenantId,
+        string expectedAudience, string expectedNonce, string expectedCredentialType,
+        Uri expectedSubjectContextUri, IPresentationChallengeStore challenges,
+        TimeProvider clock, out JsonElement verifiedSubject)
+    {
+        ArgumentNullException.ThrowIfNull(presentationJwt);
+        ArgumentNullException.ThrowIfNull(snapshotJwt);
+        ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
+        ArgumentNullException.ThrowIfNull(challenges);
+        ArgumentNullException.ThrowIfNull(clock);
+        verifiedSubject = default;
+
+        if (!PresentationChallengePolicy.IsValidLookup(verifierTenantId,
+                expectedAudience, expectedNonce))
+        {
+            return RevocationSnapshotCheckResult.Invalid;
+        }
+
+        var challenge = challenges.Find(verifierTenantId, expectedAudience, expectedNonce);
+        if (challenge is null ||
+            JwtVcJsonPresentation.Check(presentationJwt, verifierTenantId,
+                expectedAudience, expectedNonce, expectedCredentialType,
+                expectedSubjectContextUri, challenges, clock, out var subject) !=
+                JwtVcJsonPresentationCheckResult.SignedButStatusUnchecked ||
+            !TryExtractEnclosedCredential(presentationJwt, out string credentialJwt))
+        {
+            return RevocationSnapshotCheckResult.Invalid;
+        }
+
+        var status = Check(snapshotJwt, credentialJwt, challenge.TrustedIssuerDid,
+            clock.GetUtcNow());
+        if (status == RevocationSnapshotCheckResult.NotListed)
+        {
+            verifiedSubject = subject;
+        }
+
+        return status;
+    }
+
+    private static bool TryExtractEnclosedCredential(string presentationJwt,
+        out string credentialJwt)
+    {
+        credentialJwt = string.Empty;
+        if (!StrictJwtReader.IsCanonicalCompact(presentationJwt, 131_072))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(
+                Base64UrlEncoder.DecodeBytes(presentationJwt.Split('.')[1]),
+                new JsonDocumentOptions { MaxDepth = 16 });
+            var payload = document.RootElement;
+            if (!payload.TryGetProperty("vp", out var vp) ||
+                vp.ValueKind != JsonValueKind.Object ||
+                !vp.TryGetProperty("verifiableCredential", out var credentials) ||
+                credentials.ValueKind != JsonValueKind.Array ||
+                credentials.GetArrayLength() != 1 ||
+                credentials[0].ValueKind != JsonValueKind.String)
+            {
+                return false;
+            }
+
+            credentialJwt = credentials[0].GetString() ?? string.Empty;
+            return StrictJwtReader.IsCanonicalCompact(credentialJwt, MaximumCredentialLength);
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException)
+        {
+            return false;
+        }
     }
 
     private static bool IsAuthenticIssuerCredential(string? jwt, string issuerDid, byte[] issuerKey)
