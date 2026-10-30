@@ -2,7 +2,7 @@ name: One-off independent offline PR53 review
 on:
   push:
     branches:
-      - review/pr53-jwt-vc-json-20261030
+      - review/pr53-fractional-jwtvc-20261030
 
 permissions: {}
 
