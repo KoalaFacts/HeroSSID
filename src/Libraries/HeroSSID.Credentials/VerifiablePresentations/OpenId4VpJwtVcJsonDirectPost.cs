@@ -20,6 +20,7 @@ public static class OpenId4VpJwtVcJsonDirectPost
 {
     private const string RequestAudience = "https://self-issued.me/v2";
     private const string CredentialQueryId = "jwt_vc_json_credential";
+    private const string ExpandedBaseCredentialType = "https://www.w3.org/2018/credentials#VerifiableCredential";
     private const int MaximumRequestLength = 16_384;
     private const int MaximumResponseLength = 180_000;
     private const int MaximumPresentationLength = 131_072;
@@ -72,7 +73,7 @@ public static class OpenId4VpJwtVcJsonDirectPost
                         id = CredentialQueryId,
                         format = "jwt_vc_json",
                         require_cryptographic_holder_binding = true,
-                        meta = new { type_values = new[] { new[] { "VerifiableCredential", credentialType } } }
+                        meta = new { type_values = new[] { new[] { ExpandedBaseCredentialType, credentialType } } }
                     }
                 }
             },
@@ -324,7 +325,7 @@ public static class OpenId4VpJwtVcJsonDirectPost
         var types = values[0];
         return types.ValueKind == JsonValueKind.Array && types.GetArrayLength() == 2 &&
             types[0].ValueKind == JsonValueKind.String && types[1].ValueKind == JsonValueKind.String &&
-            string.Equals(types[0].GetString(), "VerifiableCredential", StringComparison.Ordinal) &&
+            string.Equals(types[0].GetString(), ExpandedBaseCredentialType, StringComparison.Ordinal) &&
             string.Equals(types[1].GetString(), credentialType, StringComparison.Ordinal);
     }
 
@@ -356,8 +357,13 @@ public static class OpenId4VpJwtVcJsonDirectPost
         uri.Host.Length != 0 && uri.UserInfo.Length == 0 && uri.Fragment.Length == 0 &&
         uri.AbsoluteUri.Length <= PresentationChallengePolicy.MaximumIdentifierLength;
 
+    // DCQL type_values are expanded IRIs. Require an absolute HTTPS custom type
+    // so this bounded SDK never guesses a term mapping from a remote context.
     private static bool IsValidCredentialType(string? type) =>
         !string.IsNullOrWhiteSpace(type) && type.Length <= 128 &&
         !type.Any(char.IsWhiteSpace) &&
-        !string.Equals(type, "VerifiableCredential", StringComparison.Ordinal);
+        !string.Equals(type, ExpandedBaseCredentialType, StringComparison.Ordinal) &&
+        Uri.TryCreate(type, UriKind.Absolute, out var typeIri) &&
+        typeIri.Scheme == Uri.UriSchemeHttps &&
+        typeIri.Host.Length != 0 && typeIri.UserInfo.Length == 0;
 }
