@@ -58,7 +58,7 @@ internal static class JwtVcJsonRevocationSnapshotHttpEndpoint
         string[]? revoked = request.RevokedCredentials;
         if (issuerDid.Length > 255 || !new DidKeyMethod().IsValid(issuerDid) ||
             request.ObservedAt is not { } observedAt ||
-            revoked is null || revoked.Length > JwtVcJsonRevocationSnapshot.MaximumEntries ||
+            revoked is null || revoked.Count > JwtVcJsonRevocationSnapshot.MaximumEntries ||
             revoked.Any(static credential =>
                 string.IsNullOrWhiteSpace(credential) ||
                 credential.Length > MaximumCredentialCharacters) ||
@@ -192,7 +192,7 @@ public sealed class SignJwtVcJsonRevocationSnapshotRequest
 {
     public string? IssuerDid { get; init; }
     public DateTimeOffset? ObservedAt { get; init; }
-    public string[]? RevokedCredentials { get; init; }
+    public IReadOnlyList<string>? RevokedCredentials { get; init; }
 }
 
 /// <summary>
