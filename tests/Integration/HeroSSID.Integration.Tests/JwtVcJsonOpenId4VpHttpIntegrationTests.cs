@@ -99,6 +99,63 @@ public sealed class JwtVcJsonOpenId4VpHttpIntegrationTests(DatabaseFixture fixtu
     }
 
     [Fact]
+    public async Task AuthenticRevokedIssuerCredentialNeverReleasesHolderClaims()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        await using var host = NewHost();
+        using var client = host.CreateClient();
+        string token = await GetTokenAsync(client, "credential:verify did:manage").ConfigureAwait(true);
+        string verifierDid = await CreateDidAsync(client, token).ConfigureAwait(true);
+        using var issuerKey = NewKey();
+        using var holderKey = NewKey();
+        string issuerDid = DidFromKey(issuerKey);
+        string holderDid = DidFromKey(holderKey);
+        using var issued = await PostAsync(client, IssueRoute, new
+        {
+            verifierDid, responseUri = ResponseUri, trustedIssuerDid = issuerDid,
+            credentialType = TypeIri, subjectContextUri = Context.AbsoluteUri,
+            lifetimeSeconds = 120
+        }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Created, issued.StatusCode);
+        var details = await issued.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        string nonce = details.GetProperty("nonce").GetString()!;
+        string signedRequest = details.GetProperty("signedRequestJwt").GetString()!;
+
+        using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
+            new { id = holderDid, role = "revoked-member" }));
+        DateTimeOffset now = TimeProvider.System.GetUtcNow();
+        string credential = JwtVcJsonCredential.Create(issuerDid, holderDid, TypeIri,
+            Context, subject.RootElement, issuerKey.Export(KeyBlobFormat.RawPrivateKey),
+            now.AddMinutes(-1), now.AddMinutes(10));
+        string holderForm = OpenId4VpJwtVcJsonDirectPost.CreateHolderResponseForm(
+            signedRequest, verifierDid, new Uri(ResponseUri), TypeIri, Context,
+            credential, holderDid, holderKey.Export(KeyBlobFormat.RawPrivateKey),
+            TimeProvider.System);
+        string revokedStatus = JwtVcJsonRevocationSnapshot.Create(issuerDid,
+            [credential], issuerKey.Export(KeyBlobFormat.RawPrivateKey),
+            TimeProvider.System.GetUtcNow(), TimeProvider.System);
+
+        var submitted = new
+        {
+            verifierDid, nonce, form = holderForm, revocationSnapshot = revokedStatus,
+            expectedCredentialType = TypeIri, subjectContextUri = Context.AbsoluteUri
+        };
+        using var denied = await PostAsync(client, VerifyRoute, submitted, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, denied.StatusCode);
+        var deniedJson = await denied.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal("Revoked", deniedJson.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, deniedJson.GetProperty("verifiedSubject").ValueKind);
+
+        using var replay = await PostAsync(client, VerifyRoute, submitted, token).ConfigureAwait(true);
+        var replayJson = await replay.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal("Invalid", replayJson.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, replayJson.GetProperty("verifiedSubject").ValueKind);
+    }
+
+    [Fact]
     public async Task NoBearerNoDualScopeForeignVerifierAndNonHttpsCallbackCannotIssue()
     {
         await EnsureMigratedAsync().ConfigureAwait(true);
