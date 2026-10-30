@@ -9,6 +9,7 @@ HeroSSID is a development-stage .NET foundation for issuing, holding and verifyi
 | Area | Implemented | Current boundary |
 |---|---|---|
 | Identities | `did:key` creation, Ed25519 keys, locally stored DID resolution | Remote DID resolution, signing-key rotation and recovery are unfinished |
+| Issuer key succession (opt-in SDK) | Two independent Ed25519 issuer keys cross-sign an exact verifier-specific five-minute successor statement; verifier pins old DID, HTTPS audience and fresh nonce | DID keys are immutable; no automatic trust promotion, original-key compromise detection, persistence, lost-key recovery or wallet standard interoperability |
 | REST ownership | Validated bearer `tenant_id`, exact operation scopes, tenant-owned DID creation and issuer lookup | An issuance-scope client can use any issuer DID owned by its tenant; per-client DID grants are future work |
 | Credential issuance | Ed25519-signed JWT credentials and PostgreSQL persistence | Existing payloads use the 2018 credentials context; full VC 2.0 conformance is not established |
 | Opt-in VCDM 2.0 JOSE issuance/verification | Real Ed25519 direct VC 2.0 JWT; in-memory SDK, authenticated tenant-owned short-lived HTTP issue and independently pinned HTTP verify | HTTP issue is limited to 15 minutes and not persisted/revocable; no JSON-LD expansion, external conformance, holder proof or third-party wallet exchange |
