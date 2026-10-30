@@ -22,6 +22,9 @@ public static class OpenId4VpJwtVcJsonDirectPost
     private const string CredentialQueryId = "jwt_vc_json_credential";
     private const string ExpandedBaseCredentialType = "https://www.w3.org/2018/credentials#VerifiableCredential";
     private const int MaximumRequestLength = 16_384;
+    private const int MaximumWalletInvocationLength = 20_000;
+    private const string WalletInvocationPrefix = "openid4vp://?client_id=";
+    private const string WalletRequestParameter = "&request=";
     private const int MaximumResponseLength = 180_000;
     private const int MaximumPresentationLength = 131_072;
     private static readonly string[] EdDsaAlgorithms = ["EdDSA"];
@@ -182,6 +185,85 @@ public static class OpenId4VpJwtVcJsonDirectPost
                 ExpiresAt = DateTimeOffset.UnixEpoch.AddTicks((long)(expiresAt * TimeSpan.TicksPerSecond))
             },
             clientId, new Uri(responseUri, UriKind.Absolute), expectedCredentialType);
+        return true;
+    }
+
+    /// <summary>
+    /// Produce a by-value OpenID4VP 1.0 wallet invocation from a genuinely
+    /// signed, currently valid verifier Request Object. This is an opaque
+    /// same-device launch link, not a QR-size promise, a consent UI or
+    /// evidence of third-party wallet support.
+    /// </summary>
+    public static string CreateWalletInvocation(string requestJwt, string expectedVerifierDid,
+        Uri expectedResponseUri, string expectedCredentialType, Uri expectedSubjectContextUri,
+        TimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(requestJwt);
+        ArgumentNullException.ThrowIfNull(expectedResponseUri);
+        ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        if (!TryReadSignedRequest(requestJwt, expectedVerifierDid, expectedResponseUri,
+                expectedCredentialType, expectedSubjectContextUri, clock, out _))
+        {
+            throw new ArgumentException("A live, pinned, signed verifier Request Object is required.",
+                nameof(requestJwt));
+        }
+
+        string clientId = "decentralized_identifier:" + expectedVerifierDid;
+        string invocation = WalletInvocationPrefix + Uri.EscapeDataString(clientId) +
+            WalletRequestParameter + requestJwt;
+        if (invocation.Length > MaximumWalletInvocationLength)
+        {
+            throw new ArgumentException("The signed verifier request exceeds the by-value launch limit.",
+                nameof(requestJwt));
+        }
+
+        return invocation;
+    }
+
+    /// <summary>
+    /// Parse ONLY the exact canonical two-parameter by-value form and verify the
+    /// original verifier Ed25519 signature, pinned DID, HTTPS callback, type,
+    /// subject vocabulary and expiry BEFORE returning a Request Object.
+    /// The application must still show all disclosures and obtain consent.
+    /// </summary>
+    public static bool TryReadWalletInvocation(string? walletInvocation,
+        string expectedVerifierDid, Uri expectedResponseUri,
+        string expectedCredentialType, Uri expectedSubjectContextUri,
+        TimeProvider clock, out string requestJwt)
+    {
+        ArgumentNullException.ThrowIfNull(expectedResponseUri);
+        ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
+        ArgumentNullException.ThrowIfNull(clock);
+        requestJwt = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(walletInvocation) ||
+            walletInvocation.Length > MaximumWalletInvocationLength ||
+            !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(expectedVerifierDid, out _))
+        {
+            return false;
+        }
+
+        string expectedPrefix = WalletInvocationPrefix +
+            Uri.EscapeDataString("decentralized_identifier:" + expectedVerifierDid) +
+            WalletRequestParameter;
+        if (!walletInvocation.StartsWith(expectedPrefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        // Compact JWS uses only unescaped base64url characters and dots.
+        // Any URI-escaped token, fragment, duplicate or extra parameter is rejected.
+        string signed = walletInvocation[expectedPrefix.Length..];
+        if (!StrictJwtReader.IsCanonicalCompact(signed, MaximumRequestLength) ||
+            !TryReadSignedRequest(signed, expectedVerifierDid, expectedResponseUri,
+                expectedCredentialType, expectedSubjectContextUri, clock, out _))
+        {
+            return false;
+        }
+
+        requestJwt = signed;
         return true;
     }
 
