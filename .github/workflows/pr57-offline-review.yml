@@ -1,4 +1,5 @@
-name: One-off independent offline PR57 HTTP issuance security review
+name: Publish completed independent PR57 review
+
 on:
   push:
     branches:
@@ -7,119 +8,77 @@ on:
 permissions: {}
 
 jobs:
-  review:
-    name: Independent model review of complete PR57 patch
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout immutable helper and pinned candidate
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Verify pinned source and baseline
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse 731945f074587569376ae4995824b3feb90e3c29^{commit})" = "731945f074587569376ae4995824b3feb90e3c29"
-          test "$(git rev-parse a7d1dc118cff9907e4d9a58756d3d385e2141e0e^{commit})" = "a7d1dc118cff9907e4d9a58756d3d385e2141e0e"
-          test "$(git diff --name-only a7d1dc118cff9907e4d9a58756d3d385e2141e0e 731945f074587569376ae4995824b3feb90e3c29 | wc -l)" -eq 5
-      - name: Install isolated local review model
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl --fail --silent --show-error --location https://ollama.com/install.sh --output /tmp/ollama-install.sh
-          sh /tmp/ollama-install.sh
-          nohup ollama serve >/tmp/ollama-server.log 2>&1 </dev/null &
-          for i in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
-            sleep 2
-          done
-          curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null
-          ollama pull qwen2.5-coder:7b
-      - name: Review complete pinned file patches
-        shell: bash
-        run: |
-          set -euo pipefail
-          for part in 1; do
-            REVIEW_PART="$part" python3 tools/offline_pr57_review.py
-            test -s "review-$part.md"
-            test -s "review-$part.json"
-            test "$(cat review-head-$part.txt)" = "731945f074587569376ae4995824b3feb90e3c29"
-          done
-      - name: Retain raw review and model evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: independent-pr57-review
-          path: |
-            review-*.md
-            review-*.json
-            review-head-*.txt
-            review-model-*.json
-          if-no-files-found: warn
-          retention-days: 30
-
   publish:
-    name: Submit verified independent model COMMENTED review
-    needs: review
+    name: Submit exact-head independent COMMENTED review
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
+      actions: read
       pull-requests: write
     steps:
-      - name: Download complete model review
-        uses: actions/download-artifact@v4
-        with:
-          name: independent-pr57-review
-      - name: Verify changed files, model evidence and unchanged PR head
+      - name: Reuse completed independent model artifact
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/56 --jq '.head.sha')"
+          gh run download 41080599142 --repo KoalaFacts/HeroSSID \
+            --name independent-pr57-review --dir .
+          test -s review-1.json
+          test -s review-model-1.json
+          test -s review-1.md
+      - name: Verify pinned source, artifact provenance and full review coverage
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/57 --jq '.head.sha')"
           test "$actual" = "731945f074587569376ae4995824b3feb90e3c29"
+          artifact_digest="$(gh api repos/KoalaFacts/HeroSSID/actions/artifacts/12990970282 --jq '.digest')"
+          test "$artifact_digest" = "sha256:bfb7952317bd3cf37a7bdcd3515c7b04b947bb066bcff4fa4e159342cd03a81e"
+          gh api repos/KoalaFacts/HeroSSID/actions/runs/41080599142/jobs \
+            --jq '.jobs[] | select(.name=="Independent model review of complete PR57 patch") | .conclusion' \
+            | grep -qx success
           python3 - <<'PY'
           import json
           from pathlib import Path
-          expected_head = "731945f074587569376ae4995824b3feb90e3c29"
-          expected_files = {"README.md", "docs/jwt-vc-json-http-issue-profile.md", "src/Services/HeroSSID.Api/Features/Credentials/CredentialEndpoints.cs", "src/Services/HeroSSID.Api/Features/Credentials/JwtVcJsonCredentialIssuanceEndpoint.cs", "tests/Contract/HeroSSID.OpenID4VC.Contract.Tests/JwtVcJsonCredentialIssuanceHttpTests.cs"}
-          seen = set()
-          for part in (1,):
-              payload = json.loads(Path(f"review-{part}.json").read_text())
-              assert payload["head"] == expected_head
-              assert payload["part"] == part
-              files = set(payload["files"])
-              assert files and files.isdisjoint(seen)
-              seen.update(files)
-              assert payload["review"]["verdict"] in (
-                  "no_actionable_findings", "actionable_findings", "inconclusive"
-              )
-              assert Path(f"review-model-{part}.json").stat().st_size > 20
-              assert Path(f"review-{part}.md").stat().st_size > 200
-          assert seen == expected_files
+          head = "731945f074587569376ae4995824b3feb90e3c29"
+          expected = {
+            "README.md",
+            "docs/jwt-vc-json-http-issue-profile.md",
+            "src/Services/HeroSSID.Api/Features/Credentials/CredentialEndpoints.cs",
+            "src/Services/HeroSSID.Api/Features/Credentials/JwtVcJsonCredentialIssuanceEndpoint.cs",
+            "tests/Contract/HeroSSID.OpenID4VC.Contract.Tests/JwtVcJsonCredentialIssuanceHttpTests.cs",
+          }
+          payload = json.loads(Path("review-1.json").read_text())
+          raw = json.loads(Path("review-model-1.json").read_text())
+          assert payload["head"] == head and payload["part"] == 1
+          assert set(payload["files"]) == expected and len(payload["files"]) == len(expected)
+          assert raw["verdict"] in ("no_actionable_findings", "actionable_findings", "inconclusive")
+          assert payload["review"]["verdict"] == raw["verdict"]
+          assert len(Path("review-1.md").read_text()) > 200
+          assert Path("review-head-1.txt").read_text().strip() == head
           PY
-      - name: Publish COMMENTED review (not APPROVED)
+      - name: Submit independent COMMENTED review to the correct PR
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           {
-            echo 'Independent local Qwen2.5-Coder 7B CI security code review of PR #57.'
+            echo 'Independent Qwen2.5-Coder 7B security review of all five changed PR #57 files.'
             echo
-            echo 'Exact source: 731945f074587569376ae4995824b3feb90e3c29. Baseline: a7d1dc118cff9907e4d9a58756d3d385e2141e0e.'
-            echo 'This automated review is NOT human approval or an external security audit.'
-            echo 'Investigate every finding against the actual source and tests before merge.'
+            echo 'Reviewed head: 731945f074587569376ae4995824b3feb90e3c29.'
+            echo 'Baseline: a7d1dc118cff9907e4d9a58756d3d385e2141e0e.'
+            echo 'This is a submitted independent MODEL review, NOT human approval or external cryptography audit.'
+            echo 'All findings require verification against source and tests before merging.'
             echo
             cat review-1.md
-            echo
-            echo
           } > /tmp/pr57-review.md
-          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/56/reviews \
-            -f event=COMMENT -f commit_id="731945f074587569376ae4995824b3feb90e3c29" \
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/57/reviews \
+            -f event=COMMENT \
+            -f commit_id=731945f074587569376ae4995824b3feb90e3c29 \
             -f body="$(cat /tmp/pr57-review.md)" \
             --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
