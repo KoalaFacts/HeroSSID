@@ -6,6 +6,7 @@ using HeroSSID.Core.TenantManagement;
 using HeroSSID.Infrastructure.KeyEncryption;
 using HeroSSID.Infrastructure.RateLimiting;
 using HeroSSID.Api.Authentication;
+using HeroSSID.Api.Ingress;
 using HeroSSID.DidOperations.DidMethod;
 using HeroSSID.DidOperations.DidCreation;
 using HeroSSID.DidOperations.DidResolution;
@@ -24,8 +25,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.EntityFrameworkCore;
 using Asp.Versioning;
-using Microsoft.AspNetCore.RateLimiting;
-using System.Threading.RateLimiting;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -155,28 +154,11 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Add rate limiting (T031)
-builder.Services.AddRateLimiter(options =>
-{
-    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
-    {
-        // Use authenticated user if available, otherwise use IP address (not spoofable Host header)
-        var partitionKey = httpContext.User.Identity?.Name
-            ?? httpContext.Connection.RemoteIpAddress?.ToString()
-            ?? "anonymous";
+// Use the trusted peer list only when explicitly enabled; never trust all X-Forwarded headers.
+var trustForwardedHeaders = IngressProtection.ConfigureForwarding(builder.Services, builder.Configuration);
 
-        return RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: partitionKey,
-            factory: partition => new FixedWindowRateLimiterOptions
-            {
-                AutoReplenishment = true,
-                PermitLimit = 100,
-                Window = TimeSpan.FromMinutes(1)
-            });
-    });
-
-    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-});
+// Independent validated-client budgets plus a bounded aggregate HTTP budget.
+IngressProtection.AddRateLimiting(builder.Services);
 
 // Add problem details support (T029)
 builder.Services.AddProblemDetails();
@@ -261,6 +243,12 @@ if (app.Environment.IsDevelopment())
     app.MapScalarApiReference();
 }
 
+// Apply trusted X-Forwarded-For/Proto before redirection, authentication or rate limiting.
+if (trustForwardedHeaders)
+{
+    app.UseForwardedHeaders();
+}
+
 // Use HTTPS redirection (T025)
 app.UseHttpsRedirection();
 
@@ -286,12 +274,11 @@ app.Use(async (context, next) =>
 // Use CORS
 app.UseCors();
 
-// Use authentication and authorization (CRITICAL-2)
+// Authenticate first so verified tenant/client claims select the budget;
+// throttle invalid/anonymous traffic before authorization can short-circuit.
 app.UseAuthentication();
-app.UseAuthorization();
-
-// Use rate limiting
 app.UseRateLimiter();
+app.UseAuthorization();
 
 // Use exception handling (T029)
 // Use DeveloperExceptionPage in development, otherwise use exception handler
