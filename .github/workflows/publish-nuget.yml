@@ -11,7 +11,6 @@ on:
         type: string
 
 permissions:
-  id-token: write  # Required for OIDC authentication with NuGet.org
   contents: read
 
 jobs:
@@ -22,17 +21,31 @@ jobs:
       version: ${{ steps.version.outputs.VERSION }}
 
     steps:
-      - name: Determine version
+      - name: Determine and validate version
         id: version
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          DISPATCH_VERSION: ${{ inputs.version }}
         run: |
-          if [ "${{ github.event_name }}" == "release" ]; then
-            VERSION="${{ github.event.release.tag_name }}"
-            VERSION="${VERSION#v}"  # Remove 'v' prefix if present
+          if [[ "$EVENT_NAME" == "release" ]]; then
+            VERSION="${RELEASE_TAG#v}"
           else
-            VERSION="${{ inputs.version }}"
+            VERSION="$DISPATCH_VERSION"
           fi
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "Publishing version: $VERSION"
+
+          # Deliberately strict NuGet SemVer 2 subset: exactly three numeric
+          # components and optional prerelease identifiers; no metadata.
+          # Reject newlines, metacharacters, output-file injection and
+          # ambiguous/noncanonical package versions before downstream jobs.
+          if (( ${#VERSION} > 128 )) ||
+             [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            echo "::error::Invalid release version; expected 1.2.3 or 1.2.3-preview.1 (max 128 characters)."
+            exit 1
+          fi
+          printf 'VERSION=%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
+          printf 'Validated package version: %s\n' "$VERSION"
 
   build:
     name: Build
@@ -54,7 +67,9 @@ jobs:
         run: dotnet restore
 
       - name: Build solution
-        run: dotnet build --configuration Release --no-restore /p:Version=${{ needs.version.outputs.version }}
+        env:
+          PACKAGE_VERSION: ${{ needs.version.outputs.version }}
+        run: dotnet build --configuration Release --no-restore "/p:Version=$PACKAGE_VERSION"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -90,7 +105,9 @@ jobs:
         run: dotnet restore
 
       - name: Build solution
-        run: dotnet build --configuration Release --no-restore /p:Version=${{ needs.version.outputs.version }}
+        env:
+          PACKAGE_VERSION: ${{ needs.version.outputs.version }}
+        run: dotnet build --configuration Release --no-restore "/p:Version=$PACKAGE_VERSION"
 
       - name: Run all tests
         run: dotnet test --configuration Release --no-build --verbosity normal
@@ -170,47 +187,59 @@ jobs:
         run: dotnet restore
 
       - name: Build solution
-        run: dotnet build --configuration Release --no-restore /p:Version=${{ needs.version.outputs.version }}
+        env:
+          PACKAGE_VERSION: ${{ needs.version.outputs.version }}
+        run: dotnet build --configuration Release --no-restore "/p:Version=$PACKAGE_VERSION"
 
       - name: Pack HeroSSID.Core
+        env:
+          PACKAGE_VERSION: ${{ needs.version.outputs.version }}
         run: |
           dotnet pack src/Libraries/HeroSSID.Core/HeroSSID.Core.csproj \
             --configuration Release \
             --no-build \
             --output ./packages \
-            /p:PackageVersion=${{ needs.version.outputs.version }}
+            "/p:PackageVersion=$PACKAGE_VERSION"
 
       - name: Pack HeroSSID.DidOperations
+        env:
+          PACKAGE_VERSION: ${{ needs.version.outputs.version }}
         run: |
           dotnet pack src/Libraries/HeroSSID.DidOperations/HeroSSID.DidOperations.csproj \
             --configuration Release \
             --no-build \
             --output ./packages \
-            /p:PackageVersion=${{ needs.version.outputs.version }}
+            "/p:PackageVersion=$PACKAGE_VERSION"
 
       - name: Pack HeroSSID.Credentials
+        env:
+          PACKAGE_VERSION: ${{ needs.version.outputs.version }}
         run: |
           dotnet pack src/Libraries/HeroSSID.Credentials/HeroSSID.Credentials.csproj \
             --configuration Release \
             --no-build \
             --output ./packages \
-            /p:PackageVersion=${{ needs.version.outputs.version }}
+            "/p:PackageVersion=$PACKAGE_VERSION"
 
       - name: Pack HeroSSID.Data
+        env:
+          PACKAGE_VERSION: ${{ needs.version.outputs.version }}
         run: |
           dotnet pack src/Libraries/HeroSSID.Data/HeroSSID.Data.csproj \
             --configuration Release \
             --no-build \
             --output ./packages \
-            /p:PackageVersion=${{ needs.version.outputs.version }}
+            "/p:PackageVersion=$PACKAGE_VERSION"
 
       - name: Pack HeroSSID.Observability
+        env:
+          PACKAGE_VERSION: ${{ needs.version.outputs.version }}
         run: |
           dotnet pack src/Libraries/HeroSSID.Observability/HeroSSID.Observability.csproj \
             --configuration Release \
             --no-build \
             --output ./packages \
-            /p:PackageVersion=${{ needs.version.outputs.version }}
+            "/p:PackageVersion=$PACKAGE_VERSION"
 
       - name: Upload NuGet packages
         uses: actions/upload-artifact@v4
@@ -223,6 +252,9 @@ jobs:
     name: Publish to NuGet.org
     needs: [version, release]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     environment: production  # Require manual approval for production
 
     steps:
@@ -250,14 +282,17 @@ jobs:
         run: |
           dotnet nuget push "./packages/*.nupkg" \
             --source https://api.nuget.org/v3/index.json \
-            --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }} \
+            --api-key "$NUGET_API_KEY" \
             --skip-duplicate
         env:
           DOTNET_CLI_TELEMETRY_OPTOUT: 1
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
 
       - name: Create release summary
+        env:
+          PACKAGE_VERSION: ${{ needs.version.outputs.version }}
         run: |
-          echo "## Published Packages - Version ${{ needs.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          printf '## Published Packages - Version %s\n' "$PACKAGE_VERSION" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "The following packages have been published to NuGet.org:" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
