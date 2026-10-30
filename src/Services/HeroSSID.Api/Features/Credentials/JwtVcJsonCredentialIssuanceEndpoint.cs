@@ -115,9 +115,15 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
             try
             {
                 seed = encryption.Decrypt(issuer.PrivateKeyEd25519Encrypted);
+                // No validFrom is supplied by this HTTP API. Use the current
+                // whole UTC second for immediate validity. The lower-level SDK
+                // still rounds UP any explicit caller-supplied fractional start
+                // to prevent accidental backdating of requested constraints.
+                DateTimeOffset signingStart =
+                    DateTimeOffset.FromUnixTimeSeconds(now.ToUnixTimeSeconds());
                 string jwt = JwtVcJsonCredential.Create(issuerDid, holderDid,
                     credentialType, context, request.CredentialSubject, seed,
-                    now, validUntil);
+                    signingStart, validUntil);
 
                 if (clock.GetUtcNow() >= validUntil)
                 {
