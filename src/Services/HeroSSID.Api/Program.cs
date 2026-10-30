@@ -274,12 +274,11 @@ app.Use(async (context, next) =>
 // Use CORS
 app.UseCors();
 
-// Use authentication and authorization (CRITICAL-2)
+// Authenticate first so verified tenant/client claims select the budget;
+// throttle invalid/anonymous traffic before authorization can short-circuit.
 app.UseAuthentication();
-app.UseAuthorization();
-
-// Use rate limiting
 app.UseRateLimiter();
+app.UseAuthorization();
 
 // Use exception handling (T029)
 // Use DeveloperExceptionPage in development, otherwise use exception handler
