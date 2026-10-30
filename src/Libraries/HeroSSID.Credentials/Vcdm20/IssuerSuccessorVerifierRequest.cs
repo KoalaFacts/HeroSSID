@@ -86,6 +86,10 @@ public static class IssuerSuccessorVerifierRequest
         string expectedPreviousIssuerDid, TimeProvider clock,
         out PresentationChallenge? challenge)
     {
+        ArgumentNullException.ThrowIfNull(requestJwt);
+        ArgumentNullException.ThrowIfNull(expectedVerifierDid);
+        ArgumentNullException.ThrowIfNull(expectedAudience);
+        ArgumentNullException.ThrowIfNull(expectedPreviousIssuerDid);
         ArgumentNullException.ThrowIfNull(clock);
         challenge = null;
 
