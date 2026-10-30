@@ -128,7 +128,7 @@ public sealed class OpenId4VpJwtVcJsonDirectPostTests
         Assert.Throws<ArgumentException>(() => OpenId4VpJwtVcJsonDirectPost.CreateHolderResponseForm(
             request, _verifier.Did, ResponseUri, CredentialType, SubjectContext,
             Credential(), _holder.Did, _other.Seed, _clock));
-        Assert.Throws<ArgumentException>(() => OpenId4VpJwtVcJsonDirectPost.CreateHolderResponseForm(\n            request, _verifier.Did, ResponseUri, CredentialType, SubjectContext,\n            Credential(), _holder.Did, _other.Seed, _clock));
+
     }
 
     [Fact]
