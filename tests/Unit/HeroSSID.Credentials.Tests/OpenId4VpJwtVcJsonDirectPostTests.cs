@@ -9,7 +9,7 @@ namespace HeroSSID.Credentials.Tests;
 
 public sealed class OpenId4VpJwtVcJsonDirectPostTests
 {
-    private const string CredentialType = "MembershipCredential";
+    private const string CredentialType = "https://issuer.example/credentials#MembershipCredential";
     private static readonly Uri SubjectContext = new("https://issuer.example/contexts/membership/v1");
     private static readonly Uri ResponseUri = new("https://verifier.example/oid4vp/direct-post");
     private static readonly DateTimeOffset StartingTime = new(2026, 10, 30, 10, 0, 0, TimeSpan.Zero);
@@ -46,7 +46,7 @@ public sealed class OpenId4VpJwtVcJsonDirectPostTests
             Assert.Equal("EdDSA", root.GetProperty("client_metadata")
                 .GetProperty("vp_formats_supported").GetProperty("jwt_vc_json")
                 .GetProperty("alg_values")[0].GetString());
-            Assert.Equal("VerifiableCredential", root.GetProperty("dcql_query")
+            Assert.Equal("https://www.w3.org/2018/credentials#VerifiableCredential", root.GetProperty("dcql_query")
                 .GetProperty("credentials")[0].GetProperty("meta")
                 .GetProperty("type_values")[0][0].GetString());
             Assert.Equal(CredentialType, root.GetProperty("dcql_query")
@@ -79,6 +79,25 @@ public sealed class OpenId4VpJwtVcJsonDirectPostTests
             OpenId4VpJwtVcJsonDirectPost.CheckResponseForm(form, tenant, Audience,
                 challenge.Nonce, CredentialType, SubjectContext, store, _clock, out var replayClaims));
         Assert.Equal(JsonValueKind.Undefined, replayClaims.ValueKind);
+    }
+
+    [Fact]
+    public void DcqlRequiresExpandedW3cTypeAndAbsoluteCredentialIri()
+    {
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(Guid.NewGuid(), Audience, _issuer.Did);
+        Assert.Throws<ArgumentException>(() => OpenId4VpJwtVcJsonDirectPost.CreateSignedRequest(
+            challenge, _verifier.Did, _verifier.Seed, ResponseUri, "MembershipCredential",
+            SubjectContext, _clock));
+
+        string request = Request(challenge);
+        string shortened = Ed25519JwtSigner.ExtractPayload(request).Replace(
+            "https://www.w3.org/2018/credentials#VerifiableCredential",
+            "VerifiableCredential", StringComparison.Ordinal);
+        string malformed = Ed25519JwtSigner.CreateSignedJwt(
+            Ed25519JwtSigner.ExtractHeader(request), shortened, _verifier.Seed);
+        Assert.False(OpenId4VpJwtVcJsonDirectPost.TryReadSignedRequest(
+            malformed, _verifier.Did, ResponseUri, CredentialType, SubjectContext, _clock, out _));
     }
 
     [Fact]
