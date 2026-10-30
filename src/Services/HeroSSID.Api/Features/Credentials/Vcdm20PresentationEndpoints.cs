@@ -1,12 +1,16 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using HeroSSID.Core.TenantManagement;
+using HeroSSID.Data;
 using HeroSSID.DidOperations.DidMethods;
 using HeroSSID.Credentials.Vcdm20;
 using HeroSSID.Credentials.VerifiablePresentations;
+using HeroSSID.Infrastructure.KeyEncryption;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
 namespace HeroSSID.Api.Features.Credentials;
@@ -22,6 +26,18 @@ internal static class Vcdm20PresentationEndpoints
 
     internal static void Map(RouteGroupBuilder credentials)
     {
+        credentials.MapPost("/vcdm20/signed-presentation-request", IssueSignedAsync)
+            .RequireAuthorization("credential:verify", "did:manage")
+            .WithName("IssueVcdm20SignedPresentationRequest")
+            .WithSummary("Issue and sign a one-use verifier challenge with the tenant's active verifier did:key")
+            .Produces<IssueVcdm20SignedPresentationRequestResponse>(StatusCodes.Status201Created)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
         credentials.MapPost("/vcdm20/presentation-challenge", Issue)
             .RequireAuthorization("credential:verify")
             .WithName("IssueVcdm20PresentationChallenge")
@@ -42,6 +58,113 @@ internal static class Vcdm20PresentationEndpoints
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+    }
+
+    /// <summary>
+    /// A non-.NET verifier may ask HeroSSID to sign its own challenge with an active
+    /// verifier DID owned by the authenticated tenant. The holder key remains outside
+    /// the API, and the holder must independently pin this verifier DID and audience
+    /// and affirmatively consent to every claim before creating a presentation.
+    /// This is NOT an OpenID4VP request object or proof of business authorization.
+    /// </summary>
+    internal static async Task<IResult> IssueSignedAsync(
+        [FromBody] IssueVcdm20SignedPresentationRequestRequest request,
+        [FromServices] IPresentationChallengeStore challenges,
+        [FromServices] ITenantContext tenantContext,
+        [FromServices] HeroDbContext dbContext,
+        [FromServices] IKeyEncryptionService encryption,
+        [FromServices] TimeProvider clock,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(challenges);
+        ArgumentNullException.ThrowIfNull(tenantContext);
+        ArgumentNullException.ThrowIfNull(dbContext);
+        ArgumentNullException.ThrowIfNull(encryption);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        if (!ValidAudience(request.Audience) ||
+            string.IsNullOrWhiteSpace(request.VerifierDid) ||
+            request.VerifierDid.Length > 255 ||
+            !new DidKeyMethod().IsValid(request.VerifierDid) ||
+            string.IsNullOrWhiteSpace(request.TrustedIssuerDid) ||
+            request.TrustedIssuerDid.Length > 255 ||
+            !new DidKeyMethod().IsValid(request.TrustedIssuerDid) ||
+            request.LifetimeSeconds is < 1 or > 300)
+        {
+            return BadSignedRequest();
+        }
+
+        Guid tenantId = tenantContext.GetCurrentTenantId();
+        if (tenantId == Guid.Empty)
+        {
+            return Results.Unauthorized();
+        }
+
+        byte[]? privateKey = null;
+        try
+        {
+            // The untrusted request cannot choose somebody else's verifier key.
+            // Require an active DID in the authenticated caller's own tenant.
+            var verifier = await dbContext.Dids.AsNoTracking()
+                .Where(did => did.TenantId == tenantId &&
+                    did.DidIdentifier == request.VerifierDid && did.Status == "active")
+                .Select(did => new { did.PublicKeyEd25519, did.PrivateKeyEd25519Encrypted })
+                .FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
+            if (verifier is null ||
+                !string.Equals(new DidKeyMethod().GenerateDidIdentifier(
+                    verifier.PublicKeyEd25519), request.VerifierDid, StringComparison.Ordinal))
+            {
+                return Results.NotFound();
+            }
+
+            // The retained tenant/issuer policy comes from the verifier, never
+            // from the eventual holder proof. Issuing is atomic in the existing
+            // PostgreSQL store across HTTP replicas; a signing failure releases
+            // no JWT, and the unused nonce expires automatically.
+            privateKey = encryption.Decrypt(verifier.PrivateKeyEd25519Encrypted);
+            var challenge = challenges.Issue(
+                tenantId, request.Audience!, request.TrustedIssuerDid!,
+                TimeSpan.FromSeconds(request.LifetimeSeconds));
+            string signed = OfflineSignedPresentationRequest.Create(
+                challenge, request.VerifierDid!, privateKey, clock);
+            return Results.Json(new IssueVcdm20SignedPresentationRequestResponse(
+                signed, request.VerifierDid!, challenge.Audience, challenge.Nonce,
+                challenge.TrustedIssuerDid, challenge.ExpiresAt),
+                statusCode: StatusCodes.Status201Created);
+        }
+        catch (InvalidOperationException exception) when (
+            exception.Message.Contains("challenge limit has been reached", StringComparison.Ordinal))
+        {
+            return Results.Problem(title: "Challenge Capacity Exhausted",
+                detail: "The verifier has reached the retained challenge capacity.",
+                statusCode: StatusCodes.Status429TooManyRequests);
+        }
+        catch (NpgsqlException)
+        {
+            return Unavailable();
+        }
+        catch (TimeoutException)
+        {
+            return Unavailable();
+        }
+        catch (ArgumentException)
+        {
+            // Invalid stored public key, decrypted seed or clock-expired signed
+            // request must never be returned or mistaken for a holder statement.
+            return Unavailable();
+        }
+        catch (CryptographicException)
+        {
+            return Unavailable();
+        }
+        finally
+        {
+            if (privateKey is not null)
+            {
+                CryptographicOperations.ZeroMemory(privateKey);
+            }
+        }
     }
 
     /// <summary>
@@ -174,6 +297,11 @@ internal static class Vcdm20PresentationEndpoints
         string.IsNullOrEmpty(uri.UserInfo) && string.IsNullOrEmpty(uri.Fragment) &&
         string.Equals(uri.AbsoluteUri, audience, StringComparison.Ordinal);
 
+    private static IResult BadSignedRequest() => Results.Problem(
+        title: "Invalid Signed Request",
+        detail: "An owned active Ed25519 verifier did:key, exact HTTPS audience, valid trusted issuer did:key and lifetime of 1–300 seconds are required.",
+        statusCode: StatusCodes.Status400BadRequest);
+
     private static IResult BadChallenge() => Results.Problem(
         title: "Invalid Challenge Request",
         detail: "An exact HTTPS verifier audience, valid Ed25519 did:key issuer and lifetime between 1 and 300 seconds are required.",
@@ -184,6 +312,20 @@ internal static class Vcdm20PresentationEndpoints
         detail: "The presentation could not be verified using durable challenge state.",
         statusCode: StatusCodes.Status503ServiceUnavailable);
 }
+
+/// <summary>A verifier signs only under its own active, tenant-owned did:key.</summary>
+public sealed class IssueVcdm20SignedPresentationRequestRequest
+{
+    public string? VerifierDid { get; init; }
+    public string? Audience { get; init; }
+    public string? TrustedIssuerDid { get; init; }
+    public int LifetimeSeconds { get; init; } = 120;
+}
+
+/// <summary>Holder apps must independently pin the verifier DID and audience and obtain consent.</summary>
+public sealed record IssueVcdm20SignedPresentationRequestResponse(
+    string SignedRequestJwt, string VerifierDid, string Audience, string Nonce,
+    string TrustedIssuerDid, DateTimeOffset ExpiresAt);
 
 /// <summary>Only the verifier chooses and retains trusted issuer and challenge audience.</summary>
 public sealed class IssueVcdm20PresentationChallengeRequest
