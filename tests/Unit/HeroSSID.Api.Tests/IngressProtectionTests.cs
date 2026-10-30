@@ -7,7 +7,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 
 namespace HeroSSID.Api.Tests;
@@ -94,8 +93,8 @@ public sealed class IngressProtectionTests
     [Fact]
     public async Task TrustedProxySeparatesActualClientsAndPreservesForwardedHttps()
     {
-        using var server = NewServer(trustProxy: true);
-        using var client = server.CreateClient();
+        await using var server = await NewServerAsync(trustProxy: true).ConfigureAwait(true);
+        using var client = server.GetTestClient();
 
         var first = await ProbeAsync(client, "192.0.2.15", "198.51.100.10", "https").ConfigureAwait(true);
         var second = await ProbeAsync(client, "192.0.2.15", "198.51.100.10", "https").ConfigureAwait(true);
@@ -114,7 +113,7 @@ public sealed class IngressProtectionTests
     public async Task UntrustedPeerCannotSpoofForwardedAddressOrHttps()
     {
         using var server = NewServer(trustProxy: true);
-        using var client = server.CreateClient();
+        using var client = server.GetTestClient();
 
         var first = await ProbeAsync(client, "203.0.113.40", "198.51.100.10", "https").ConfigureAwait(true);
         var second = await ProbeAsync(client, "203.0.113.40", "198.51.100.11", "https").ConfigureAwait(true);
@@ -129,8 +128,8 @@ public sealed class IngressProtectionTests
     [Fact]
     public async Task DirectPeersUseRealAddressesEvenWithSpoofedHeaders()
     {
-        using var server = NewServer(trustProxy: false);
-        using var client = server.CreateClient();
+        await using var server = await NewServerAsync(trustProxy: false).ConfigureAwait(true);
+        using var client = server.GetTestClient();
 
         var first = await ProbeAsync(client, "203.0.113.40", "198.51.100.10", "https").ConfigureAwait(true);
         var second = await ProbeAsync(client, "203.0.113.40", "198.51.100.11", "https").ConfigureAwait(true);
@@ -148,7 +147,7 @@ public sealed class IngressProtectionTests
     public async Task TwoValidatedClientsRemainIndependentBehindSharedAddress()
     {
         using var server = NewServer(trustProxy: true);
-        using var client = server.CreateClient();
+        using var client = server.GetTestClient();
 
         var first = await ProbeAsync(client, "192.0.2.15", "198.51.100.10", "https", "alice").ConfigureAwait(true);
         var second = await ProbeAsync(client, "192.0.2.15", "198.51.100.10", "https", "alice").ConfigureAwait(true);
@@ -164,8 +163,8 @@ public sealed class IngressProtectionTests
     [Fact]
     public async Task ProcessWideBudgetStillBlocksChangingClientIdentifiers()
     {
-        using var server = NewServer(trustProxy: false, aggregatePermitLimit: 3);
-        using var client = server.CreateClient();
+        await using var server = await NewServerAsync(trustProxy: false, aggregatePermitLimit: 3).ConfigureAwait(true);
+        using var client = server.GetTestClient();
 
         Assert.Equal(HttpStatusCode.OK,
             (await ProbeAsync(client, "203.0.113.40", clientId: "alice").ConfigureAwait(true)).Status);
@@ -177,55 +176,60 @@ public sealed class IngressProtectionTests
             (await ProbeAsync(client, "203.0.113.40", clientId: "charlie").ConfigureAwait(true)).Status);
     }
 
-    private static TestServer NewServer(bool trustProxy, int aggregatePermitLimit = 32)
+    private static async Task<WebApplication> NewServerAsync(
+        bool trustProxy, int aggregatePermitLimit = 32)
     {
         var configuration = Configuration(
             ("Ingress:ForwardedHeaders:Enabled", trustProxy.ToString()),
             ("Ingress:ForwardedHeaders:KnownProxies:0", "192.0.2.15"));
 
-        return new TestServer(new WebHostBuilder()
-            .ConfigureServices(services =>
+        // The supported WebApplication + UseTestServer path avoids deprecated
+        // IWebHostBuilder/TestServer constructors on ASP.NET Core 10.
+        var builder = WebApplication.CreateBuilder(
+            new WebApplicationOptions { EnvironmentName = "Development" });
+        builder.WebHost.UseTestServer();
+        IngressProtection.ConfigureForwarding(builder.Services, configuration);
+        IngressProtection.AddRateLimiting(
+            builder.Services, perSourcePermitLimit: 2,
+            aggregatePermitLimit: aggregatePermitLimit);
+
+        var app = builder.Build();
+
+        // TestServer has no real TCP peer. This test-only middleware simulates
+        // the CONNECTING PEER, not forwarded headers, before proxy processing.
+        app.Use((context, next) =>
+        {
+            context.Connection.RemoteIpAddress =
+                IPAddress.Parse(context.Request.Headers["X-Test-Peer"].ToString());
+            return next(context);
+        });
+
+        if (trustProxy)
+        {
+            app.UseForwardedHeaders();
+        }
+
+        // Test-only validated principal simulation. Production only derives
+        // identities from its validated JWT authentication middleware.
+        app.Use((context, next) =>
+        {
+            string id = context.Request.Headers["X-Test-Client"].ToString();
+            if (id.Length != 0)
             {
-                IngressProtection.ConfigureForwarding(services, configuration);
-                IngressProtection.AddRateLimiting(
-                    services, perSourcePermitLimit: 2, aggregatePermitLimit: aggregatePermitLimit);
-            })
-            .Configure(app =>
-            {
-                // TestServer does not carry a real TCP peer. This test-only
-                // middleware simulates the CONNECTING PEER, not forwarded headers.
-                app.Use((context, next) =>
-                {
-                    context.Connection.RemoteIpAddress =
-                        IPAddress.Parse(context.Request.Headers["X-Test-Peer"].ToString());
-                    return next(context);
-                });
+                context.User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [
+                        new Claim("tenant_id", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+                        new Claim("client_id", id)
+                    ], "validated"));
+            }
 
-                if (trustProxy)
-                {
-                    app.UseForwardedHeaders();
-                }
-
-                // Simulate already-validated bearer claims in an isolated host.
-                // Production obtains these claims from its JWT verification.
-                app.Use((context, next) =>
-                {
-                    string id = context.Request.Headers["X-Test-Client"].ToString();
-                    if (id.Length != 0)
-                    {
-                        context.User = new ClaimsPrincipal(new ClaimsIdentity(
-                            [
-                                new Claim("tenant_id", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
-                                new Claim("client_id", id)
-                            ], "validated"));
-                    }
-
-                    return next(context);
-                });
-                app.UseRateLimiter();
-                app.Run(context => context.Response.WriteAsync(
-                    context.Connection.RemoteIpAddress + "|" + context.Request.Scheme));
-            }));
+            return next(context);
+        });
+        app.UseRateLimiter();
+        app.Run(context => context.Response.WriteAsync(
+            context.Connection.RemoteIpAddress + "|" + context.Request.Scheme));
+        await app.StartAsync().ConfigureAwait(true);
+        return app;
     }
 
     private static async Task<(HttpStatusCode Status, string Body)> ProbeAsync(
@@ -248,9 +252,9 @@ public sealed class IngressProtectionTests
         }
 
         using var response = await client.SendAsync(
-            request, TestContext.Current.CancellationToken).ConfigureAwait(true);
+            request, CancellationToken.None).ConfigureAwait(true);
         return (response.StatusCode,
             await response.Content.ReadAsStringAsync(
-                TestContext.Current.CancellationToken).ConfigureAwait(true));
+                CancellationToken.None).ConfigureAwait(true));
     }
 }
