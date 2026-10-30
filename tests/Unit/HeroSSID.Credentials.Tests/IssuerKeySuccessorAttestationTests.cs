@@ -105,7 +105,7 @@ public sealed class IssuerKeySuccessorAttestationTests
             oldKey.Did, newKey.Did, oldKey.Seed, newKey.Seed,
             Audience, Nonce, TimeProviderForNow());
 
-    private static TimeProvider TimeProviderForNow() => new FixedClock(Now);
+    private static FixedClock TimeProviderForNow() => new FixedClock(Now);
 
     private static (string Did, byte[] Seed) NewKey()
     {
