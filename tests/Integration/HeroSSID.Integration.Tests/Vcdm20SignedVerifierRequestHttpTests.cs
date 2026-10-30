@@ -126,7 +126,11 @@ public sealed class Vcdm20SignedVerifierRequestHttpTests(DatabaseFixture fixture
         Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
 
         string verifyOnly = await GetTokenAsync(client, "credential:verify").ConfigureAwait(true);
-        using var unowned = await PostAsync(client, Route, request, verifyOnly).ConfigureAwait(true);
+        using var insufficient = await PostAsync(client, Route, request, verifyOnly).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, insufficient.StatusCode);
+
+        string signerAuthorized = await GetTokenAsync(client, "did:manage credential:verify").ConfigureAwait(true);
+        using var unowned = await PostAsync(client, Route, request, signerAuthorized).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.NotFound, unowned.StatusCode);
     }
 

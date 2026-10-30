@@ -24,7 +24,7 @@ The response is **201** and includes `audience`, cryptographically random `nonce
 
 **Signing options:** The basic challenge response itself is **not** signed. A verifier with an independent private seed can sign locally using `OfflineSignedPresentationRequest.Create(challenge, verifierDid, verifierPrivateKey, clock)`. Never send a locally held private key to the API.
 
-Alternatively, an authenticated `credential:verify` client can sign and issue the same kind of one-use request under **its own active tenant-owned server DID** (not a holder DID or issuer key):
+Alternatively, a client authenticated with **both** `credential:verify` and `did:manage` scopes can sign and issue the same kind of one-use request under **its own active tenant-owned server DID** (not a holder DID or issuer key):
 
 ```http
 POST /api/v1/credentials/vcdm20/signed-presentation-request

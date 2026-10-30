@@ -27,7 +27,7 @@ internal static class Vcdm20PresentationEndpoints
     internal static void Map(RouteGroupBuilder credentials)
     {
         credentials.MapPost("/vcdm20/signed-presentation-request", IssueSignedAsync)
-            .RequireAuthorization("credential:verify")
+            .RequireAuthorization("credential:verify", "did:manage")
             .WithName("IssueVcdm20SignedPresentationRequest")
             .WithSummary("Issue and sign a one-use verifier challenge with the tenant's active verifier did:key")
             .Produces<IssueVcdm20SignedPresentationRequestResponse>(StatusCodes.Status201Created)
