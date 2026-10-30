@@ -59,6 +59,13 @@ public sealed class JwtVcJsonOpenId4VpHttpIntegrationTests(DatabaseFixture fixtu
         Assert.Equal(2, parameters.Length);
         Assert.Equal(Uri.EscapeDataString("decentralized_identifier:" + verifierDid), parameters[0]);
         Assert.Equal(signed, Uri.UnescapeDataString(parameters[1]));
+        Assert.True(OpenId4VpJwtVcJsonDirectPost.TryReadWalletInvocation(
+            launch, verifierDid, new Uri(ResponseUri), TypeIri, Context,
+            TimeProvider.System, out string recovered));
+        Assert.Equal(signed, recovered);
+        Assert.False(OpenId4VpJwtVcJsonDirectPost.TryReadWalletInvocation(
+            launch + "&request=duplicate", verifierDid, new Uri(ResponseUri),
+            TypeIri, Context, TimeProvider.System, out _));
         Assert.True(OpenId4VpJwtVcJsonDirectPost.TryReadSignedRequest(
             signed, verifierDid, new Uri(ResponseUri), TypeIri, Context, TimeProvider.System,
             out var parsed));
