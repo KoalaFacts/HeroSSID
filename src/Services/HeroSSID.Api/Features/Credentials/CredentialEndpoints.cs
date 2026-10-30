@@ -55,6 +55,7 @@ public static class CredentialEndpoints
 
         JwtVcJsonCredentialIssuanceEndpoint.Map(credentials);
         JwtVcJsonCredentialVerificationEndpoint.Map(credentials);
+        JwtVcJsonPresentationEndpoints.Map(credentials);
         Vcdm20CredentialIssuanceEndpoint.Map(credentials);
         Vcdm20CredentialVerificationEndpoint.Map(credentials);
         Vcdm20PresentationEndpoints.Map(credentials);
