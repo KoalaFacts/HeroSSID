@@ -19,6 +19,9 @@ public sealed class JwtVcJsonCredentialIssuanceHttpTests(AspireWebApplicationFac
     private const string CredentialType = "https://issuer.example/credentials#MembershipCredential";
     private static readonly Uri Vocabulary = new("https://issuer.example/contexts/membership/v1");
     private const string Endpoint = "/api/v1/credentials/jwt-vc-json/issue";
+    private const string StatusEndpoint = "/api/v1/credentials/jwt-vc-json/sign-revocation-snapshot";
+    private static readonly string[] SeparateRequiredScopes = ["credential:revoke", "did:manage"];
+    private static readonly string[] ForgedStatusTokens = ["not-a-valid-issued-jwt"];
 
     [Fact]
     public async Task AuthenticatedIssuerSignsVc11JwtForUnenrolledHolder()
@@ -101,6 +104,112 @@ public sealed class JwtVcJsonCredentialIssuanceHttpTests(AspireWebApplicationFac
             validUntil = DateTimeOffset.UtcNow.AddMinutes(5)
         }, token).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
+    }
+
+
+    [Fact]
+    public async Task OwnedIssuerCanExportSignedVc11RevocationStatusForExternalVerifier()
+    {
+        string token = await GetTokenAsync("did:manage credential:issue credential:revoke").ConfigureAwait(true);
+        string issuerDid = await CreateDidAsync(token).ConfigureAwait(true);
+        using var holder = Key.Create(SignatureAlgorithm.Ed25519);
+        string holderDid = DidFromKey(holder.PublicKey.Export(KeyBlobFormat.RawPublicKey));
+
+        using var issuance = await PostAsync(Endpoint,
+            Request(issuerDid, holderDid, holderDid, DateTimeOffset.UtcNow.AddMinutes(5)), token)
+            .ConfigureAwait(true);
+        string credential = await SetupResponse.ReadRequiredStringAsync(
+            issuance, HttpStatusCode.Created, "Issue VC1.1 before status export", "credential")
+            .ConfigureAwait(true);
+
+        using var export = await PostAsync(StatusEndpoint, new
+        {
+            issuerDid,
+            observedAt = DateTimeOffset.UtcNow,
+            revokedCredentials = new[] { credential }
+        }, token).ConfigureAwait(true);
+        string snapshot = await SetupResponse.ReadRequiredStringAsync(
+            export, HttpStatusCode.Created, "Export issuer-signed VC1.1 revocation status",
+            "snapshotJwt").ConfigureAwait(true);
+
+        Assert.Equal("Revoked", JwtVcJsonRevocationSnapshot.Check(snapshot, credential,
+            issuerDid, DateTimeOffset.UtcNow).ToString());
+        Assert.Equal("Invalid", JwtVcJsonRevocationSnapshot.Check(snapshot, credential,
+            issuerDid, DateTimeOffset.UtcNow.AddMinutes(2)).ToString());
+
+        using var empty = await PostAsync(StatusEndpoint, new
+        {
+            issuerDid,
+            observedAt = DateTimeOffset.UtcNow,
+            revokedCredentials = Array.Empty<string>()
+        }, token).ConfigureAwait(true);
+        string notListed = await SetupResponse.ReadRequiredStringAsync(
+            empty, HttpStatusCode.Created, "Sign caller-supplied empty VC1.1 status set",
+            "snapshotJwt").ConfigureAwait(true);
+        Assert.Equal("NotListed", JwtVcJsonRevocationSnapshot.Check(notListed, credential,
+            issuerDid, DateTimeOffset.UtcNow).ToString());
+    }
+
+    [Fact]
+    public async Task StatusExportRequiresIndependentRevocationAndDidManagementScopes()
+    {
+        string fullToken = await GetTokenAsync("did:manage credential:revoke").ConfigureAwait(true);
+        string issuerDid = await CreateDidAsync(fullToken).ConfigureAwait(true);
+        var request = new
+        {
+            issuerDid,
+            observedAt = DateTimeOffset.UtcNow,
+            revokedCredentials = Array.Empty<string>()
+        };
+
+        using var anonymous = await _client.PostAsJsonAsync(StatusEndpoint, request)
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+
+        foreach (string scope in SeparateRequiredScopes)
+        {
+            string partialToken = await GetTokenAsync(scope).ConfigureAwait(true);
+            using var forbidden = await PostAsync(StatusEndpoint, request, partialToken)
+                .ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+        }
+
+        using var allowed = await PostAsync(StatusEndpoint, request, fullToken)
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Created, allowed.StatusCode);
+    }
+
+    [Fact]
+    public async Task StatusExportRejectsInvalidForeignAndStaleObservationWithoutSigning()
+    {
+        string token = await GetTokenAsync("did:manage credential:revoke").ConfigureAwait(true);
+        string issuerDid = await CreateDidAsync(token).ConfigureAwait(true);
+        using var foreignKey = Key.Create(SignatureAlgorithm.Ed25519);
+        string foreignDid = DidFromKey(foreignKey.PublicKey.Export(KeyBlobFormat.RawPublicKey));
+
+        using var foreign = await PostAsync(StatusEndpoint, new
+        {
+            issuerDid = foreignDid,
+            observedAt = DateTimeOffset.UtcNow,
+            revokedCredentials = Array.Empty<string>()
+        }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+
+        using var forged = await PostAsync(StatusEndpoint, new
+        {
+            issuerDid,
+            observedAt = DateTimeOffset.UtcNow,
+            revokedCredentials = ForgedStatusTokens
+        }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, forged.StatusCode);
+
+        using var stale = await PostAsync(StatusEndpoint, new
+        {
+            issuerDid,
+            observedAt = DateTimeOffset.UtcNow.AddMinutes(-2),
+            revokedCredentials = Array.Empty<string>()
+        }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, stale.StatusCode);
     }
 
     private static object Request(string issuer, string holder, string subject,
