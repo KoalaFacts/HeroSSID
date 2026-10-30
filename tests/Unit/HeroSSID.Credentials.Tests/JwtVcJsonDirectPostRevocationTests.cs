@@ -48,8 +48,8 @@ public sealed class JwtVcJsonDirectPostRevocationTests
         string snapshot = Snapshot([anotherCredential]);
 
         Assert.Equal(RevocationSnapshotCheckResult.Revoked,
-            IssuerRevocationSnapshot.Check(snapshot, anotherCredential,
-                _issuer.Did, _issuer.PublicKey, _clock.GetUtcNow()));
+            JwtVcJsonRevocationSnapshot.Check(snapshot, anotherCredential,
+                _issuer.Did, _clock.GetUtcNow()));
         Assert.Equal(RevocationSnapshotCheckResult.NotListed,
             Check(Form(challenge, presented), snapshot, tenant, challenge.Nonce, store, out var claims));
         Assert.Equal(_holder.Did, claims.GetProperty("id").GetString());
@@ -63,8 +63,8 @@ public sealed class JwtVcJsonDirectPostRevocationTests
         var store = new InMemoryPresentationChallengeStore(_clock);
         var challenge = store.Issue(tenant, Audience, _issuer.Did);
         string credential = Issue("active");
-        string foreignStatus = IssuerRevocationSnapshot.Create(
-            _foreign.Did, [], _foreign.Seed, _foreign.PublicKey, _clock.GetUtcNow());
+        string foreignStatus = JwtVcJsonRevocationSnapshot.Create(
+            _foreign.Did, [], _foreign.Seed, _clock.GetUtcNow(), _clock);
 
         Assert.Equal(RevocationSnapshotCheckResult.Invalid,
             Check(Form(challenge, credential), foreignStatus, tenant, challenge.Nonce, store, out var claims));
@@ -118,8 +118,8 @@ public sealed class JwtVcJsonDirectPostRevocationTests
             nonce, CredentialType, Context, store, _clock, out claims);
 
     private string Snapshot(IReadOnlyCollection<string> revoked) =>
-        IssuerRevocationSnapshot.Create(_issuer.Did, revoked, _issuer.Seed,
-            _issuer.PublicKey, _clock.GetUtcNow());
+        JwtVcJsonRevocationSnapshot.Create(_issuer.Did, revoked, _issuer.Seed,
+            _clock.GetUtcNow(), _clock);
 
     private string Form(PresentationChallenge challenge, string credential)
     {
