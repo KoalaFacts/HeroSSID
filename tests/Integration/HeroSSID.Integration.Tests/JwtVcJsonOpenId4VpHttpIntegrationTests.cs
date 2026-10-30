@@ -303,10 +303,13 @@ public sealed class JwtVcJsonOpenId4VpHttpIntegrationTests(DatabaseFixture fixtu
         using var anonymous = await client.PostAsJsonAsync(CancelRoute, cancellation,
             TestContext.Current.CancellationToken).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
-        string wrongScope = await GetTokenAsync(client, "did:manage").ConfigureAwait(true);
-        using var forbidden = await PostAsync(client, CancelRoute, cancellation, wrongScope)
-            .ConfigureAwait(true);
-        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+        foreach (string scope in new[] { "credential:verify", "did:manage" })
+        {
+            string wrongScope = await GetTokenAsync(client, scope).ConfigureAwait(true);
+            using var forbidden = await PostAsync(client, CancelRoute, cancellation, wrongScope)
+                .ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+        }
 
         using var malformed = await PostAsync(client, CancelRoute,
             new { verifierDid, nonce = "bad" }, token).ConfigureAwait(true);
