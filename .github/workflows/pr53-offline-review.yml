@@ -1,8 +1,6 @@
 name: One-off independent offline PR53 review
 on:
-  push:
-    branches:
-      - review/pr53-fractional-jwtvc-20261030
+  workflow_dispatch:
 
 permissions: {}
 
