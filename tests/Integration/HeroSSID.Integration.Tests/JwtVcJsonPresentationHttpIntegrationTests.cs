@@ -102,10 +102,13 @@ public sealed class JwtVcJsonPresentationHttpIntegrationTests(DatabaseFixture fi
             VerifyPath, Request(proof.Presentation, foreignStatus, proof.Nonce), TestContext.Current.CancellationToken).ConfigureAwait(true);
         Assert.Equal("Invalid", (await ReadJsonAsync(foreignResponse).ConfigureAwait(true))
             .GetProperty("status").GetString());
-        using var genuine = await client.AuthorizedPostAsJsonAsync(VerifyPath, proof.ValidRequest, TestContext.Current.CancellationToken)
+        // The authentic holder proof spent the nonce before rejecting the
+        // foreign issuer's status, so even a later correct snapshot cannot replay.
+        using var replay = await client.AuthorizedPostAsJsonAsync(VerifyPath, proof.ValidRequest, TestContext.Current.CancellationToken)
             .ConfigureAwait(true);
-        Assert.Equal("SignedNotListed", (await ReadJsonAsync(genuine).ConfigureAwait(true))
-            .GetProperty("status").GetString());
+        var replayOutcome = await ReadJsonAsync(replay).ConfigureAwait(true);
+        Assert.Equal("Invalid", replayOutcome.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, replayOutcome.GetProperty("verifiedSubject").ValueKind);
     }
 
     [Fact]
