@@ -20,6 +20,7 @@ public sealed class JwtVcJsonCredentialIssuanceHttpTests(AspireWebApplicationFac
     private static readonly Uri Vocabulary = new("https://issuer.example/contexts/membership/v1");
     private const string Endpoint = "/api/v1/credentials/jwt-vc-json/issue";
     private const string StatusEndpoint = "/api/v1/credentials/jwt-vc-json/sign-revocation-snapshot";
+    private static readonly string[] SeparateRequiredScopes = ["credential:revoke", "did:manage"];
 
     [Fact]
     public async Task AuthenticatedIssuerSignsVc11JwtForUnenrolledHolder()
@@ -164,7 +165,7 @@ public sealed class JwtVcJsonCredentialIssuanceHttpTests(AspireWebApplicationFac
             .ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
 
-        foreach (string scope in new[] { "credential:revoke", "did:manage" })
+        foreach (string scope in SeparateRequiredScopes)
         {
             string partialToken = await GetTokenAsync(scope).ConfigureAwait(true);
             using var forbidden = await PostAsync(StatusEndpoint, request, partialToken)
