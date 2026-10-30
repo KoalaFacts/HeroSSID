@@ -2,7 +2,7 @@ name: One-off independent offline PR55 review
 on:
   push:
     branches:
-      - review/pr55-jwtvc-presentation-20261030
+      - review/pr55-jwtvc-oid4vp-20261030
 
 permissions: {}
 
