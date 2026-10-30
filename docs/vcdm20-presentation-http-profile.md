@@ -22,13 +22,34 @@ Content-Type: application/json
 
 The response is **201** and includes `audience`, cryptographically random `nonce`, `trustedIssuerDid` and `expiresAt`. The challenge is owned by the authenticated tenant; the audience must be an exact HTTPS URL, issuer a valid Ed25519 `did:key`, lifetime 1–300 seconds. Only the verifier chooses which issuer it trusts; an issuer DID merely supplied by the holder cannot establish issuer trust. Malformed input is **400**; exceeded retained challenge capacity is **429**; a database availability failure is **503**.
 
-**Signing requirement:** The challenge response itself is not a signed verifier request. A verifier with a distinct self-held Ed25519 signing seed and an independently known verifier DID uses `OfflineSignedPresentationRequest.Create(challenge, verifierDid, verifierPrivateKey, clock)` to sign the exact challenge. Never send the seed to the HeroSSID HTTP API. The holder must already pin that verifier DID and exact audience by its own trusted channel; DID information inside the request is not sufficient.
+**Signing options:** The basic challenge response itself is **not** signed. A verifier with an independent private seed can sign locally using `OfflineSignedPresentationRequest.Create(challenge, verifierDid, verifierPrivateKey, clock)`. Never send a locally held private key to the API.
+
+Alternatively, an authenticated `credential:verify` client can sign and issue the same kind of one-use request under **its own active tenant-owned server DID** (not a holder DID or issuer key):
+
+```http
+POST /api/v1/credentials/vcdm20/signed-presentation-request
+Authorization: Bearer <verifier-access-token>
+Content-Type: application/json
+```
+
+```json
+{
+  "verifierDid": "did:key:<tenant-owned-active-verifier>",
+  "audience": "https://verifier.example/present",
+  "trustedIssuerDid": "did:key:<independently-chosen-issuer>",
+  "lifetimeSeconds": 120
+}
+```
+
+The **201** response contains `signedRequestJwt`, `verifierDid`, `audience`, `nonce`, `trustedIssuerDid` and `expiresAt`. The server verifies the verifier DID is active and **belongs to the authenticated tenant**, decrypts only that tenant's existing verifier seed, signs the durable one-use challenge with the genuine Ed25519 key, then zeroes the decrypted bytes. An unowned or inactive verifier DID returns **404**, anonymous **401**, wrong scope **403**, malformed policy **400**, retained challenge capacity exhaustion **429**, and key or challenge-store unavailability **503**. No new schema is required.
+
+This optional server-managed **verifier** signing is not holder key custody, holder consent, identity proofing or a hosted OpenID4VP Request Object. The holder must independently pin that verifier DID **and** audience through a trusted channel before accepting the signed JWT; a DID embedded in the request is not a trusted pin.
 
 ## 2. Holder independently authenticates the request and chooses disclosure
 
 The holder app uses `OfflineSignedPresentationRequest.TryRead(requestJwt, pinnedVerifierDid, exactAudience, clock, out challenge)` to authenticate the real verifier signature and request expiry. It must display **all claims** and the destination, obtain affirmative full-disclosure consent and allow refusal before signing. After consent, `Vcdm20JosePresentation.Create(requestJwt, pinnedVerifierDid, exactAudience, issuerSignedCredential, expectedCredentialType, expectedHttpsContext, holderDid, holderOwnedSeed, clock)` creates a real holder-signed `vp+jwt` envelope preserving the original issuer-signed VC2 JWT. The issuer and holder keys remain independent.
 
-The issuer separately signs a **complete** status snapshot using `Vcdm20RevocationSnapshot.Create`, based on its authoritative revocation data, with observation time recorded before any potentially slow status read. The present `/vcdm20/issue` HTTP endpoint **does not persist or revoke** short-lived VC2 credentials. HeroSSID does not publish VC2 snapshots automatically. No wallet UI, consent record, issuer status registry or hosted verifier signing endpoint is supplied here.
+The issuer separately signs a **complete** status snapshot using `Vcdm20RevocationSnapshot.Create`, based on its authoritative revocation data, with observation time recorded before any potentially slow status read. The present `/vcdm20/issue` HTTP endpoint **does not persist or revoke** short-lived VC2 credentials. HeroSSID does not publish VC2 snapshots automatically. No wallet UI, consent record or issuer status registry is supplied here. The optional server-managed verifier signer is limited to the tenant's own existing DID; holder private keys remain external.
 
 ## 3. Verifier submits the proof and issuer snapshot
 
