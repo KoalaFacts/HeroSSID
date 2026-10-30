@@ -31,7 +31,7 @@ A successful response is **201 Created**:
 }
 ```
 
-The JWT has a real Ed25519 issuer signature and `vc.@context` / `vc.type` / `vc.credentialSubject` nested under `vc`; its issuer, subject, type, context and validity are verified by `JwtVcJsonCredential.TryVerify`. Start time is rounded **up** to a whole JWT NumericDate second; expiry is rounded **down**, never extending validity beyond the requested interval. Incorrect key material, untrusted issuer policy, tampering, missing holder subject, invalid HTTPS type/context and invalid lifetime are rejected.
+The JWT has a real Ed25519 issuer signature and `vc.@context` / `vc.type` / `vc.credentialSubject` nested under `vc`; its issuer, subject, type, context and validity are verified by `JwtVcJsonCredential.TryVerify`. Because this HTTP API has no caller-supplied start time, the server uses the **current whole UTC second** as the JWT start (at most one second before actual signing) so freshly returned tokens can be verified immediately. The lower-level SDK still rounds any explicitly requested fractional start **up**. Expiry is rounded **down**, never extending validity beyond the requested interval. Incorrect key material, untrusted issuer policy, tampering, missing holder subject, invalid HTTPS type/context and invalid lifetime are rejected.
 
 ## HTTP security and persistence boundaries
 
