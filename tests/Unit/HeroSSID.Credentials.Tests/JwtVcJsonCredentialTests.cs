@@ -39,6 +39,69 @@ public sealed class JwtVcJsonCredentialTests
     }
 
     [Fact]
+    public void OrdinaryUtcNowFractionalSecondsCanBeIssuedAndIndependentlyVerified()
+    {
+        // Reproduces the documented SDK example without artificial whole-second timestamps.
+        var current = DateTimeOffset.UtcNow;
+        using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
+            new { id = _holder.Did, membership = "active" }));
+        string jwt = JwtVcJsonCredential.Create(_issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, subject.RootElement, _issuer.Seed,
+            current.AddSeconds(-1).AddTicks(1), current.AddMinutes(10));
+
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, current, out var verified));
+        Assert.Equal("active", verified.GetProperty("membership").GetString());
+    }
+
+    [Fact]
+    public void FractionalBoundsRoundInwardsAndNeverExpandTheRequestedWindow()
+    {
+        using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
+            new { id = _holder.Did, membership = "active" }));
+        DateTimeOffset requestedStart = Now.AddMilliseconds(125);
+        DateTimeOffset requestedEnd = Now.AddSeconds(600).AddMilliseconds(875);
+        string jwt = JwtVcJsonCredential.Create(_issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, subject.RootElement, _issuer.Seed,
+            requestedStart, requestedEnd);
+
+        using var payloadDocument = JsonDocument.Parse(Ed25519JwtSigner.ExtractPayload(jwt));
+        JsonElement payload = payloadDocument.RootElement;
+        long notBefore = payload.GetProperty("nbf").GetInt64();
+        long expires = payload.GetProperty("exp").GetInt64();
+        Assert.Equal(Now.ToUnixTimeSeconds() + 1, notBefore);
+        Assert.Equal(Now.ToUnixTimeSeconds() + 600, expires);
+        Assert.Equal(notBefore, payload.GetProperty("iat").GetInt64());
+        Assert.True(DateTimeOffset.FromUnixTimeSeconds(notBefore) >= requestedStart);
+        Assert.True(DateTimeOffset.FromUnixTimeSeconds(expires) <= requestedEnd);
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now.AddMilliseconds(999), out _));
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now.AddSeconds(1), out _));
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now.AddSeconds(599), out _));
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now.AddSeconds(600), out _));
+    }
+
+    [Fact]
+    public void FractionalWindowMustRemainNonemptyShortAndSignedByThePinnedIssuer()
+    {
+        using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
+            new { id = _holder.Did, membership = "active" }));
+        DateTimeOffset start = Now.AddMilliseconds(125);
+        Assert.Throws<ArgumentException>(() => JwtVcJsonCredential.Create(
+            _issuer.Did, _holder.Did, CredentialType, Vocabulary,
+            subject.RootElement, _issuer.Seed, start, start.AddMilliseconds(500)));
+        Assert.Throws<ArgumentException>(() => JwtVcJsonCredential.Create(
+            _issuer.Did, _holder.Did, CredentialType, Vocabulary,
+            subject.RootElement, _issuer.Seed, start, start.AddSeconds(902)));
+        Assert.Throws<ArgumentException>(() => JwtVcJsonCredential.Create(
+            _issuer.Did, _holder.Did, CredentialType, Vocabulary,
+            subject.RootElement, _other.Seed, start, start.AddMinutes(10)));
+    }
+
+    [Fact]
     public void WrongIssuerHolderVocabularyOrTypeNeverReleasesClaims()
     {
         string jwt = Issue();

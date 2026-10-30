@@ -35,7 +35,15 @@ public static class JwtVcJsonCredential
         ArgumentNullException.ThrowIfNull(subjectContextUri);
         ArgumentNullException.ThrowIfNull(issuerPrivateKey);
 
+        // JWT NumericDate uses whole seconds. Round the start UP and the end DOWN:
+        // the signed credential must never become valid before the requested start
+        // or remain valid after the requested end. Reject windows that disappear.
         long issued = validFrom.ToUnixTimeSeconds();
+        if (validFrom.UtcTicks % TimeSpan.TicksPerSecond != 0)
+        {
+            issued++;
+        }
+
         long expires = validUntil.ToUnixTimeSeconds();
         if (!OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(issuerDid, out _) ||
             !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(holderDid, out _) ||
@@ -43,8 +51,6 @@ public static class JwtVcJsonCredential
             !ValidContext(subjectContextUri) ||
             issuerPrivateKey.Length != 32 ||
             issuerPrivateKey.All(static b => b == 0) ||
-            validFrom.UtcTicks % TimeSpan.TicksPerSecond != 0 ||
-            validUntil.UtcTicks % TimeSpan.TicksPerSecond != 0 ||
             issued < 0 || expires <= issued ||
             expires - issued > MaximumValiditySeconds ||
             credentialSubject.ValueKind != JsonValueKind.Object ||
@@ -81,7 +87,7 @@ public static class JwtVcJsonCredential
         // must never escape this API as a purported credential.
         if (signed.Length > MaximumJwtLength ||
             !TryVerify(signed, issuerDid, holderDid, credentialType,
-                subjectContextUri, validFrom, out _))
+                subjectContextUri, DateTimeOffset.FromUnixTimeSeconds(issued), out _))
         {
             throw new ArgumentException("The seed does not control the issuer DID or the VC is ambiguous/oversized.",
                 nameof(issuerPrivateKey));
