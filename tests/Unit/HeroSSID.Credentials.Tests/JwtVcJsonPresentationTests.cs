@@ -132,7 +132,7 @@ public sealed class JwtVcJsonPresentationTests
                 Type, new Uri("https://untrusted.example/v1"), store, _clock, out _));
         var parts = presentation.Split('.');
         parts[1] = Base64UrlEncoder.Encode(Ed25519JwtSigner.ExtractPayload(presentation)
-            .Replace("MembershipCredential", "AdminCredential", StringComparison.Ordinal));
+            .Replace(_holder.Did, _other.Did, StringComparison.Ordinal));
         Assert.Equal(JwtVcJsonPresentationCheckResult.Invalid,
             JwtVcJsonPresentation.Check(string.Join('.', parts), tenant, Audience, challenge.Nonce,
                 Type, Vocabulary, store, _clock, out _));
