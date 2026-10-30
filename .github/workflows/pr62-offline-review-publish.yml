@@ -1,0 +1,82 @@
+name: Submit already completed independent PR62 model review to GitHub
+on:
+  push:
+    branches:
+      - review/pr62-publish-20261031
+
+permissions: {}
+
+jobs:
+  publish:
+    name: Verify saved model artifact and submit exact-head COMMENTED review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Retrieve original completed five-file model review without rerunning inference
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh run download 41131707800 --repo KoalaFacts/HeroSSID --name independent-pr62-review --dir .
+          test -s review-1.md
+          test -s review-1.json
+          test -s review-model-1.json
+          test -s review-head-1.txt
+      - name: Verify real source head and complete exact-file evidence
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/62 --jq '.head.sha')"
+          test "$actual" = "746ea07e616d70dbc19002faf11fdb5be66c779c"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          head = "746ea07e616d70dbc19002faf11fdb5be66c779c"
+          expected = {
+            "README.md",
+            "docs/issuer-key-successor-http-profile.md",
+            "src/Libraries/HeroSSID.Credentials/Vcdm20/IssuerSuccessorVerifierRequest.cs",
+            "src/Services/HeroSSID.Api/Features/Credentials/IssuerSuccessorEndpoints.cs",
+            "tests/Integration/HeroSSID.Integration.Tests/IssuerSuccessorHttpIntegrationTests.cs",
+          }
+          model = json.loads(Path("review-model-1.json").read_text())
+          result = json.loads(Path("review-1.json").read_text())
+          assert result["head"] == head and result["part"] == 1
+          assert set(result["files"]) == expected and len(result["files"]) == len(expected)
+          assert result["review"]["verdict"] == model["verdict"]
+          assert model["verdict"] in ("no_actionable_findings", "actionable_findings", "inconclusive")
+          assert isinstance(model["findings"], list)
+          assert len(Path("review-1.md").read_text()) > 200
+          assert Path("review-head-1.txt").read_text().strip() == head
+          print("Validated original independent review:", model["verdict"],
+                "findings", len(model["findings"]))
+          PY
+      - name: Submit original independent COMMENTED review with honest verdict
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo 'Independent Qwen2.5-Coder 7B review of the complete five-file PR #62 signed issuer-successor request diff.'
+            echo
+            echo 'Reviewed exact source head: 746ea07e616d70dbc19002faf11fdb5be66c779c.'
+            echo 'Source baseline: b299f3164d1e861048e45774ee9ad3a0577937cb.'
+            echo 'Original completed model run: https://github.com/KoalaFacts/HeroSSID/actions/runs/41131707800'
+            echo 'This is an independently executed MODEL review, not human approval or external cryptographic certification.'
+            echo 'All findings require source/test verification before integration.'
+            echo
+            cat review-1.md
+          } >/tmp/pr62-submitted-review.md
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/62/reviews \
+            -f event=COMMENT \
+            -f commit_id=746ea07e616d70dbc19002faf11fdb5be66c779c \
+            -f body="$(cat /tmp/pr62-submitted-review.md)" \
+            --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
