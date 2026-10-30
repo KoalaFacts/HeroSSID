@@ -45,7 +45,7 @@ public sealed class Vcdm20SignedVerifierRequestHttpTests(DatabaseFixture fixture
             verifierDid, audience = Audience, trustedIssuerDid = issuerDid, lifetimeSeconds = 120
         }, token).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.Created, issued.StatusCode);
-        using var body = JsonDocument.Parse(await issued.Content.ReadAsStringAsync().ConfigureAwait(true));
+        using var body = JsonDocument.Parse(await issued.Content.ReadAsStringAsync(TestContext.Current.CancellationToken).ConfigureAwait(true));
         string requestJwt = body.RootElement.GetProperty("signedRequestJwt").GetString()!;
         Assert.Equal(verifierDid, body.RootElement.GetProperty("verifierDid").GetString());
         Assert.Equal(Audience, body.RootElement.GetProperty("audience").GetString());
@@ -95,7 +95,7 @@ public sealed class Vcdm20SignedVerifierRequestHttpTests(DatabaseFixture fixture
         using var verified = await PostAsync(client,
             "/api/v1/credentials/vcdm20/verify-presentation", proof, token).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.OK, verified.StatusCode);
-        using var verifiedJson = JsonDocument.Parse(await verified.Content.ReadAsStringAsync().ConfigureAwait(true));
+        using var verifiedJson = JsonDocument.Parse(await verified.Content.ReadAsStringAsync(TestContext.Current.CancellationToken).ConfigureAwait(true));
         Assert.Equal("SignedNotListed", verifiedJson.RootElement.GetProperty("status").GetString());
         Assert.Equal("member", verifiedJson.RootElement.GetProperty("verifiedSubject")
             .GetProperty("role").GetString());
@@ -103,7 +103,7 @@ public sealed class Vcdm20SignedVerifierRequestHttpTests(DatabaseFixture fixture
         using var replay = await PostAsync(client,
             "/api/v1/credentials/vcdm20/verify-presentation", proof, token).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
-        using var replayJson = JsonDocument.Parse(await replay.Content.ReadAsStringAsync().ConfigureAwait(true));
+        using var replayJson = JsonDocument.Parse(await replay.Content.ReadAsStringAsync(TestContext.Current.CancellationToken).ConfigureAwait(true));
         Assert.Equal("Invalid", replayJson.RootElement.GetProperty("status").GetString());
         Assert.Equal(JsonValueKind.Null, replayJson.RootElement.GetProperty("verifiedSubject").ValueKind);
     }
@@ -118,7 +118,7 @@ public sealed class Vcdm20SignedVerifierRequestHttpTests(DatabaseFixture fixture
         string outsideDid = DidFromKey(outsideKey);
         var request = new { verifierDid = outsideDid, audience = Audience,
             trustedIssuerDid = outsideDid, lifetimeSeconds = 120 };
-        using var anonymous = await client.PostAsJsonAsync(Route, request).ConfigureAwait(true);
+        using var anonymous = await client.PostAsJsonAsync(Route, request, TestContext.Current.CancellationToken).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
 
         string issueOnly = await GetTokenAsync(client, "credential:issue").ConfigureAwait(true);
@@ -206,7 +206,7 @@ public sealed class Vcdm20SignedVerifierRequestHttpTests(DatabaseFixture fixture
     private static async Task<string> ReadStringAsync(
         HttpResponseMessage response, HttpStatusCode status, string name)
     {
-        string json = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+        string json = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
         Assert.True(response.StatusCode == status,
             $"Expected {status} but received {response.StatusCode}: {json}");
         using var document = JsonDocument.Parse(json);
