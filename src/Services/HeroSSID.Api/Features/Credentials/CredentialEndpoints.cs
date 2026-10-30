@@ -53,6 +53,7 @@ public static class CredentialEndpoints
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
+        JwtVcJsonCredentialIssuanceEndpoint.Map(credentials);
         Vcdm20CredentialIssuanceEndpoint.Map(credentials);
         Vcdm20CredentialVerificationEndpoint.Map(credentials);
         Vcdm20PresentationEndpoints.Map(credentials);
