@@ -21,6 +21,7 @@ public sealed class JwtVcJsonCredentialIssuanceHttpTests(AspireWebApplicationFac
     private const string Endpoint = "/api/v1/credentials/jwt-vc-json/issue";
     private const string StatusEndpoint = "/api/v1/credentials/jwt-vc-json/sign-revocation-snapshot";
     private static readonly string[] SeparateRequiredScopes = ["credential:revoke", "did:manage"];
+    private static readonly string[] ForgedStatusTokens = ["not-a-valid-issued-jwt"];
 
     [Fact]
     public async Task AuthenticatedIssuerSignsVc11JwtForUnenrolledHolder()
@@ -198,7 +199,7 @@ public sealed class JwtVcJsonCredentialIssuanceHttpTests(AspireWebApplicationFac
         {
             issuerDid,
             observedAt = DateTimeOffset.UtcNow,
-            revokedCredentials = new[] { "not-a-valid-issued-jwt" }
+            revokedCredentials = ForgedStatusTokens
         }, token).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.BadRequest, forged.StatusCode);
 
