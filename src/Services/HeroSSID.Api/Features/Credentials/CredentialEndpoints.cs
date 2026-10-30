@@ -54,6 +54,7 @@ public static class CredentialEndpoints
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         JwtVcJsonCredentialIssuanceEndpoint.Map(credentials);
+        JwtVcJsonCredentialVerificationEndpoint.Map(credentials);
         Vcdm20CredentialIssuanceEndpoint.Map(credentials);
         Vcdm20CredentialVerificationEndpoint.Map(credentials);
         Vcdm20PresentationEndpoints.Map(credentials);
