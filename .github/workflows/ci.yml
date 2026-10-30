@@ -166,14 +166,11 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore
 
-      - name: Run dependency vulnerability scan
-        shell: bash
-        run: |
-          dotnet list package --vulnerable --include-transitive 2>&1 | tee vulnerability-report.txt
-          if grep -q "has the following vulnerable packages" vulnerability-report.txt; then
-            echo "::warning::Vulnerable packages detected. Review the report."
-            cat vulnerability-report.txt
-          fi
+      - name: Test dependency vulnerability gate with deterministic fixtures
+        run: PYTHONPATH=tools/ci python3 -m unittest discover -s tests/ci -p 'test_*.py'
+
+      - name: Run dependency vulnerability scan (fail closed)
+        run: python3 tools/ci/check_nuget_vulnerabilities.py vulnerability-report.json
 
       - name: Run security analysis
         shell: bash
@@ -187,7 +184,7 @@ jobs:
         with:
           name: security-scan-results
           path: |
-            vulnerability-report.txt
+            vulnerability-report.json
             **/obj/security-scan.sarif
             security-scan.log
           retention-days: 30
