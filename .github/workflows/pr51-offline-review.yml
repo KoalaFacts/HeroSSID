@@ -2,7 +2,7 @@ name: One-off independent offline PR51 review
 on:
   push:
     branches:
-      - review/pr51-nuget-20261030
+      - review/pr51-jwt-vc-json-20261030
 
 permissions: {}
 
