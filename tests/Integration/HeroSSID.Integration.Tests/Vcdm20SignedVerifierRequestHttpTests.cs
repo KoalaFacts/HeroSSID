@@ -135,6 +135,45 @@ public sealed class Vcdm20SignedVerifierRequestHttpTests(DatabaseFixture fixture
     }
 
     [Fact]
+    public async Task RegisteredForeignTenantAndDeactivatedVerifierKeysCannotSign()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        await using var host = NewHost();
+        using var client = host.CreateClient();
+        string token = await GetTokenAsync(client, "did:manage credential:verify").ConfigureAwait(true);
+        string foreignDid = await CreateDidAsync(client, token).ConfigureAwait(true);
+        string deactivatedDid = await CreateDidAsync(client, token).ConfigureAwait(true);
+        using var issuerKey = NewKey();
+        string issuerDid = DidFromKey(issuerKey);
+
+        // Use genuinely enrolled, correctly encrypted keys rather than an
+        // unregistered DID: the endpoint must reject a different tenant's
+        // existing signer and this tenant's deactivated signer before decryption.
+        await using (var db = _fixture.CreateDbContext<HeroDbContext>())
+        {
+            var foreign = await db.Dids.SingleAsync(
+                did => did.DidIdentifier == foreignDid,
+                TestContext.Current.CancellationToken).ConfigureAwait(true);
+            var inactive = await db.Dids.SingleAsync(
+                did => did.DidIdentifier == deactivatedDid,
+                TestContext.Current.CancellationToken).ConfigureAwait(true);
+            foreign.TenantId = Guid.NewGuid();
+            inactive.Status = "deactivated";
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
+        }
+
+        foreach (string verifierDid in new[] { foreignDid, deactivatedDid })
+        {
+            using var response = await PostAsync(client, Route, new
+            {
+                verifierDid, audience = Audience, trustedIssuerDid = issuerDid,
+                lifetimeSeconds = 120
+            }, token).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+    }
+
+    [Fact]
     public async Task InvalidHttpsAudienceIssuerAndChallengeLifetimeAreRejected()
     {
         await EnsureMigratedAsync().ConfigureAwait(true);
