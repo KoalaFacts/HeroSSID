@@ -1,0 +1,123 @@
+name: Independent exact-head PR64 OpenID4VP VC1.1 challenge cancellation review
+
+on:
+  push:
+    branches:
+      - review/pr64-openid4vp-cancel-20261031
+
+permissions: {}
+
+jobs:
+  review:
+    name: Independent model security review of complete PR64 OpenID4VP cancellation patch
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout pinned candidate and helper
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify immutable source and complete changed-file set
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse 7f50267dea6cac0cd07f780237bd3ddb9f8f69b5^{commit})" = "7f50267dea6cac0cd07f780237bd3ddb9f8f69b5"
+          test "$(git rev-parse a3e41fb7e567b151a939f14017b0cf549499740f^{commit})" = "a3e41fb7e567b151a939f14017b0cf549499740f"
+          test "$(git diff --name-only a3e41fb7e567b151a939f14017b0cf549499740f 7f50267dea6cac0cd07f780237bd3ddb9f8f69b5 | wc -l)" -eq 4
+      - name: Install independent local model
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location https://ollama.com/install.sh --output /tmp/ollama-install.sh
+          sh /tmp/ollama-install.sh
+          nohup ollama serve >/tmp/ollama-server.log 2>&1 </dev/null &
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null
+          ollama pull qwen2.5-coder:7b
+      - name: Independently inspect all four changed source, test and documentation patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          REVIEW_PART=1 python3 tools/offline_pr64_review.py
+          test -s review-1.md
+          test -s review-1.json
+          test -s review-model-1.json
+          test "$(cat review-head-1.txt)" = "7f50267dea6cac0cd07f780237bd3ddb9f8f69b5"
+      - name: Retain raw model artifact and exact-head provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-pr64-review
+          path: |
+            review-*.md
+            review-*.json
+            review-head-*.txt
+            review-model-*.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  publish:
+    name: Submit exact-head independent COMMENTED review
+    needs: review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Download raw review and structured findings
+        uses: actions/download-artifact@v4
+        with:
+          name: independent-pr64-review
+      - name: Verify PR head, independent finding format and all changed files
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/64 --jq '.head.sha')"
+          test "$actual" = "7f50267dea6cac0cd07f780237bd3ddb9f8f69b5"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          head = "7f50267dea6cac0cd07f780237bd3ddb9f8f69b5"
+          expected = {
+            "README.md",
+            "docs/jwt-vc-json-openid4vp-http-profile.md",
+            "src/Services/HeroSSID.Api/Features/Credentials/JwtVcJsonOpenId4VpHttpEndpoints.cs",
+            "tests/Integration/HeroSSID.Integration.Tests/JwtVcJsonOpenId4VpHttpIntegrationTests.cs",
+          }
+          result = json.loads(Path("review-1.json").read_text())
+          raw = json.loads(Path("review-model-1.json").read_text())
+          assert result["head"] == head and result["part"] == 1
+          assert set(result["files"]) == expected and len(result["files"]) == len(expected)
+          assert result["review"]["verdict"] == raw["verdict"]
+          assert raw["verdict"] in ("no_actionable_findings", "actionable_findings", "inconclusive")
+          assert len(Path("review-1.md").read_text()) > 200
+          assert Path("review-head-1.txt").read_text().strip() == head
+          PY
+      - name: Submit independent model review, never claim human approval
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo 'Independent Qwen2.5-Coder 7B security/code review of all four changed PR #64 OpenID4VP VC1.1 challenge cancellation files.'
+            echo
+            echo 'Reviewed exact head: 7f50267dea6cac0cd07f780237bd3ddb9f8f69b5.'
+            echo 'Baseline: a3e41fb7e567b151a939f14017b0cf549499740f.'
+            echo 'This is a submitted independent MODEL review, not human approval or external cryptographic certification.'
+            echo 'All findings require explicit source/test verification before merge.'
+            echo
+            cat review-1.md
+          } > /tmp/pr64-review.md
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/64/reviews \
+            -f event=COMMENT -f commit_id=7f50267dea6cac0cd07f780237bd3ddb9f8f69b5 \
+            -f body="$(cat /tmp/pr64-review.md)" \
+            --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
