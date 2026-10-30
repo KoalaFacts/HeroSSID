@@ -3,7 +3,7 @@ name: Independent exact-head PR63 OpenID4VP VC1.1 HTTP bridge review
 on:
   push:
     branches:
-      - review/pr63-issuer-signed-request-20261031
+      - review/pr63-openid4vp-http-20261031
 
 permissions: {}
 
