@@ -213,6 +213,7 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
 
     private static bool ValidHttps(string? value, out Uri? uri)
     {
+        uri = null;
         bool valid = !string.IsNullOrWhiteSpace(value) && value.Length <= 2048 &&
             Uri.TryCreate(value, UriKind.Absolute, out uri) &&
             uri.Scheme == Uri.UriSchemeHttps && uri.Host.Length != 0 &&
