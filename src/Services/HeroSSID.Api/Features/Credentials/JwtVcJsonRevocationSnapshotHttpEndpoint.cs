@@ -55,9 +55,13 @@ internal static class JwtVcJsonRevocationSnapshotHttpEndpoint
         ArgumentNullException.ThrowIfNull(clock);
 
         string issuerDid = request.IssuerDid ?? string.Empty;
-        string[]? revoked = request.RevokedCredentials;
+        IReadOnlyList<string>? revoked = request.RevokedCredentials;
+        if (request.ObservedAt is not DateTimeOffset observedAt)
+        {
+            return InvalidRequest();
+        }
+
         if (issuerDid.Length > 255 || !new DidKeyMethod().IsValid(issuerDid) ||
-            request.ObservedAt is not { } observedAt ||
             revoked is null || revoked.Count > JwtVcJsonRevocationSnapshot.MaximumEntries ||
             revoked.Any(static credential =>
                 string.IsNullOrWhiteSpace(credential) ||
