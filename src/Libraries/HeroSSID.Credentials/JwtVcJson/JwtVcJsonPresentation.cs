@@ -54,6 +54,24 @@ public static class JwtVcJsonPresentation
                 nameof(signedRequestJwt));
         }
 
+        return CreateForAuthenticatedChallenge(challenge, credentialJwt, expectedCredentialType,
+            expectedSubjectContextUri, holderDid, holderSeed, clock);
+    }
+
+    /// <summary>
+    /// Sign only after a caller within this assembly has authenticated the verifier
+    /// and parsed its signed, nonce-bound request. Never trust holder-supplied
+    /// issuer or audience values as a verifier policy.
+    /// </summary>
+    internal static string CreateForAuthenticatedChallenge(PresentationChallenge challenge,
+        string credentialJwt, string expectedCredentialType, Uri expectedSubjectContextUri,
+        string holderDid, byte[] holderSeed, TimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(challenge);
+        ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
+        ArgumentNullException.ThrowIfNull(holderSeed);
+        ArgumentNullException.ThrowIfNull(clock);
+
         DateTimeOffset now = clock.GetUtcNow();
         if (string.IsNullOrWhiteSpace(credentialJwt) ||
             credentialJwt.Length > MaximumCredentialLength ||
