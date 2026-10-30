@@ -1,0 +1,73 @@
+name: Publish completed independent PR53 model evidence
+on:
+  push:
+    branches:
+      - review/pr53-fractional-jwtvc-20261030
+
+permissions: {}
+
+jobs:
+  publish:
+    name: Submit verified independent model COMMENTED review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    steps:
+      - name: Download complete model review
+        uses: actions/download-artifact@v4
+        with:
+          name: independent-pr53-review
+          run-id: 41027676589
+          github-token: ${{ github.token }}
+      - name: Verify changed files, model evidence and unchanged PR head
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/53 --jq '.head.sha')"
+          test "$actual" = "97860a40f7b4fb21ef6057b34bab9b23267872d2"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          expected_head = "97860a40f7b4fb21ef6057b34bab9b23267872d2"
+          expected_files = {"docs/jwt-vc-json-profile.md", "src/Libraries/HeroSSID.Credentials/JwtVcJson/JwtVcJsonCredential.cs", "tests/Unit/HeroSSID.Credentials.Tests/JwtVcJsonCredentialTests.cs"}
+          seen = set()
+          for part in (1,):
+              payload = json.loads(Path(f"review-{part}.json").read_text())
+              assert payload["head"] == expected_head
+              assert payload["part"] == part
+              files = set(payload["files"])
+              assert files and files.isdisjoint(seen)
+              seen.update(files)
+              assert payload["review"]["verdict"] in (
+                  "no_actionable_findings", "actionable_findings", "inconclusive"
+              )
+              assert Path(f"review-model-{part}.json").stat().st_size > 20
+              assert Path(f"review-{part}.md").stat().st_size > 200
+          assert seen == expected_files
+          PY
+      - name: Publish COMMENTED review (not APPROVED)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo 'Independent local Qwen2.5-Coder 7B CI security code review of PR #53.'
+            echo
+            echo 'Exact source: 97860a40f7b4fb21ef6057b34bab9b23267872d2. Baseline: 09bd906d2b07b503d106c8a080ffdf78982b0827.'
+            echo 'This automated review is NOT human approval or an external security audit.'
+            echo 'Investigate every finding against the actual source and tests before merge.'
+            echo
+            cat review-1.md
+            echo
+            echo
+          } > /tmp/pr53-review.md
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/53/reviews \
+            -f event=COMMENT -f commit_id="97860a40f7b4fb21ef6057b34bab9b23267872d2" \
+            -f body="$(cat /tmp/pr53-review.md)" \
+            --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
