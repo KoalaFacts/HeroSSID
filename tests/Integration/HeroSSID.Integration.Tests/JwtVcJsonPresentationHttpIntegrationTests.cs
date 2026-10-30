@@ -39,14 +39,14 @@ public sealed class JwtVcJsonPresentationHttpIntegrationTests(DatabaseFixture fi
         using var first = firstHost.CreateClient();
         using var second = secondHost.CreateClient();
         var proof = await CreateProofAsync(first).ConfigureAwait(true);
-        using var accepted = await second.AuthorizedPostAsJsonAsync(VerifyPath, proof.ValidRequest)
+        using var accepted = await second.AuthorizedPostAsJsonAsync(VerifyPath, proof.ValidRequest, TestContext.Current.CancellationToken)
             .ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
         var outcome = await ReadJsonAsync(accepted).ConfigureAwait(true);
         Assert.Equal("SignedNotListed", outcome.GetProperty("status").GetString());
         Assert.Equal("member", outcome.GetProperty("verifiedSubject").GetProperty("role").GetString());
 
-        using var replay = await first.AuthorizedPostAsJsonAsync(VerifyPath, proof.ValidRequest)
+        using var replay = await first.AuthorizedPostAsJsonAsync(VerifyPath, proof.ValidRequest, TestContext.Current.CancellationToken)
             .ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
         var rejected = await ReadJsonAsync(replay).ConfigureAwait(true);
@@ -62,14 +62,14 @@ public sealed class JwtVcJsonPresentationHttpIntegrationTests(DatabaseFixture fi
         using var client = host.CreateClient();
         var proof = await CreateProofAsync(client).ConfigureAwait(true);
         object revokedRequest = Request(proof.Presentation, proof.RevokedStatus, proof.Nonce);
-        using var revoked = await client.AuthorizedPostAsJsonAsync(VerifyPath, revokedRequest)
+        using var revoked = await client.AuthorizedPostAsJsonAsync(VerifyPath, revokedRequest, TestContext.Current.CancellationToken)
             .ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.OK, revoked.StatusCode);
         var denied = await ReadJsonAsync(revoked).ConfigureAwait(true);
         Assert.Equal("Revoked", denied.GetProperty("status").GetString());
         Assert.Equal(JsonValueKind.Null, denied.GetProperty("verifiedSubject").ValueKind);
 
-        using var replay = await client.AuthorizedPostAsJsonAsync(VerifyPath, proof.ValidRequest)
+        using var replay = await client.AuthorizedPostAsJsonAsync(VerifyPath, proof.ValidRequest, TestContext.Current.CancellationToken)
             .ConfigureAwait(true);
         Assert.Equal("Invalid", (await ReadJsonAsync(replay).ConfigureAwait(true))
             .GetProperty("status").GetString());
@@ -87,7 +87,7 @@ public sealed class JwtVcJsonPresentationHttpIntegrationTests(DatabaseFixture fi
             .Replace("member", "administrator", StringComparison.Ordinal));
         string forged = string.Join('.', parts);
         using var forgedResponse = await client.AuthorizedPostAsJsonAsync(
-            VerifyPath, Request(forged, proof.CleanStatus, proof.Nonce)).ConfigureAwait(true);
+            VerifyPath, Request(forged, proof.CleanStatus, proof.Nonce), TestContext.Current.CancellationToken).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.OK, forgedResponse.StatusCode);
         var forgedBody = await ReadJsonAsync(forgedResponse).ConfigureAwait(true);
         Assert.Equal("Invalid", forgedBody.GetProperty("status").GetString());
@@ -99,10 +99,10 @@ public sealed class JwtVcJsonPresentationHttpIntegrationTests(DatabaseFixture fi
             DidFromKey(foreign), [], foreign.Export(KeyBlobFormat.RawPrivateKey),
             TimeProvider.System.GetUtcNow(), TimeProvider.System);
         using var foreignResponse = await client.AuthorizedPostAsJsonAsync(
-            VerifyPath, Request(proof.Presentation, foreignStatus, proof.Nonce)).ConfigureAwait(true);
+            VerifyPath, Request(proof.Presentation, foreignStatus, proof.Nonce), TestContext.Current.CancellationToken).ConfigureAwait(true);
         Assert.Equal("Invalid", (await ReadJsonAsync(foreignResponse).ConfigureAwait(true))
             .GetProperty("status").GetString());
-        using var genuine = await client.AuthorizedPostAsJsonAsync(VerifyPath, proof.ValidRequest)
+        using var genuine = await client.AuthorizedPostAsJsonAsync(VerifyPath, proof.ValidRequest, TestContext.Current.CancellationToken)
             .ConfigureAwait(true);
         Assert.Equal("SignedNotListed", (await ReadJsonAsync(genuine).ConfigureAwait(true))
             .GetProperty("status").GetString());
@@ -122,26 +122,26 @@ public sealed class JwtVcJsonPresentationHttpIntegrationTests(DatabaseFixture fi
             trustedIssuerDid = DidFromKey(issuer),
             lifetimeSeconds = 120
         };
-        using var anonymousIssue = await client.PostAsJsonAsync(ChallengePath, issueRequest)
+        using var anonymousIssue = await client.PostAsJsonAsync(ChallengePath, issueRequest, TestContext.Current.CancellationToken)
             .ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.Unauthorized, anonymousIssue.StatusCode);
         string issueOnly = await ScopeTokenAsync(client, "credential:issue").ConfigureAwait(true);
         using var forbiddenIssue = await PostWithBearerAsync(client, ChallengePath, issueRequest, issueOnly)
             .ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.Forbidden, forbiddenIssue.StatusCode);
-        using var anonymousVerify = await client.PostAsJsonAsync(VerifyPath, new { })
+        using var anonymousVerify = await client.PostAsJsonAsync(VerifyPath, new { }, TestContext.Current.CancellationToken)
             .ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.Unauthorized, anonymousVerify.StatusCode);
         using var forbiddenVerify = await PostWithBearerAsync(client, VerifyPath, new { }, issueOnly)
             .ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.Forbidden, forbiddenVerify.StatusCode);
         using var invalid = await client.AuthorizedPostAsJsonAsync(ChallengePath,
-            new { audience = "http://attacker.example", trustedIssuerDid = DidFromKey(issuer) })
+            new { audience = "http://attacker.example", trustedIssuerDid = DidFromKey(issuer) }, TestContext.Current.CancellationToken)
             .ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
     }
 
-    private async Task<Proof> CreateProofAsync(HttpClient client)
+    private static async Task<Proof> CreateProofAsync(HttpClient client)
     {
         using var issuer = Key.Create(SignatureAlgorithm.Ed25519,
             new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
@@ -153,7 +153,7 @@ public sealed class JwtVcJsonPresentationHttpIntegrationTests(DatabaseFixture fi
         string holderDid = DidFromKey(holder);
         string verifierDid = DidFromKey(verifier);
         using var issueResponse = await client.AuthorizedPostAsJsonAsync(ChallengePath,
-            new { audience = Audience, trustedIssuerDid = issuerDid, lifetimeSeconds = 120 })
+            new { audience = Audience, trustedIssuerDid = issuerDid, lifetimeSeconds = 120 }, TestContext.Current.CancellationToken)
             .ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.Created, issueResponse.StatusCode);
         var issued = await ReadJsonAsync(issueResponse).ConfigureAwait(true);
@@ -194,7 +194,7 @@ public sealed class JwtVcJsonPresentationHttpIntegrationTests(DatabaseFixture fi
     };
 
     private static async Task<JsonElement> ReadJsonAsync(HttpResponseMessage response) =>
-        await response.Content.ReadFromJsonAsync<JsonElement>().ConfigureAwait(true);
+        await response.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken).ConfigureAwait(true);
 
     private async Task MigrateAsync()
     {
@@ -241,7 +241,7 @@ public sealed class JwtVcJsonPresentationHttpIntegrationTests(DatabaseFixture fi
             ["client_secret"] = "test_secret",
             ["scope"] = scope
         });
-        using var response = await client.PostAsync("/oauth2/token", form).ConfigureAwait(true);
+        using var response = await client.PostAsync("/oauth2/token", form, TestContext.Current.CancellationToken).ConfigureAwait(true);
         var payload = await ReadJsonAsync(response).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return payload.GetProperty("access_token").GetString()!;
@@ -255,7 +255,7 @@ public sealed class JwtVcJsonPresentationHttpIntegrationTests(DatabaseFixture fi
             Content = JsonContent.Create(body)
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        return await client.SendAsync(request).ConfigureAwait(true);
+        return await client.SendAsync(request, TestContext.Current.CancellationToken).ConfigureAwait(true);
     }
 
     private sealed record Proof(string Presentation, string CleanStatus, string RevokedStatus, string Nonce)
