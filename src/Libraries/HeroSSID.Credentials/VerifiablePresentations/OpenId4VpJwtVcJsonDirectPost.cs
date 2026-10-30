@@ -23,6 +23,7 @@ public static class OpenId4VpJwtVcJsonDirectPost
     private const int MaximumRequestLength = 16_384;
     private const int MaximumResponseLength = 180_000;
     private const int MaximumPresentationLength = 131_072;
+    private static readonly string[] EdDsaAlgorithms = ["EdDSA"];
 
     /// <summary>
     /// Sign an already-issued and retained verifier-owned challenge with the
@@ -79,7 +80,7 @@ public static class OpenId4VpJwtVcJsonDirectPost
             {
                 vp_formats_supported = new
                 {
-                    jwt_vc_json = new { alg_values = new[] { "EdDSA" } }
+                    jwt_vc_json = new { alg_values = EdDsaAlgorithms }
                 }
             },
             // Signed application policy extensions, not standard DCQL fields.
