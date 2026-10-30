@@ -2,7 +2,23 @@
 
 This opt-in, **authenticated verifier HTTP API** adds holder-signed W3C VC Data Model **1.1** `jwt_vc_json` presentation verification. It reuses the existing PostgreSQL `presentation_challenges` table (already migrated in the repository); **no schema changes or new migration** are part of this feature. This is a HeroSSID-specific challenge and short-lived issuer status format, **not** OpenID4VP, OpenID4VCI, a hosted wallet, a consent UI or independent external-wallet interoperability.
 
-## Step 1: authenticated verifier issues a challenge
+## Step 1: authenticated verifier issues and signs a challenge
+
+For a verifier managed by HeroSSID, use the **signed** route. It requires **both** `credential:verify` and `did:manage`, plus a separately enrolled, active Ed25519 `did:key` that belongs to the same authenticated tenant:
+
+```http
+POST /api/v1/credentials/jwt-vc-json/signed-presentation-request
+Authorization: Bearer <credential:verify and did:manage scoped token>
+Content-Type: application/json
+
+{"verifierDid":"did:key:z...","audience":"https://verifier.example/membership","trustedIssuerDid":"did:key:z...","lifetimeSeconds":120}
+```
+
+**201 Created** returns `signedRequestJwt` (real Ed25519 `herossid-request+jwt`), `verifierDid`, `audience`, `nonce`, `trustedIssuerDid`, and `expiresAt`. The signature uses only the active DID key that the authenticated tenant selected for its **verifier** role; no holder key is received or used. The verifier could deliberately select a DID that also acts as an issuer, so key-role separation and independent issuer trust remain an integrator responsibility. Nonexistent, inactive, foreign-tenant or DID/public-key mismatched verifier signers are not used (**404**). A client missing either scope receives **403**; anonymous **401**. Bad audience/issuer/expiry is **400**, challenge capacity **429**, backing store or signing failures **503**. No new database schema is required; production deployment is outside this change.
+
+The signing implementation is deliberately shared with the existing VCDM 2.0 signed verifier route: its private request format is **credential-format agnostic**. Both flows store the verifier tenant's independent trusted issuer policy in the same atomic, migrated PostgreSQL challenge store. This endpoint signs a **private HeroSSID request**, not an OpenID4VP 1.0 Request Object or a statement of organisational authority. Holders must pin the verifier DID and exact audience from an independent trusted channel; **do not trust the DID merely because it appears inside the signed JWT**.
+
+Alternatively, verifiers who keep their signing key outside HeroSSID can use the older **unsigned** challenge route:
 
 ```http
 POST /api/v1/credentials/jwt-vc-json/presentation-challenge
@@ -14,7 +30,7 @@ Content-Type: application/json
 
 Returns **201** with `audience`, an unpredictable one-use `nonce`, `trustedIssuerDid`, and `expiresAt`. The verifier tenant owns this challenge and independently chooses the trusted issuer. The audience must be a canonical HTTPS URL, the issuer a real Ed25519 `did:key`, and lifetime 1–300 seconds. **401** anonymous, **403** insufficient scope, **400** malformed, **429** challenge capacity reached, **503** PostgreSQL unavailable.
 
-The challenge response is **not signed**. The verifier must authenticate it to the holder using a distinct verifier-controlled Ed25519 private key, for example `OfflineSignedPresentationRequest.Create`, and the holder must independently pin the verifier DID and exact audience before accepting it. A verifier's signature establishes control of that verifier key, **not** its organisation, trustworthiness or authority.
+The unsigned challenge response **is not signed**. The verifier must authenticate it to the holder using its own distinct, independently controlled Ed25519 key, for example `OfflineSignedPresentationRequest.Create`. Never treat the unsigned response as an authenticated verifier request; the holder must independently pin the verifier DID and exact audience before accepting either flow. A verifier's signature establishes control of that verifier key, **not** its organisation, trustworthiness or authority.
 
 ## Step 2: holder intentionally signs the original issuer statement
 

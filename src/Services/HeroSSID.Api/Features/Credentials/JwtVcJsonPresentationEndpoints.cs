@@ -25,6 +25,24 @@ internal static class JwtVcJsonPresentationEndpoints
 
     internal static void Map(RouteGroupBuilder credentials)
     {
+        // The existing verifier-owned DID signer and durable challenge are
+        // credential-format agnostic. Reuse that security boundary for VC1.1
+        // rather than accepting an unsigned HTTP challenge as verifier proof.
+        // Both scopes are mandatory because verification alone must not
+        // authorize a server-side private signing key operation.
+        credentials.MapPost("/jwt-vc-json/signed-presentation-request",
+                Vcdm20PresentationEndpoints.IssueSignedAsync)
+            .RequireAuthorization(OperationScopes.CredentialVerify, OperationScopes.DidManage)
+            .WithName("IssueJwtVcJsonSignedPresentationRequest")
+            .WithSummary("Sign a VC1.1 verifier request using a tenant-owned active did:key and durable one-use nonce")
+            .Produces<IssueVcdm20SignedPresentationRequestResponse>(StatusCodes.Status201Created)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
         credentials.MapPost("/jwt-vc-json/presentation-challenge", Issue)
             .RequireAuthorization(OperationScopes.CredentialVerify)
             .WithName("IssueJwtVcJsonPresentationChallenge")
