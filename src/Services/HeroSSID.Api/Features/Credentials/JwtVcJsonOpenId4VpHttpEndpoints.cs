@@ -70,7 +70,7 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
         ArgumentNullException.ThrowIfNull(clock);
 
         if (!ValidDid(request.VerifierDid) || !ValidDid(request.TrustedIssuerDid) ||
-            !ValidHttps(request.ResponseUri, out Uri? responseUri) ||
+            !ValidHttps(request.ResponseUri) ||
             !ValidType(request.CredentialType) ||
             !ValidContext(request.SubjectContextUri) ||
             request.LifetimeSeconds is < 1 or > 300)
@@ -105,10 +105,10 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
             var challenge = challenges.Issue(tenantId, clientId,
                 request.TrustedIssuerDid!, TimeSpan.FromSeconds(request.LifetimeSeconds));
             string signed = OpenId4VpJwtVcJsonDirectPost.CreateSignedRequest(
-                challenge, request.VerifierDid!, verifierSeed, responseUri!,
+                challenge, request.VerifierDid!, verifierSeed, request.ResponseUri!,
                 request.CredentialType!, request.SubjectContextUri!, clock);
             return Results.Json(new IssueOpenId4VpSignedRequestResponse(
-                signed, clientId, request.VerifierDid!, responseUri!.OriginalString,
+                signed, clientId, request.VerifierDid!, request.ResponseUri!,
                 challenge.Nonce, challenge.TrustedIssuerDid, challenge.ExpiresAt),
                 statusCode: StatusCodes.Status201Created);
         }
@@ -211,21 +211,11 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
         !string.IsNullOrWhiteSpace(did) && did.Length <= 255 &&
         new DidKeyMethod().IsValid(did);
 
-    private static bool ValidHttps(string? value, out Uri? uri)
-    {
-        uri = null;
-        bool valid = !string.IsNullOrWhiteSpace(value) && value.Length <= 2048 &&
-            Uri.TryCreate(value, UriKind.Absolute, out uri) &&
-            uri.Scheme == Uri.UriSchemeHttps && uri.Host.Length != 0 &&
-            uri.UserInfo.Length == 0 && uri.Fragment.Length == 0 &&
-            string.Equals(uri.AbsoluteUri, value, StringComparison.Ordinal);
-        if (!valid)
-        {
-            uri = null;
-        }
-
-        return valid;
-    }
+    private static bool ValidHttps(Uri? uri) =>
+        uri is { IsAbsoluteUri: true } && uri.OriginalString.Length <= 2048 &&
+        uri.Scheme == Uri.UriSchemeHttps && uri.Host.Length != 0 &&
+        uri.UserInfo.Length == 0 && uri.Fragment.Length == 0 &&
+        string.Equals(uri.AbsoluteUri, uri.OriginalString, StringComparison.Ordinal);
 
     private static bool ValidContext(Uri? uri) =>
         uri is { IsAbsoluteUri: true } && uri.Scheme == Uri.UriSchemeHttps &&
@@ -256,7 +246,7 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
 public sealed class IssueOpenId4VpSignedRequestRequest
 {
     public string? VerifierDid { get; init; }
-    public string? ResponseUri { get; init; }
+    public Uri? ResponseUri { get; init; }
     public string? TrustedIssuerDid { get; init; }
     public string? CredentialType { get; init; }
     public Uri? SubjectContextUri { get; init; }
@@ -265,7 +255,7 @@ public sealed class IssueOpenId4VpSignedRequestRequest
 
 /// <summary>Untrusted holder must independently pin DID, HTTPS callback, type, context and consent.</summary>
 public sealed record IssueOpenId4VpSignedRequestResponse(
-    string SignedRequestJwt, string ClientId, string VerifierDid, string ResponseUri,
+    string SignedRequestJwt, string ClientId, string VerifierDid, Uri ResponseUri,
     string Nonce, string TrustedIssuerDid, DateTimeOffset ExpiresAt);
 
 /// <summary>Authorized verifier forwards the entire unmodified direct_post form.</summary>
