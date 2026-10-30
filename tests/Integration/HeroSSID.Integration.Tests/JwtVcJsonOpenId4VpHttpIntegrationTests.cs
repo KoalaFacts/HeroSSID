@@ -24,6 +24,7 @@ public sealed class JwtVcJsonOpenId4VpHttpIntegrationTests(DatabaseFixture fixtu
 {
     private const string IssueRoute = "/api/v1/credentials/jwt-vc-json/openid4vp/signed-request";
     private const string VerifyRoute = "/api/v1/credentials/jwt-vc-json/openid4vp/verify-response";
+    private const string CancelRoute = "/api/v1/credentials/jwt-vc-json/openid4vp/cancel-request";
     private const string ResponseUri = "https://verifier.example/direct-post";
     private const string TypeIri = "https://issuer.example/credentials#MembershipCredential";
     private static readonly Uri Context = new("https://issuer.example/contexts/membership/v1");
@@ -199,6 +200,124 @@ public sealed class JwtVcJsonOpenId4VpHttpIntegrationTests(DatabaseFixture fixtu
             subjectContextUri = Context.AbsoluteUri
         }, TestContext.Current.CancellationToken).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.Unauthorized, untrustedVerify.StatusCode);
+    }
+
+
+    [Fact]
+    public async Task CancellationRevokesAnOutstandingSignedRequestButNotAnotherVerifiersChallenge()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        await using var host = NewHost();
+        using var client = host.CreateClient();
+        string token = await GetTokenAsync(client, "credential:verify did:manage").ConfigureAwait(true);
+        string verifierDid = await CreateDidAsync(client, token).ConfigureAwait(true);
+        string differentVerifierDid = await CreateDidAsync(client, token).ConfigureAwait(true);
+        using var issuerKey = NewKey();
+        using var holderKey = NewKey();
+        string issuerDid = DidFromKey(issuerKey);
+        string holderDid = DidFromKey(holderKey);
+
+        using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
+            new { id = holderDid, role = "member" }));
+        DateTimeOffset now = TimeProvider.System.GetUtcNow();
+        string credential = JwtVcJsonCredential.Create(issuerDid, holderDid, TypeIri,
+            Context, subject.RootElement, issuerKey.Export(KeyBlobFormat.RawPrivateKey),
+            now.AddMinutes(-1), now.AddMinutes(10));
+        string status = JwtVcJsonRevocationSnapshot.Create(issuerDid, [],
+            issuerKey.Export(KeyBlobFormat.RawPrivateKey), now, TimeProvider.System);
+
+        using var first = await PostAsync(client, IssueRoute, new
+        {
+            verifierDid, responseUri = ResponseUri, trustedIssuerDid = issuerDid,
+            credentialType = TypeIri, subjectContextUri = Context.AbsoluteUri,
+            lifetimeSeconds = 120
+        }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+        var firstBody = await first.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        string firstNonce = firstBody.GetProperty("nonce").GetString()!;
+        string firstRequest = firstBody.GetProperty("signedRequestJwt").GetString()!;
+        string firstForm = OpenId4VpJwtVcJsonDirectPost.CreateHolderResponseForm(
+            firstRequest, verifierDid, new Uri(ResponseUri), TypeIri, Context,
+            credential, holderDid, holderKey.Export(KeyBlobFormat.RawPrivateKey),
+            TimeProvider.System);
+
+        using var wrongVerifierCancellation = await PostAsync(client, CancelRoute,
+            new { verifierDid = differentVerifierDid, nonce = firstNonce }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NoContent, wrongVerifierCancellation.StatusCode);
+
+        using var allowed = await PostAsync(client, VerifyRoute, new
+        {
+            verifierDid, nonce = firstNonce, form = firstForm, revocationSnapshot = status,
+            expectedCredentialType = TypeIri, subjectContextUri = Context.AbsoluteUri
+        }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
+        var allowedBody = await allowed.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal("SignedNotListed", allowedBody.GetProperty("status").GetString());
+
+        using var second = await PostAsync(client, IssueRoute, new
+        {
+            verifierDid, responseUri = ResponseUri, trustedIssuerDid = issuerDid,
+            credentialType = TypeIri, subjectContextUri = Context.AbsoluteUri,
+            lifetimeSeconds = 120
+        }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Created, second.StatusCode);
+        var secondBody = await second.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        string secondNonce = secondBody.GetProperty("nonce").GetString()!;
+        string secondForm = OpenId4VpJwtVcJsonDirectPost.CreateHolderResponseForm(
+            secondBody.GetProperty("signedRequestJwt").GetString()!, verifierDid,
+            new Uri(ResponseUri), TypeIri, Context, credential, holderDid,
+            holderKey.Export(KeyBlobFormat.RawPrivateKey), TimeProvider.System);
+
+        using var cancelled = await PostAsync(client, CancelRoute,
+            new { verifierDid, nonce = secondNonce }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NoContent, cancelled.StatusCode);
+        using var repeatedCancellation = await PostAsync(client, CancelRoute,
+            new { verifierDid, nonce = secondNonce }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NoContent, repeatedCancellation.StatusCode);
+
+        using var denied = await PostAsync(client, VerifyRoute, new
+        {
+            verifierDid, nonce = secondNonce, form = secondForm, revocationSnapshot = status,
+            expectedCredentialType = TypeIri, subjectContextUri = Context.AbsoluteUri
+        }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, denied.StatusCode);
+        var deniedBody = await denied.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal("Invalid", deniedBody.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, deniedBody.GetProperty("verifiedSubject").ValueKind);
+    }
+
+    [Fact]
+    public async Task CancelRequestRequiresCredentialVerifyAndValidVerifierBoundNonce()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        await using var host = NewHost();
+        using var client = host.CreateClient();
+        string token = await GetTokenAsync(client, "credential:verify did:manage").ConfigureAwait(true);
+        string verifierDid = await CreateDidAsync(client, token).ConfigureAwait(true);
+        var cancellation = new { verifierDid, nonce = new string('A', 43) };
+
+        using var anonymous = await client.PostAsJsonAsync(CancelRoute, cancellation,
+            TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        foreach (string scope in new[] { "credential:verify", "did:manage" })
+        {
+            string wrongScope = await GetTokenAsync(client, scope).ConfigureAwait(true);
+            using var forbidden = await PostAsync(client, CancelRoute, cancellation, wrongScope)
+                .ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+        }
+
+        using var malformed = await PostAsync(client, CancelRoute,
+            new { verifierDid, nonce = "bad" }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
+
+        using var unknown = await PostAsync(client, CancelRoute, cancellation, token)
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NoContent, unknown.StatusCode);
     }
 
     private async Task EnsureMigratedAsync()

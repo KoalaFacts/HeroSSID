@@ -42,6 +42,16 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
+        credentials.MapPost("/jwt-vc-json/openid4vp/cancel-request", Cancel)
+            .RequireAuthorization(OperationScopes.CredentialVerify, OperationScopes.DidManage)
+            .WithName("CancelJwtVcJsonOpenId4VpSignedRequest")
+            .WithSummary("Atomically invalidate an outstanding verifier-owned OpenID4VP request")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
         credentials.MapPost("/jwt-vc-json/openid4vp/verify-response", Verify)
             .RequireAuthorization(OperationScopes.CredentialVerify)
             .WithName("VerifyJwtVcJsonOpenId4VpDirectPostResponse")
@@ -142,6 +152,53 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
             {
                 CryptographicOperations.ZeroMemory(verifierSeed);
             }
+        }
+    }
+
+    /// <summary>
+    /// The authenticated verifier backend cancels an outstanding request when
+    /// its transaction ends or the holder declines disclosure. Reuse the exact
+    /// PostgreSQL one-time consume gate: cancelling and verifying race atomically.
+    /// Do not reveal whether a nonce was unknown, already used or cancelled.
+    /// </summary>
+    internal static IResult Cancel(
+        [FromBody] CancelOpenId4VpSignedRequestRequest request,
+        [FromServices] IPresentationChallengeStore challenges,
+        [FromServices] ITenantContext tenantContext)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(challenges);
+        ArgumentNullException.ThrowIfNull(tenantContext);
+
+        if (!ValidDid(request.VerifierDid) ||
+            string.IsNullOrWhiteSpace(request.Nonce) || request.Nonce.Length != 43)
+        {
+            return Results.Problem(title: "Invalid OpenID4VP Cancellation",
+                detail: "A verifier DID and exact 43-character issued nonce are required.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        Guid tenantId = tenantContext.GetCurrentTenantId();
+        if (tenantId == Guid.Empty)
+        {
+            return Results.Unauthorized();
+        }
+
+        try
+        {
+            // The retained challenge is bound to tenant, verifier client ID and nonce.
+            // Atomic consumption also prevents a future valid holder response.
+            _ = challenges.TryConsume(tenantId,
+                "decentralized_identifier:" + request.VerifierDid, request.Nonce);
+            return Results.NoContent();
+        }
+        catch (NpgsqlException)
+        {
+            return Unavailable();
+        }
+        catch (TimeoutException)
+        {
+            return Unavailable();
         }
     }
 
@@ -257,6 +314,16 @@ public sealed class IssueOpenId4VpSignedRequestRequest
 public sealed record IssueOpenId4VpSignedRequestResponse(
     string SignedRequestJwt, string ClientId, string VerifierDid, Uri ResponseUri,
     string Nonce, string TrustedIssuerDid, DateTimeOffset ExpiresAt);
+
+/// <summary>
+/// Backend-only cancellation of an outstanding verifier-owned challenge.
+/// A holder cannot call this endpoint with a wallet presentation alone.
+/// </summary>
+public sealed class CancelOpenId4VpSignedRequestRequest
+{
+    public string? VerifierDid { get; init; }
+    public string? Nonce { get; init; }
+}
 
 /// <summary>Authorized verifier forwards the entire unmodified direct_post form.</summary>
 public sealed class VerifyOpenId4VpDirectPostRequest

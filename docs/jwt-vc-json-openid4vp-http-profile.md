@@ -50,6 +50,25 @@ A **200 OK** result returns only `{"status":"SignedNotListed","verifiedSubject":
 
 `SignedNotListed` says that a valid signed issuer credential was not present in that issuer's supplied complete revoked digest set *at observation time*. It **does not** prove status is current or that the issuer supplied a complete authoritative set. HTTP issuance does not persist or revoke this format. There is no automatic status publication, independent wallet testing, public callback hosting, end-user consent evidence, real-world identity verification or business authorization. None of these trust responsibilities can be inferred from a signature.
 
+## Cancel an outstanding signed request (backend only)
+
+When the holder declines, the verifier abandons the transaction, or an application no longer wants to accept the response, its **authenticated backend** can invalidate the pending one-time challenge. The backend requires both `credential:verify` and `did:manage`, just like issuing the signed request. A wallet has no access to this privileged route; the relying-party application must translate its cancellation/decline event into this call.
+
+```http
+POST /api/v1/credentials/jwt-vc-json/openid4vp/cancel-request
+Authorization: Bearer <credential:verify and did:manage token>
+Content-Type: application/json
+
+{
+  "verifierDid": "did:key:<the-original-verifier>",
+  "nonce": "<the-original-43-character-nonce>"
+}
+```
+
+The route uses the existing tenant-bound PostgreSQL one-time challenge store and atomic consume operation. It returns **204 No Content** for a matching unexpired challenge, an already-consumed challenge or an unknown challenge, deliberately not exposing which case occurred. A different verifier DID, tenant or nonce cannot consume the original challenge. Missing auth/scope returns **401/403**, malformed input **400**, and store unavailability **503**. Repeated cancellation does not reactivate a request; a later otherwise-valid holder proof for a cancelled challenge is rejected without claims. No schema migration is necessary.
+
+Cancellation is *not* a cryptographic consent record, proof of holder intent or guarantee that a response has not **already been accepted**: if verification wins the atomic race first, disclosed information cannot be retracted. Applications must prevent use of already-delivered claims and obtain explicit human disclosure consent in their own wallet/user experience.
+
 ## Executable acceptance
 
 ```bash
