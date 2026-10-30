@@ -3,7 +3,7 @@ name: Independent exact-head PR59 VC1.1 holder HTTP proof review
 on:
   push:
     branches:
-      - review/pr59-jwtvc-http-verify-20261031
+      - review/pr59-jwtvc-presentation-20261031
 
 permissions: {}
 
