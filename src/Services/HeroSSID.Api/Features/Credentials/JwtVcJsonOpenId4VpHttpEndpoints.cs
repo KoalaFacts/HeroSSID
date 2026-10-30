@@ -117,9 +117,13 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
             string signed = OpenId4VpJwtVcJsonDirectPost.CreateSignedRequest(
                 challenge, request.VerifierDid!, verifierSeed, request.ResponseUri!,
                 request.CredentialType!, request.SubjectContextUri!, clock);
+            string walletInvocation = OpenId4VpJwtVcJsonDirectPost.CreateWalletInvocation(
+                signed, request.VerifierDid!, request.ResponseUri!,
+                request.CredentialType!, request.SubjectContextUri!, clock);
             return Results.Json(new IssueOpenId4VpSignedRequestResponse(
                 signed, clientId, request.VerifierDid!, request.ResponseUri!,
-                challenge.Nonce, challenge.TrustedIssuerDid, challenge.ExpiresAt),
+                challenge.Nonce, challenge.TrustedIssuerDid, challenge.ExpiresAt,
+                walletInvocation),
                 statusCode: StatusCodes.Status201Created);
         }
         catch (InvalidOperationException exception) when (
@@ -313,7 +317,9 @@ public sealed class IssueOpenId4VpSignedRequestRequest
 /// <summary>Untrusted holder must independently pin DID, HTTPS callback, type, context and consent.</summary>
 public sealed record IssueOpenId4VpSignedRequestResponse(
     string SignedRequestJwt, string ClientId, string VerifierDid, Uri ResponseUri,
-    string Nonce, string TrustedIssuerDid, DateTimeOffset ExpiresAt);
+    string Nonce, string TrustedIssuerDid, DateTimeOffset ExpiresAt,
+    [property: System.Text.Json.Serialization.JsonPropertyName("walletInvocationUri")]
+    string WalletInvocation);
 
 /// <summary>
 /// Backend-only cancellation of an outstanding verifier-owned challenge.
