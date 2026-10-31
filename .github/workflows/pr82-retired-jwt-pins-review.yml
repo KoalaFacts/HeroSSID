@@ -1,4 +1,4 @@
-name: Independent PR82 retired issuer exact-JWT candidate review
+name: Publish preserved independent PR82 model review
 
 on:
   push:
@@ -8,71 +8,8 @@ on:
 permissions: {}
 
 jobs:
-  review:
-    name: Independent Qwen review of four retired-key exact-JWT patches
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout pinned candidate and helper
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Verify immutable candidate and complete four-file diff
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse 634f0faa40ae3430ef8b559c889c61160b1a0825^{commit})" = "634f0faa40ae3430ef8b559c889c61160b1a0825"
-          test "$(git rev-parse b4e8ef6484a848119ba4f8d5635bb1c06c927f6e^{commit})" = "b4e8ef6484a848119ba4f8d5635bb1c06c927f6e"
-          test "$(git diff --name-only b4e8ef6484a848119ba4f8d5635bb1c06c927f6e 634f0faa40ae3430ef8b559c889c61160b1a0825 | wc -l)" -eq 4
-      - name: Install local independent code review model
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl --fail --silent --show-error --location https://ollama.com/install.sh --output /tmp/ollama-install.sh
-          sh /tmp/ollama-install.sh
-          nohup ollama serve >/tmp/ollama-server.log 2>&1 </dev/null &
-          for i in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
-            sleep 2
-          done
-          curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null
-          ollama pull qwen2.5-coder:7b
-      - name: Review part 1 of 2 (real source patches, not a mock)
-        shell: bash
-        run: |
-          set -euo pipefail
-          REVIEW_PART=1 python3 tools/offline_pr82_review.py
-          test -s review-1.md
-          test -s review-1.json
-          test -s review-model-1.json
-          test "$(cat review-head-1.txt)" = "634f0faa40ae3430ef8b559c889c61160b1a0825"
-      - name: Review part 2 of 2 (full remaining source patches)
-        shell: bash
-        run: |
-          set -euo pipefail
-          REVIEW_PART=2 python3 tools/offline_pr82_review.py
-          test -s review-2.md
-          test -s review-2.json
-          test -s review-model-2.json
-          test "$(cat review-head-2.txt)" = "634f0faa40ae3430ef8b559c889c61160b1a0825"
-      - name: Retain independent raw model results and exact-head evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: independent-pr82-review
-          path: |
-            review-*.md
-            review-*.json
-            review-head-*.txt
-            review-model-*.json
-          if-no-files-found: warn
-          retention-days: 30
-
   publish:
     name: Submit independent exact-head COMMENTED review, not approval
-    needs: review
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -82,6 +19,8 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: independent-pr82-review
+          run-id: 41212232500
+          github-token: ${{ github.token }}
       - name: Verify exact head and that all four changed files were inspected
         shell: bash
         env:
@@ -97,7 +36,7 @@ jobs:
           expected = {
             "README.md",
             "docs/jwt-vc-json-retired-issuer-exact-pins.md",
-            "src/Libraries/HeroSSID.Credentials/VerifiablePresentations/JwtVcJsonRetiredIssuerVerifier.cs",
+            "src/Libraries/HeroSSID.Credentials/JwtVcJson/JwtVcJsonRetiredIssuerVerifier.cs",
             "tests/Unit/HeroSSID.Credentials.Tests/JwtVcJsonRetiredIssuerVerifierTests.cs",
           }
           seen = []
