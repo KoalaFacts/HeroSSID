@@ -57,6 +57,7 @@ public static class CredentialEndpoints
         JwtVcJsonRevocationSnapshotHttpEndpoint.Map(credentials);
         JwtVcJsonCredentialVerificationEndpoint.Map(credentials);
         JwtVcJsonTrustedIssuerVerificationEndpoint.Map(credentials);
+        JwtVcJsonRetiredIssuerVerificationEndpoint.Map(credentials);
         JwtVcJsonPresentationEndpoints.Map(credentials);
         JwtVcJsonOpenId4VpHttpEndpoints.Map(credentials);
         Vcdm20CredentialIssuanceEndpoint.Map(credentials);
