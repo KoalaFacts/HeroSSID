@@ -1,0 +1,123 @@
+name: Independent exact-head PR69 VC2 wallet disclosure review
+
+on:
+  push:
+    branches:
+      - review/pr69-vc2-wallet-signed-status-20261031
+
+permissions: {}
+
+jobs:
+  review:
+    name: Independent model security review of complete four-file direct VC2 status-aware wallet preflight patch
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout pinned candidate and helper
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify immutable source and complete four-file diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse 18e78fcb0df8d809e972983f3e846093c7e7a7f4^{commit})" = "18e78fcb0df8d809e972983f3e846093c7e7a7f4"
+          test "$(git rev-parse cde52eca37113bb484227765bcc594bfcf9c41b6^{commit})" = "cde52eca37113bb484227765bcc594bfcf9c41b6"
+          test "$(git diff --name-only cde52eca37113bb484227765bcc594bfcf9c41b6 18e78fcb0df8d809e972983f3e846093c7e7a7f4 | wc -l)" -eq 4
+      - name: Install independent local model
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location https://ollama.com/install.sh --output /tmp/ollama-install.sh
+          sh /tmp/ollama-install.sh
+          nohup ollama serve >/tmp/ollama-server.log 2>&1 </dev/null &
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null
+          ollama pull qwen2.5-coder:7b
+      - name: Independently inspect all four source test and documentation patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          REVIEW_PART=1 python3 tools/offline_pr69_review.py
+          test -s review-1.md
+          test -s review-1.json
+          test -s review-model-1.json
+          test "$(cat review-head-1.txt)" = "18e78fcb0df8d809e972983f3e846093c7e7a7f4"
+      - name: Retain raw model artifact and exact-head provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-pr69-review
+          path: |
+            review-*.md
+            review-*.json
+            review-head-*.txt
+            review-model-*.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  publish:
+    name: Submit exact-head independent COMMENTED review
+    needs: review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Download raw review and structured findings
+        uses: actions/download-artifact@v4
+        with:
+          name: independent-pr69-review
+      - name: Verify PR head and exact four-file model coverage
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/69 --jq '.head.sha')"
+          test "$actual" = "18e78fcb0df8d809e972983f3e846093c7e7a7f4"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          head = "18e78fcb0df8d809e972983f3e846093c7e7a7f4"
+          expected = {
+            "README.md",
+            "docs/vcdm20-wallet-disclosure-preflight.md",
+            "src/Libraries/HeroSSID.Credentials/Vcdm20/Vcdm20WalletDisclosure.cs",
+            "tests/Unit/HeroSSID.Credentials.Tests/Vcdm20WalletStatusDisclosureTests.cs",
+          }
+          result = json.loads(Path("review-1.json").read_text())
+          raw = json.loads(Path("review-model-1.json").read_text())
+          assert result["head"] == head and result["part"] == 1
+          assert set(result["files"]) == expected and len(result["files"]) == len(expected)
+          assert result["review"]["verdict"] == raw["verdict"]
+          assert raw["verdict"] in ("no_actionable_findings", "actionable_findings", "inconclusive")
+          assert len(Path("review-1.md").read_text()) > 200
+          assert Path("review-head-1.txt").read_text().strip() == head
+          PY
+      - name: Submit independent model findings without claiming human approval
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo 'Independent Qwen2.5-Coder 7B security/code review of all four changed PR #69 VC2 authenticated status-aware full-disclosure preview files.'
+            echo
+            echo 'Reviewed exact head: 18e78fcb0df8d809e972983f3e846093c7e7a7f4.'
+            echo 'Baseline: cde52eca37113bb484227765bcc594bfcf9c41b6.'
+            echo 'This is a submitted independent MODEL review, not human approval or external cryptographic certification.'
+            echo 'All findings require explicit source/test verification before merge.'
+            echo
+            cat review-1.md
+          } > /tmp/pr69-review.md
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/69/reviews \
+            -f event=COMMENT -f commit_id=18e78fcb0df8d809e972983f3e846093c7e7a7f4 \
+            -f body="$(cat /tmp/pr69-review.md)" \
+            --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
