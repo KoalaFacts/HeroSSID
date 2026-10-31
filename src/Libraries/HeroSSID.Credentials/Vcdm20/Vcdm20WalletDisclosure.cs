@@ -22,6 +22,14 @@ public sealed record Vcdm20WalletDisclosurePreview(
     string CredentialSha256);
 
 /// <summary>
+/// Full-disclosure preview bound to the exact issuer-signed, short-lived VC2
+/// revocation snapshot. SignedNotListed is not proof of live non-revocation.
+/// </summary>
+public sealed record Vcdm20WalletStatusDisclosurePreview(
+    Vcdm20WalletDisclosurePreview Disclosure,
+    string SnapshotSha256);
+
+/// <summary>
 /// Wallet-side no-key preview and preview-bound VC2 presentation signing.
 /// A wallet must obtain meaningful full-disclosure consent in its own UI.
 /// </summary>
@@ -118,6 +126,32 @@ public static class Vcdm20WalletDisclosure
             signedRequestJwt, preview.VerifierDid, preview.VerifierAudience,
             credentialJwt, preview.CredentialType, preview.SubjectContextUri,
             preview.HolderDid, holderSeed, clock);
+    }
+
+    /// <summary>
+    /// Verify an independently pinned issuer and verifier, full-disclosure VC2
+    /// claims and an authentic, current same-issuer revocation snapshot without
+    /// a holder private key. Only an authentic SignedNotListed set can preview.
+    /// </summary>
+    public static bool TryPrepareWithStatus(
+        string signedRequestJwt, string expectedVerifierDid, string expectedAudience,
+        string expectedCredentialType, Uri expectedContextUri, string expectedIssuerDid,
+        string credentialJwt, string holderDid, string issuerSignedSnapshotJwt,
+        TimeProvider clock, out Vcdm20WalletStatusDisclosurePreview? preview)
+    {
+        throw new NotSupportedException("Status-aware wallet preflight has not been implemented.");
+    }
+
+    /// <summary>
+    /// Recheck the exact verified snapshot, request, credential and full disclosed
+    /// subject at signing time before invoking the actual holder private key.
+    /// </summary>
+    public static string CreateHolderPresentationAfterStatusPreview(
+        Vcdm20WalletStatusDisclosurePreview preview, string signedRequestJwt,
+        string credentialJwt, string issuerSignedSnapshotJwt,
+        byte[] holderSeed, TimeProvider clock)
+    {
+        throw new NotSupportedException("Status-aware wallet holder signing has not been implemented.");
     }
 
     private static string Sha256(string jwt) =>
