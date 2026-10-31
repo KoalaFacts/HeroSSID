@@ -109,6 +109,108 @@ public sealed class Vcdm20SignedVerifierRequestHttpTests(DatabaseFixture fixture
     }
 
     [Fact]
+    public async Task TenantVerifierSignsExplicitVc2PolicyAndWalletRejectsAuthenticPolicySubstitution()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        await using var host = NewHost();
+        using var client = host.CreateClient();
+        string token = await GetTokenAsync(client, "did:manage credential:verify").ConfigureAwait(true);
+        string verifierDid = await CreateDidAsync(client, token).ConfigureAwait(true);
+        using var issuerKey = NewKey();
+        using var holderKey = NewKey();
+        string issuerDid = DidFromKey(issuerKey);
+        string holderDid = DidFromKey(holderKey);
+
+        var policyRequest = new
+        {
+            verifierDid, audience = Audience, trustedIssuerDid = issuerDid,
+            expectedCredentialType = "MembershipCredential",
+            subjectContextUri = Vocabulary.AbsoluteUri, lifetimeSeconds = 120
+        };
+        using var issued = await PostAsync(client, Route, policyRequest, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Created, issued.StatusCode);
+        using var body = JsonDocument.Parse(
+            await issued.Content.ReadAsStringAsync(TestContext.Current.CancellationToken).ConfigureAwait(true));
+        string requestJwt = body.RootElement.GetProperty("signedRequestJwt").GetString()!;
+        string nonce = body.RootElement.GetProperty("nonce").GetString()!;
+        Assert.True(OfflineSignedPresentationRequest.TryReadPolicyBound(
+            requestJwt, verifierDid, Audience, "MembershipCredential", Vocabulary,
+            TimeProvider.System, out var requestChallenge));
+        Assert.NotNull(requestChallenge);
+        Assert.Equal("MembershipCredential", requestChallenge!.CredentialType);
+        Assert.Equal(Vocabulary, requestChallenge.SubjectContextUri);
+        Assert.Equal(nonce, requestChallenge.Nonce);
+        Assert.False(OfflineSignedPresentationRequest.TryRead(
+            requestJwt, verifierDid, Audience, TimeProvider.System, out _));
+        Assert.False(OfflineSignedPresentationRequest.TryReadPolicyBound(
+            requestJwt, verifierDid, Audience, "AdministratorCredential", Vocabulary,
+            TimeProvider.System, out _));
+
+        using var subject = JsonDocument.Parse(
+            JsonSerializer.Serialize(new { id = holderDid, role = "member" }));
+        DateTimeOffset now = TimeProvider.System.GetUtcNow();
+        string credentialJwt = Vcdm20JoseCredential.Create(
+            issuerDid, holderDid, "MembershipCredential", Vocabulary,
+            subject.RootElement, issuerKey.Export(KeyBlobFormat.RawPrivateKey),
+            now.AddMinutes(-1), now.AddMinutes(10));
+        Assert.True(Vcdm20WalletDisclosure.TryPrepareRequiringSignedPolicy(
+            requestJwt, verifierDid, Audience, "MembershipCredential", Vocabulary,
+            issuerDid, credentialJwt, holderDid, TimeProvider.System, out var preview));
+        Assert.NotNull(preview);
+
+        // An independently valid issuer signature does not allow the same verifier
+        // request to be silently repurposed for an administrator qualification.
+        string adminCredential = Vcdm20JoseCredential.Create(
+            issuerDid, holderDid, "AdministratorCredential", Vocabulary,
+            subject.RootElement, issuerKey.Export(KeyBlobFormat.RawPrivateKey),
+            now.AddMinutes(-1), now.AddMinutes(10));
+        Assert.False(Vcdm20WalletDisclosure.TryPrepare(
+            requestJwt, verifierDid, Audience, "AdministratorCredential", Vocabulary,
+            issuerDid, adminCredential, holderDid, TimeProvider.System, out _));
+        var otherVocabulary = new Uri("https://issuer.example/contexts/admin/v1");
+        string otherCredential = Vcdm20JoseCredential.Create(
+            issuerDid, holderDid, "MembershipCredential", otherVocabulary,
+            subject.RootElement, issuerKey.Export(KeyBlobFormat.RawPrivateKey),
+            now.AddMinutes(-1), now.AddMinutes(10));
+        Assert.False(Vcdm20WalletDisclosure.TryPrepare(
+            requestJwt, verifierDid, Audience, "MembershipCredential", otherVocabulary,
+            issuerDid, otherCredential, holderDid, TimeProvider.System, out _));
+
+        string proof = Vcdm20WalletDisclosure.CreateHolderPresentationAfterPreview(
+            preview!, requestJwt, credentialJwt,
+            holderKey.Export(KeyBlobFormat.RawPrivateKey), TimeProvider.System);
+        string status = Vcdm20RevocationSnapshot.Create(
+            issuerDid, [], issuerKey.Export(KeyBlobFormat.RawPrivateKey),
+            TimeProvider.System.GetUtcNow(), TimeProvider.System);
+        using var verified = await PostAsync(client,
+            "/api/v1/credentials/vcdm20/verify-presentation", new
+            {
+                presentation = proof, revocationSnapshot = status,
+                audience = Audience, nonce,
+                expectedCredentialType = "MembershipCredential",
+                subjectContextUri = Vocabulary.AbsoluteUri
+            }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, verified.StatusCode);
+        using var result = JsonDocument.Parse(
+            await verified.Content.ReadAsStringAsync(TestContext.Current.CancellationToken).ConfigureAwait(true));
+        Assert.Equal("SignedNotListed", result.RootElement.GetProperty("status").GetString());
+        Assert.Equal("member", result.RootElement.GetProperty("verifiedSubject").GetProperty("role").GetString());
+
+        using var noContext = await PostAsync(client, Route, new
+        {
+            verifierDid, audience = Audience, trustedIssuerDid = issuerDid,
+            expectedCredentialType = "MembershipCredential", lifetimeSeconds = 120
+        }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, noContext.StatusCode);
+        using var noType = await PostAsync(client, Route, new
+        {
+            verifierDid, audience = Audience, trustedIssuerDid = issuerDid,
+            subjectContextUri = Vocabulary.AbsoluteUri, lifetimeSeconds = 120
+        }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, noType.StatusCode);
+    }
+
+    [Fact]
     public async Task AnonymousWrongScopeAndForeignVerifierDidCannotSign()
     {
         await EnsureMigratedAsync().ConfigureAwait(true);
