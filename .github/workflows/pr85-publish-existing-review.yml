@@ -1,0 +1,78 @@
+name: Publish existing independent PR85 review artifact
+
+on:
+  push:
+    branches:
+      - review/pr85-publish-existing-artifact-20261101
+
+permissions: {}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Download original completed four-file model review without rerunning model
+        uses: actions/download-artifact@v4
+        with:
+          name: independent-pr85-review
+          run-id: 41229706379
+          repository: KoalaFacts/HeroSSID
+          github-token: ${{ github.token }}
+      - name: Verify immutable candidate, original review, and exact four files
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/85 --jq '.head.sha')"
+          test "$actual" = "1e117443e20c6e49e7f691ad449c0685873aa9e2"
+          gh api repos/KoalaFacts/HeroSSID/pulls/85/files --paginate --jq '.[].filename' | sort >/tmp/actual-files.txt
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          head = "1e117443e20c6e49e7f691ad449c0685873aa9e2"
+          expected = {
+              "README.md",
+              "docs/jwt-vc-json-http-verifier-denylist.md",
+              "src/Services/HeroSSID.Api/Features/Credentials/JwtVcJsonRetiredIssuerVerificationEndpoint.cs",
+              "tests/Unit/HeroSSID.Api.Tests/JwtVcJsonVerifierDenylistHttpTests.cs",
+          }
+          seen = []
+          assert set(Path("/tmp/actual-files.txt").read_text().splitlines()) == expected
+          for part in (1, 2):
+              data = json.loads(Path(f"review-{part}.json").read_text())
+              raw = json.loads(Path(f"review-model-{part}.json").read_text())
+              assert data["head"] == head and data["part"] == part
+              assert data["review"]["verdict"] == raw["verdict"]
+              assert raw["verdict"] in ("no_actionable_findings", "actionable_findings", "inconclusive")
+              assert len(Path(f"review-{part}.md").read_text()) > 200
+              assert Path(f"review-head-{part}.txt").read_text().strip() == head
+              seen.extend(data["files"])
+          assert len(seen) == len(expected) and set(seen) == expected, (seen, expected)
+          PY
+      - name: Submit actual model review to PR85 at immutable candidate SHA
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo 'Independent Qwen2.5-Coder 7B review of ALL FOUR PR #85 emergency-denial HTTP files (original completed model artifacts from workflow run 41229706379).'
+            echo
+            echo 'Reviewed exact HEAD: 1e117443e20c6e49e7f691ad449c0685873aa9e2.'
+            echo 'Base: 5523fcda08a6cc8b0712fd627ba02a0eef1be810.'
+            echo 'Automated model analysis, NOT human approval or an external cryptographic audit; all findings need itemized disposition.'
+            echo
+            cat review-1.md
+            echo
+            cat review-2.md
+          } >/tmp/review.md
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/85/reviews \
+            -f event=COMMENT -f commit_id=1e117443e20c6e49e7f691ad449c0685873aa9e2 \
+            -f body="$(cat /tmp/review.md)" \
+            --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
