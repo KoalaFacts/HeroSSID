@@ -139,7 +139,26 @@ public static class Vcdm20WalletDisclosure
         string credentialJwt, string holderDid, string issuerSignedSnapshotJwt,
         TimeProvider clock, out Vcdm20WalletStatusDisclosurePreview? preview)
     {
-        throw new NotSupportedException("Status-aware wallet preflight has not been implemented.");
+        ArgumentNullException.ThrowIfNull(clock);
+        preview = null;
+
+        if (string.IsNullOrWhiteSpace(issuerSignedSnapshotJwt) ||
+            !TryPrepare(signedRequestJwt, expectedVerifierDid, expectedAudience,
+                expectedCredentialType, expectedContextUri, expectedIssuerDid,
+                credentialJwt, holderDid, clock, out var disclosure) ||
+            disclosure is null ||
+            Vcdm20RevocationSnapshot.Check(issuerSignedSnapshotJwt, credentialJwt,
+                disclosure.TrustedIssuerDid, clock.GetUtcNow()) !=
+                Vcdm20RevocationCheckResult.SignedNotListed)
+        {
+            // Never return even an authentic subject to the Wallet UI when
+            // the independently pinned issuer status is missing or negative.
+            return false;
+        }
+
+        preview = new Vcdm20WalletStatusDisclosurePreview(
+            disclosure, Sha256(issuerSignedSnapshotJwt));
+        return true;
     }
 
     /// <summary>
@@ -151,7 +170,41 @@ public static class Vcdm20WalletDisclosure
         string credentialJwt, string issuerSignedSnapshotJwt,
         byte[] holderSeed, TimeProvider clock)
     {
-        throw new NotSupportedException("Status-aware wallet holder signing has not been implemented.");
+        ArgumentNullException.ThrowIfNull(preview);
+        ArgumentNullException.ThrowIfNull(holderSeed);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        if (preview.Disclosure is null ||
+            string.IsNullOrWhiteSpace(issuerSignedSnapshotJwt) ||
+            !string.Equals(preview.SnapshotSha256, Sha256(issuerSignedSnapshotJwt),
+                StringComparison.Ordinal) ||
+            Vcdm20RevocationSnapshot.Check(issuerSignedSnapshotJwt, credentialJwt,
+                preview.Disclosure.TrustedIssuerDid, clock.GetUtcNow()) !=
+                Vcdm20RevocationCheckResult.SignedNotListed)
+        {
+            throw new ArgumentException(
+                "A current, unchanged issuer-signed status for the previewed VC2 credential is required.",
+                nameof(preview));
+        }
+
+        // This existing signer independently reauthenticates the exact
+        // verifier-signed request, issuer-signed VC2, displayed subject and
+        // holder DID before it accesses the caller-owned private seed.
+        string presentation = CreateHolderPresentationAfterPreview(
+            preview.Disclosure, signedRequestJwt, credentialJwt, holderSeed, clock);
+
+        // Signing may have crossed the snapshot expiry boundary. A proof
+        // with expired status must never be returned as status-checked.
+        if (Vcdm20RevocationSnapshot.Check(issuerSignedSnapshotJwt, credentialJwt,
+                preview.Disclosure.TrustedIssuerDid, clock.GetUtcNow()) !=
+                Vcdm20RevocationCheckResult.SignedNotListed)
+        {
+            throw new ArgumentException(
+                "The issuer-signed snapshot expired while creating the presentation.",
+                nameof(issuerSignedSnapshotJwt));
+        }
+
+        return presentation;
     }
 
     private static string Sha256(string jwt) =>
