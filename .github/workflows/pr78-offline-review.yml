@@ -3,7 +3,7 @@ name: Independent exact-head PR78 VC2 Wallet status-bound signed-policy review
 on:
   push:
     branches:
-      - review/pr78-vc2-strict-payload-20261031
+      - review/pr78-vc2-wallet-status-policy-20261031
 
 permissions: {}
 
@@ -39,7 +39,7 @@ jobs:
           done
           curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null
           ollama pull qwen2.5-coder:7b
-      - name: Independently examine complete issuer and verifier context shadowing patch
+      - name: Independently examine signed verifier policy, issuer status and holder signing
         shell: bash
         run: |
           set -euo pipefail
@@ -106,7 +106,7 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo 'Independent Qwen2.5-Coder 7B security/code review of ALL three changed PR #78 VC2 strict-JOSE profile files.'
+            echo 'Independent Qwen2.5-Coder 7B security/code review of ALL three changed PR #78 VC2 signed-policy/status Wallet files.'
             echo
             echo 'Reviewed exact head: 1c6aac2f89d5358996bd1de8fc265a45792d895f.'
             echo 'Baseline: 96e34b3997970877681f7e1ce9fa3b441c553a2a.'
