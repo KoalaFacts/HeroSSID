@@ -40,7 +40,7 @@ internal static class Vcdm20TrustedIssuerVerificationEndpoint
 }
 
 /// <summary>Policy is owned by the verifier; never infer trust from a JWT or successor proof.</summary>
-public sealed class VerifyVcdm20TrustedIssuersRequest
+public sealed record class VerifyVcdm20TrustedIssuersRequest
 {
     public string? Credential { get; init; }
     public string[]? TrustedIssuerDids { get; init; }
