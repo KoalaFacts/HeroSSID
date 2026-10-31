@@ -200,11 +200,15 @@ public sealed class Vcdm20RevocationSnapshotTests
         // The verifier time is LATER than the fractional cutoff, so this
         // regression reaches the signed iat comparison rather than merely
         // rejecting a cutoff in the future.
+        // The issuer's signed iat stores whole seconds, not DateTimeOffset
+        // ticks. Compare the inclusive lower bound to that signed instant.
+        DateTimeOffset signedSecond = DateTimeOffset.FromUnixTimeSeconds(
+            signedAt.ToUnixTimeSeconds());
         DateTimeOffset now = signedAt.AddMilliseconds(500);
-        DateTimeOffset cutoff = signedAt.AddTicks(1);
+        DateTimeOffset cutoff = signedSecond.AddTicks(1);
         Assert.True(cutoff < now);
         Assert.Equal(Vcdm20RevocationCheckResult.SignedNotListed,
-            CheckAfterVerifierCutoff(snapshot, credential, now, signedAt));
+            CheckAfterVerifierCutoff(snapshot, credential, now, signedSecond));
         Assert.Equal(Vcdm20RevocationCheckResult.Invalid,
             CheckAfterVerifierCutoff(snapshot, credential, now, cutoff));
     }
