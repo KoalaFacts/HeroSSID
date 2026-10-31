@@ -60,6 +60,61 @@ The server first authenticates the original credential using the caller's pinned
 
 A missing snapshot fails **400**. This is a private issuer-distributed export, **not** W3C Bitstring Status List or live non-revocation verification. Even `SignedNotListed` depends on the issuer supplying a **complete authoritative revocation set**, which HeroSSID cannot infer or publish from this request. No snapshot is created or stored by these verification endpoints.
 
+## Historical and current issuer verification, with verifier-owned trust (opt-in)
+
+An authenticated **non-.NET** verifier with the exact OAuth scope credential:verify
+may independently enroll up to **16 distinct** current/historical Ed25519
+did:key issuers. Call one of the separate endpoints:
+
+- POST /api/v1/credentials/jwt-vc-json/verify-trusted-issuers
+- POST /api/v1/credentials/jwt-vc-json/verify-trusted-issuers-with-status
+
+The existing one-issuer HTTP API contracts are unchanged. Example non-status
+request (placeholder DIDs, not real signing keys):
+
+~~~json
+{
+  "credential": "<original issuer-signed VC1.1 jwt_vc_json>",
+  "trustedIssuerDids": ["did:key:<old issuer>", "did:key:<new issuer>"],
+  "expectedHolderDid": "did:key:<holder>",
+  "expectedCredentialType": "https://issuer.example/credentials#MembershipCredential",
+  "subjectContextUri": "https://issuer.example/contexts/membership/v1"
+}
+~~~
+
+The server runs the existing **complete strict VC1.1 Ed25519 verification**
+against each independently pinned issuer key. The JWT's untrusted iss or kid
+never enrolls an issuer; a successor attestation never automatically promotes
+one. An authenticated success with status SignedButStatusUnchecked includes
+verifiedIssuerDid equal to the **actual real signer** and verifiedSubject equal
+to the signed full-disclosure JSON subject. Removing the old DID from the
+verifier's own list makes that issuer's old credentials Invalid without
+reissuing the new issuer's credentials. Invalid responses provide **null** for
+both verifiedIssuerDid and verifiedSubject.
+
+The -with-status route additionally requires
+revocationSnapshot containing an original private issuer-signed HeroSSID
+VC1.1 snapshot. The snapshot must be fresh and signed by the **same issuer
+whose real signature authenticated the exact submitted credential**. A clean
+snapshot from a different issuer—even one still independently enrolled—cannot
+clear the credential. The return status is SignedNotListed with signer and
+subject only when the same issuer's snapshot genuinely omits the digest.
+Revoked and Invalid return no signer and no subject.
+
+Issuer trust lists must contain 1–16 unique, valid Ed25519 did:key DIDs;
+duplicate, missing, oversized or invalid policies fail HTTP 400. The unchecked
+endpoint refuses any supplied revocationSnapshot rather than silently ignoring
+a caller-requested status check. Anonymous calls fail 401, unauthorized scopes
+403. Both routes are POST-only, do not persist credentials, and do not change
+schema, keys or revocation registries.
+
+**Trust limitations:** issuer signature verification is not holder-key control,
+real identity, human consent, agent delegation or business authorization.
+The private SignedNotListed snapshot does not prove completeness or live
+non-revocation. This supports the narrow VC Data Model 1.1 jwt_vc_json
+encoding, but is not proof of independent third-party Wallet interoperability,
+complete OpenID4VP or standard W3C credentialStatus / Bitstring Status List.
+
 ## Trust, deployment and security limits
 
 - Authenticated `credential:verify` protects the HTTP interface; it does not automatically grant authority to credentials or their subject. These endpoints are independent issuer statement validators, **not holder private-key proofs**. A relying party requiring possession must verify a separate one-time holder-signed presentation with actual informed consent.
