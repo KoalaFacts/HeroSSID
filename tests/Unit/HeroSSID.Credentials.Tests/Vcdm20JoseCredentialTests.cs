@@ -163,6 +163,14 @@ public sealed class Vcdm20JoseCredentialTests
             out string deniedSigner, out var deniedClaims));
         Assert.Equal(string.Empty, deniedSigner);
         Assert.Equal(JsonValueKind.Undefined, deniedClaims.ValueKind);
+
+        // A retired historical DID is no longer trusted merely because an
+        // older credential was genuinely signed by that key.
+        Assert.False(Vcdm20TrustedIssuerVerifier.TryVerify(
+            original, [successorDid], _holderDid, CredentialType, Context, Now,
+            out deniedSigner, out deniedClaims));
+        Assert.Equal(string.Empty, deniedSigner);
+        Assert.Equal(JsonValueKind.Undefined, deniedClaims.ValueKind);
     }
 
     [Fact]
