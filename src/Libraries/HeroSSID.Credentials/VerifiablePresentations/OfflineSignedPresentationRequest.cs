@@ -110,9 +110,12 @@ public static class OfflineSignedPresentationRequest
     /// </summary>
     public static bool TryReadPolicyBound(string requestJwt, string expectedVerifierDid,
         string expectedAudience, string expectedCredentialType, Uri expectedContextUri,
-        TimeProvider clock, out PresentationChallenge? challenge) =>
-        TryReadCore(requestJwt, expectedVerifierDid, expectedAudience,
+        TimeProvider clock, out PresentationChallenge? challenge)
+    {
+        ArgumentNullException.ThrowIfNull(expectedContextUri);
+        return TryReadCore(requestJwt, expectedVerifierDid, expectedAudience,
             expectedCredentialType, expectedContextUri, true, clock, out challenge);
+    }
 
     private static bool TryReadCore(string requestJwt, string expectedVerifierDid,
         string expectedAudience, string? expectedCredentialType, Uri? expectedContextUri,
