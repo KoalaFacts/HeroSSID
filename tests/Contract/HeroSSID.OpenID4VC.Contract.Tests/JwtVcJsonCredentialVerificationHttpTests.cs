@@ -142,6 +142,123 @@ public sealed class JwtVcJsonCredentialVerificationHttpTests(AspireWebApplicatio
         Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);
     }
 
+    [Fact]
+    public async Task HistoricalAndCurrentVc11IssuersAuthenticateOverRealHttpWithSameSignerStatus()
+    {
+        const string trustedPath = "/api/v1/credentials/jwt-vc-json/verify-trusted-issuers";
+        const string trustedStatusPath =
+            "/api/v1/credentials/jwt-vc-json/verify-trusted-issuers-with-status";
+
+        using var oldIssuer = NewKey();
+        using var newIssuer = NewKey();
+        using var holder = NewKey();
+        string oldDid = Did(oldIssuer);
+        string newDid = Did(newIssuer);
+        string holderDid = Did(holder);
+        string oldCredential = Issue(oldIssuer, oldDid, holderDid);
+        string newCredential = Issue(newIssuer, newDid, holderDid);
+
+        foreach (var (credential, expectedSigner) in new[]
+        {
+            (oldCredential, oldDid), (newCredential, newDid)
+        })
+        {
+            using var accepted = await _client.AuthorizedPostAsJsonAsync(trustedPath, new
+            {
+                credential, trustedIssuerDids = new[] { oldDid, newDid },
+                expectedHolderDid = holderDid, expectedCredentialType = CredentialType,
+                subjectContextUri = Vocabulary.AbsoluteUri
+            }).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+            var body = await accepted.Content.ReadFromJsonAsync<JsonElement>().ConfigureAwait(true);
+            Assert.Equal("SignedButStatusUnchecked", body.GetProperty("status").GetString());
+            Assert.Equal(expectedSigner, body.GetProperty("verifiedIssuerDid").GetString());
+            Assert.Equal("member", body.GetProperty("verifiedSubject").GetProperty("role").GetString());
+        }
+
+        DateTimeOffset observed = TimeProvider.System.GetUtcNow();
+        string cleanStatus = JwtVcJsonRevocationSnapshot.Create(newDid, [],
+            Seed(newIssuer), observed, TimeProvider.System);
+        string oldSignerStatus = JwtVcJsonRevocationSnapshot.Create(oldDid, [],
+            Seed(oldIssuer), observed, TimeProvider.System);
+        string revoked = JwtVcJsonRevocationSnapshot.Create(newDid,
+            [newCredential], Seed(newIssuer), observed, TimeProvider.System);
+
+        foreach (var (snapshot, expected) in new[]
+        {
+            (cleanStatus, "SignedNotListed"), (oldSignerStatus, "Invalid"),
+            (revoked, "Revoked")
+        })
+        {
+            using var response = await _client.AuthorizedPostAsJsonAsync(
+                trustedStatusPath, new
+                {
+                    credential = newCredential, trustedIssuerDids = new[] { oldDid, newDid },
+                    expectedHolderDid = holderDid,
+                    expectedCredentialType = CredentialType,
+                    subjectContextUri = Vocabulary.AbsoluteUri,
+                    revocationSnapshot = snapshot
+                }).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>().ConfigureAwait(true);
+            Assert.Equal(expected, body.GetProperty("status").GetString());
+            if (expected == "SignedNotListed")
+            {
+                Assert.Equal(newDid, body.GetProperty("verifiedIssuerDid").GetString());
+                Assert.Equal("member", body.GetProperty("verifiedSubject").GetProperty("role").GetString());
+            }
+            else
+            {
+                Assert.Equal(JsonValueKind.Null, body.GetProperty("verifiedIssuerDid").ValueKind);
+                Assert.Equal(JsonValueKind.Null, body.GetProperty("verifiedSubject").ValueKind);
+            }
+        }
+
+        using var retired = await _client.AuthorizedPostAsJsonAsync(trustedPath, new
+        {
+            credential = oldCredential, trustedIssuerDids = new[] { newDid },
+            expectedHolderDid = holderDid, expectedCredentialType = CredentialType,
+            subjectContextUri = Vocabulary.AbsoluteUri
+        }).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, retired.StatusCode);
+        var rejected = await retired.Content.ReadFromJsonAsync<JsonElement>().ConfigureAwait(true);
+        Assert.Equal("Invalid", rejected.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, rejected.GetProperty("verifiedIssuerDid").ValueKind);
+        Assert.Equal(JsonValueKind.Null, rejected.GetProperty("verifiedSubject").ValueKind);
+    }
+
+    [Fact]
+    public async Task HistoricalIssuerHttpRouteRequiresVerifierScopeAndRejectsAmbiguousPolicy()
+    {
+        const string route = "/api/v1/credentials/jwt-vc-json/verify-trusted-issuers";
+        using var issuer = NewKey();
+        using var holder = NewKey();
+        string issuerDid = Did(issuer);
+        string holderDid = Did(holder);
+        string credential = Issue(issuer, issuerDid, holderDid);
+        var request = new
+        {
+            credential, trustedIssuerDids = new[] { issuerDid },
+            expectedHolderDid = holderDid, expectedCredentialType = CredentialType,
+            subjectContextUri = Vocabulary.AbsoluteUri
+        };
+        using var anonymous = await _client.PostAsJsonAsync(route, request).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+
+        string issuanceOnly = await ScopeTokenAsync("credential:issue").ConfigureAwait(true);
+        using var forbidden = await PostWithBearerAsync(route, request, issuanceOnly)
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+
+        using var ambiguous = await _client.AuthorizedPostAsJsonAsync(route, new
+        {
+            credential, trustedIssuerDids = new[] { issuerDid, issuerDid },
+            expectedHolderDid = holderDid, expectedCredentialType = CredentialType,
+            subjectContextUri = Vocabulary.AbsoluteUri
+        }).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, ambiguous.StatusCode);
+    }
+
     private static object Request(string credential, string issuerDid, string holderDid,
         string type = CredentialType, Uri? context = null) => new
         {
