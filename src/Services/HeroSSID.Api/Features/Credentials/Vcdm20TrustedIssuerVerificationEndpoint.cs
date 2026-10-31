@@ -43,7 +43,7 @@ internal static class Vcdm20TrustedIssuerVerificationEndpoint
 public sealed record class VerifyVcdm20TrustedIssuersRequest
 {
     public string? Credential { get; init; }
-    public string[]? TrustedIssuerDids { get; init; }
+    public IReadOnlyCollection<string>? TrustedIssuerDids { get; init; }
     public string? ExpectedHolderDid { get; init; }
     public string? ExpectedCredentialType { get; init; }
     public Uri? SubjectContextUri { get; init; }
