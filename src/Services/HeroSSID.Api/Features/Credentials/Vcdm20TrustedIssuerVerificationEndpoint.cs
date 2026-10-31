@@ -56,13 +56,93 @@ internal static class Vcdm20TrustedIssuerVerificationEndpoint
 
     internal static IResult VerifyWithDenylist(
         [FromBody] VerifyVcdm20TrustedIssuersRequest request,
-        [FromServices] TimeProvider clock) => throw new NotSupportedException(
-            "Verifier-owned direct VC2 HTTP denial is not yet implemented.");
+        [FromServices] TimeProvider clock) =>
+        VerifyDenylistCore(request, clock, withStatus: false);
 
     internal static IResult VerifyWithDenylistAndStatus(
         [FromBody] VerifyVcdm20TrustedIssuersRequest request,
-        [FromServices] TimeProvider clock) => throw new NotSupportedException(
-            "Verifier-owned direct VC2 HTTP denial with issuer status is not yet implemented.");
+        [FromServices] TimeProvider clock) =>
+        VerifyDenylistCore(request, clock, withStatus: true);
+
+    private static IResult VerifyDenylistCore(
+        VerifyVcdm20TrustedIssuersRequest request, TimeProvider clock, bool withStatus)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        if (!TryValidateDenylistRequest(request, withStatus,
+                out string[] issuers, out string[] denied))
+        {
+            return InvalidRequest();
+        }
+
+        // The source JWT, issuer signer, holder, context, type, expiry and
+        // any actual issuer's status must validate before returning claims.
+        // The SDK distinguishes a verifier-owned local denial from issuer revocation.
+        string authenticatedIssuer;
+        JsonElement authenticatedSubject;
+        DateTimeOffset now = clock.GetUtcNow();
+        Vcdm20VerifierPolicyResult status;
+        if (withStatus)
+        {
+            status = Vcdm20VerifierDenylist.CheckWithStatus(
+                request.Credential!, request.RevocationSnapshot!, issuers, denied,
+                request.ExpectedHolderDid!, request.ExpectedCredentialType!,
+                request.SubjectContextUri!, now,
+                out authenticatedIssuer, out authenticatedSubject);
+        }
+        else
+        {
+            status = Vcdm20VerifierDenylist.Check(
+                request.Credential!, issuers, denied, request.ExpectedHolderDid!,
+                request.ExpectedCredentialType!, request.SubjectContextUri!, now,
+                out authenticatedIssuer, out authenticatedSubject);
+        }
+
+        bool disclose = status is Vcdm20VerifierPolicyResult.SignedButStatusUnchecked
+            or Vcdm20VerifierPolicyResult.SignedNotListed;
+        return Results.Ok(new VerifyVcdm20TrustedIssuersResponse(
+            status.ToString(), disclose ? authenticatedIssuer : null,
+            disclose ? authenticatedSubject : (JsonElement?)null));
+    }
+
+    private static bool TryValidateDenylistRequest(
+        VerifyVcdm20TrustedIssuersRequest request, bool withStatus,
+        out string[] issuers, out string[] denied)
+    {
+        issuers = [];
+        denied = [];
+        IReadOnlyCollection<string>? supplied = request.DeniedCredentialSha256;
+        if (supplied is null || supplied.Count > 256 ||
+            !TryValidate(request with { DeniedCredentialSha256 = null },
+                withStatus, out issuers))
+        {
+            return false;
+        }
+
+        // Read the entire verifier-owned policy once, and reject even a
+        // malformed LATE entry. Never treat an invalid policy as an empty set.
+        string[] snapshot = supplied.ToArray();
+        if (snapshot.Length != supplied.Count)
+        {
+            return false;
+        }
+
+        var unique = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string digest in snapshot)
+        {
+            if (digest is not { Length: 64 } ||
+                !digest.All(static character =>
+                    character is >= '0' and <= '9' or >= 'a' and <= 'f') ||
+                !unique.Add(digest))
+            {
+                return false;
+            }
+        }
+
+        denied = snapshot;
+        return true;
+    }
 
     /// <summary>
     /// Verify original VC2 signer from the caller's separately enrolled trust policy.
@@ -137,6 +217,13 @@ internal static class Vcdm20TrustedIssuerVerificationEndpoint
         IReadOnlyCollection<string>? trusted = request.TrustedIssuerDids;
         string? status = request.RevocationSnapshot;
 
+        // Existing unchecked routes must never silently ignore a submitted
+        // caller-owned emergency denial policy, including an empty array.
+        if (request.DeniedCredentialSha256 is not null)
+        {
+            return false;
+        }
+
         if (string.IsNullOrWhiteSpace(credential) ||
             credential.Length > MaximumJwtLength ||
             string.IsNullOrWhiteSpace(expectedHolder) ||
@@ -197,7 +284,7 @@ internal static class Vcdm20TrustedIssuerVerificationEndpoint
 
     private static IResult InvalidRequest() => Results.Problem(
         title: "Invalid Request",
-        detail: "Bounded direct VC2 JWT, 1–16 distinct independently trusted issuer DIDs, holder, type and HTTPS vocabulary are required; status must be supplied only to the status endpoint.",
+        detail: "Bounded direct VC2 JWT, 1–16 distinct independently trusted issuer DIDs, holder, type and HTTPS vocabulary are required; issuer status and an explicit canonical verifier denylist must be supplied only on their matching dedicated endpoints.",
         statusCode: StatusCodes.Status400BadRequest);
 
     private static IResult InvalidCredential() =>
