@@ -1,15 +1,15 @@
-name: Independent exact-head PR72 VC2 signed verifier-request policy review
+name: Independent exact-head PR72 VC2 signed-policy HTTP verification review
 
 on:
   push:
     branches:
-      - review/pr72-vc2-signed-policy-20261031
+      - review/pr72-vc2-verify-signed-policy-20261031
 
 permissions: {}
 
 jobs:
   review:
-    name: Independent model security review of complete four-file VC2 signed verifier policy patch
+    name: Independent model security review of complete four-file VC2 signed-policy HTTP verification patch
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
@@ -39,7 +39,7 @@ jobs:
           done
           curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null
           ollama pull qwen2.5-coder:7b
-      - name: Independently inspect all nine signed-policy source test and documentation patches
+      - name: Independently inspect all four signed-policy source test and documentation patches
         shell: bash
         run: |
           set -euo pipefail
