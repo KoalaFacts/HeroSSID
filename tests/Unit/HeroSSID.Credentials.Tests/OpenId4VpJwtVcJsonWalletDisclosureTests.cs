@@ -93,7 +93,8 @@ public sealed class OpenId4VpJwtVcJsonWalletDisclosureTests
     public void SigningAfterPreviewCannotSubstituteAnotherAuthenticCredentialOrSignedRequest()
     {
         var challenges = new InMemoryPresentationChallengeStore(_clock);
-        var original = challenges.Issue(Guid.NewGuid(), Audience, _issuer.Did);
+        Guid tenant = Guid.NewGuid();
+        var original = challenges.Issue(tenant, Audience, _issuer.Did);
         string signedRequest = SignRequest(original);
         string credential = IssueCredential("active");
         Assert.True(Prepare(signedRequest, credential, _verifier.Did, Callback,
@@ -119,7 +120,7 @@ public sealed class OpenId4VpJwtVcJsonWalletDisclosureTests
         string form = OpenId4VpJwtVcJsonWalletDisclosure.CreateHolderResponseFormAfterPreview(
             preview!, signedRequest, credential, _holder.Seed, _clock);
         Assert.Equal(JwtVcJsonPresentationCheckResult.SignedButStatusUnchecked,
-            OpenId4VpJwtVcJsonDirectPost.CheckResponseForm(form, original.TenantId,
+            OpenId4VpJwtVcJsonDirectPost.CheckResponseForm(form, tenant,
                 Audience, original.Nonce, CredentialType, Context, challenges, _clock, out _));
     }
 
