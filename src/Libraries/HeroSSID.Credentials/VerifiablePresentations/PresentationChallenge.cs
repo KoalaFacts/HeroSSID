@@ -13,6 +13,14 @@ public sealed record PresentationChallenge
     /// <summary>The enrolled issuer explicitly trusted by the verifier for this request.</summary>
     public required string TrustedIssuerDid { get; init; }
 
+    /// <summary>Optional VC2-only credential type pinned in a verifier-signed request.</summary>
+    /// <remarks>Transient signing metadata, not persisted by the challenge store.</remarks>
+    public string? CredentialType { get; init; }
+
+    /// <summary>Optional VC2-only versioned HTTPS subject vocabulary pinned by the verifier.</summary>
+    /// <remarks>Transient signing metadata, not persisted by the challenge store.</remarks>
+    public Uri? SubjectContextUri { get; init; }
+
     /// <summary>UTC expiry; presentations cannot outlive the challenge.</summary>
     public required DateTimeOffset ExpiresAt { get; init; }
 }

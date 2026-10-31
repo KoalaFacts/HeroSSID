@@ -43,6 +43,29 @@ Content-Type: application/json
 
 The **201** response contains `signedRequestJwt`, `verifierDid`, `audience`, `nonce`, `trustedIssuerDid` and `expiresAt`. The server verifies the verifier DID is active and **belongs to the authenticated tenant**, decrypts only that tenant's existing verifier seed, signs the durable one-use challenge with the genuine Ed25519 key, then zeroes the decrypted bytes. An unowned or inactive verifier DID returns **404**, anonymous **401**, wrong scope **403**, malformed policy **400**, retained challenge capacity exhaustion **429**, and key or challenge-store unavailability **503**. No new schema is required.
 
+### Bind the verifier's credential type and subject vocabulary (opt-in)
+
+For a new VC2 verifier request, send **both** `expectedCredentialType` and `subjectContextUri` alongside the existing active tenant-owned verifier DID, trusted issuer and HTTPS audience. A single field without the other is a **400**; type must be bounded and non-whitespace, and the context must be a versioned absolute HTTPS URI without credentials or a fragment.
+
+```json
+{
+  "verifierDid": "did:key:<active-tenant-owned-verifier>",
+  "audience": "https://verifier.example/present",
+  "trustedIssuerDid": "did:key:<independently-chosen-issuer>",
+  "expectedCredentialType": "MembershipCredential",
+  "subjectContextUri": "https://issuer.example/contexts/member/v1",
+  "lifetimeSeconds": 120
+}
+```
+
+The response is the same **201** JSON shape. Its actual Ed25519-signed `signedRequestJwt` now includes exact `credentialType` and `subjectContextUri` claims. They are the **verifier's requested policy**, not assertions about the holder. The issuer and holder still sign their respective separate artifacts. An external verifier with its own independent seed can also opt in when calling `OfflineSignedPresentationRequest.Create` on a challenge carrying `CredentialType` and `SubjectContextUri`; the original durable challenge store still retains tenant, issuer, audience and one-use nonce without new schema.
+
+A Wallet integrating this profile should call `OfflineSignedPresentationRequest.TryReadPolicyBound` with its **independently pinned verifier DID, audience, expected credential type and exact HTTPS subject vocabulary**. To preview claims before using any holder key, call `Vcdm20WalletDisclosure.TryPrepareRequiringSignedPolicy` with these independent pins, the original issuer-signed VC2 JWT, and the expected holder DID. After the Wallet's own informed full-disclosure decision, call `CreateHolderPresentationAfterPreview`. It verifies exact artifacts and both signers again. A real credential for a different issuer, type or context is rejected even if it carries a mathematically valid issuer signature.
+
+**Downgrade boundary:** the original six-claim `herossid-request+jwt` remains readable by the legacy `TryRead` and `TryPrepare` APIs, but can **never** pass `TryReadPolicyBound` or `TryPrepareRequiringSignedPolicy`. Conversely, a new eight-claim policy-bound request does not pass legacy `TryRead`; an integration that requires this signed policy must use the strict APIs, rather than falling back to the legacy parser. This is a private HeroSSID request subprofile, **not** an OpenID4VP request, W3C conformance, genuine consent proof, identity vetting or business delegation.
+
+**Server-side authorization limit:** this signed policy is enforced at Wallet preview/signing time. The HTTP verification endpoint still receives the relying party's caller-specified credential type and context and checks issuer/holder signatures and the one-use challenge, whose durable record does **not** persist those two policy fields. A relying party requiring end-to-end verifier-policy proof must retain its own request/policy record and compare it when accepting the result; this change does not introduce a new server-side authorization decision or persistence contract.
+
 This optional server-managed **verifier** signing is not holder key custody, holder consent, identity proofing or a hosted OpenID4VP Request Object. The holder must independently pin that verifier DID **and** audience through a trusted channel before accepting the signed JWT; a DID embedded in the request is not a trusted pin.
 
 ## 2. Explicitly cancel a declined or abandoned verifier challenge

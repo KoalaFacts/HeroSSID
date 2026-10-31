@@ -49,15 +49,35 @@ public static class OfflineSignedPresentationRequest
             throw new ArgumentException("An unexpired, bounded verifier challenge and did:key issuer are required.", nameof(challenge));
         }
 
-        string payload = JsonSerializer.Serialize(new
+        bool policyBound = challenge.CredentialType is not null || challenge.SubjectContextUri is not null;
+        if (policyBound && !ValidPolicy(challenge.CredentialType, challenge.SubjectContextUri))
         {
-            iss = verifierDid,
-            aud = challenge.Audience,
-            nonce = challenge.Nonce,
-            trustedIssuerDid = challenge.TrustedIssuerDid,
-            iat = PresentationChallengePolicy.NumericDate(now),
-            exp = PresentationChallengePolicy.NumericDate(challenge.ExpiresAt)
-        });
+            throw new ArgumentException(
+                "A bound verifier request requires an exact credential type and versioned HTTPS subject context.",
+                nameof(challenge));
+        }
+
+        string payload = policyBound
+            ? JsonSerializer.Serialize(new
+            {
+                iss = verifierDid,
+                aud = challenge.Audience,
+                nonce = challenge.Nonce,
+                trustedIssuerDid = challenge.TrustedIssuerDid,
+                credentialType = challenge.CredentialType,
+                subjectContextUri = challenge.SubjectContextUri!.AbsoluteUri,
+                iat = PresentationChallengePolicy.NumericDate(now),
+                exp = PresentationChallengePolicy.NumericDate(challenge.ExpiresAt)
+            })
+            : JsonSerializer.Serialize(new
+            {
+                iss = verifierDid,
+                aud = challenge.Audience,
+                nonce = challenge.Nonce,
+                trustedIssuerDid = challenge.TrustedIssuerDid,
+                iat = PresentationChallengePolicy.NumericDate(now),
+                exp = PresentationChallengePolicy.NumericDate(challenge.ExpiresAt)
+            });
         string signed = Ed25519JwtSigner.CreateSignedJwt(RequestHeader, payload, verifierPrivateKey);
         if (signed.Length > MaximumRequestLength ||
             !Ed25519JwtSigner.VerifySignedJwt(signed, verifierPublicKey))
@@ -79,7 +99,27 @@ public static class OfflineSignedPresentationRequest
     /// Only after success may the holder inspect the requested issuer and approve disclosure.
     /// </summary>
     public static bool TryRead(string requestJwt, string expectedVerifierDid, string expectedAudience,
+        TimeProvider clock, out PresentationChallenge? challenge) =>
+        TryReadCore(requestJwt, expectedVerifierDid, expectedAudience,
+            null, null, false, clock, out challenge);
+
+    /// <summary>
+    /// Authenticate an opt-in verifier request that signs the exact credential type
+    /// and HTTPS subject vocabulary. Legacy six-field requests cannot satisfy
+    /// this method; the caller must pin both policy fields independently.
+    /// </summary>
+    public static bool TryReadPolicyBound(string requestJwt, string expectedVerifierDid,
+        string expectedAudience, string expectedCredentialType, Uri expectedContextUri,
         TimeProvider clock, out PresentationChallenge? challenge)
+    {
+        ArgumentNullException.ThrowIfNull(expectedContextUri);
+        return TryReadCore(requestJwt, expectedVerifierDid, expectedAudience,
+            expectedCredentialType, expectedContextUri, true, clock, out challenge);
+    }
+
+    private static bool TryReadCore(string requestJwt, string expectedVerifierDid,
+        string expectedAudience, string? expectedCredentialType, Uri? expectedContextUri,
+        bool requirePolicy, TimeProvider clock, out PresentationChallenge? challenge)
     {
         ArgumentNullException.ThrowIfNull(clock);
         challenge = null;
@@ -87,9 +127,10 @@ public static class OfflineSignedPresentationRequest
         if (string.IsNullOrWhiteSpace(requestJwt) ||
             string.IsNullOrWhiteSpace(expectedAudience) ||
             expectedAudience.Length > PresentationChallengePolicy.MaximumIdentifierLength ||
+            (requirePolicy && !ValidPolicy(expectedCredentialType, expectedContextUri)) ||
             !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(expectedVerifierDid, out var verifierPublicKey) ||
             !StrictJwtReader.TryRead(requestJwt, "herossid-request+jwt", MaximumRequestLength, out var payload) ||
-            payload.EnumerateObject().Count() != 6 ||
+            payload.EnumerateObject().Count() != (requirePolicy ? 8 : 6) ||
             !StrictJwtReader.TryGetString(payload, "iss", out var issuer) ||
             !string.Equals(issuer, expectedVerifierDid, StringComparison.Ordinal) ||
             !StrictJwtReader.TryGetString(payload, "aud", out var audience) ||
@@ -105,6 +146,15 @@ public static class OfflineSignedPresentationRequest
             return false;
         }
 
+        if (requirePolicy &&
+            (!StrictJwtReader.TryGetString(payload, "credentialType", out var signedType) ||
+            !string.Equals(signedType, expectedCredentialType, StringComparison.Ordinal) ||
+            !StrictJwtReader.TryGetString(payload, "subjectContextUri", out var signedContext) ||
+            !string.Equals(signedContext, expectedContextUri!.AbsoluteUri, StringComparison.Ordinal)))
+        {
+            return false;
+        }
+
         decimal now = PresentationChallengePolicy.NumericDate(clock.GetUtcNow());
         if (issuedAt > now || expiresAt <= now || expiresAt <= issuedAt ||
             expiresAt - issuedAt > 300 ||
@@ -114,17 +164,26 @@ public static class OfflineSignedPresentationRequest
             return false;
         }
 
-        // JWT NumericDate permits fractions; reconstruct the exact verifier request expiry
-        // instead of rounding seconds down and silently shortening a fresh challenge.
         challenge = new PresentationChallenge
         {
             Nonce = nonce,
             Audience = audience,
             TrustedIssuerDid = trustedIssuerDid,
-            ExpiresAt = DateTimeOffset.UnixEpoch.AddTicks((long)(expiresAt * TimeSpan.TicksPerSecond))
+            ExpiresAt = DateTimeOffset.UnixEpoch.AddTicks((long)(expiresAt * TimeSpan.TicksPerSecond)),
+            CredentialType = requirePolicy ? expectedCredentialType : null,
+            SubjectContextUri = requirePolicy ? expectedContextUri : null
         };
         return true;
     }
+
+    private static bool ValidPolicy(string? credentialType, Uri? context) =>
+        !string.IsNullOrWhiteSpace(credentialType) &&
+        credentialType.Length <= 128 &&
+        !credentialType.Any(char.IsWhiteSpace) &&
+        context is not null && context.IsAbsoluteUri &&
+        string.Equals(context.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) &&
+        string.IsNullOrEmpty(context.UserInfo) && string.IsNullOrEmpty(context.Fragment) &&
+        context.AbsoluteUri.Length <= PresentationChallengePolicy.MaximumIdentifierLength;
 
     /// <summary>
     /// Creates the existing full-disclosure holder response ONLY after verifying the request

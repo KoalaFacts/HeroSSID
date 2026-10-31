@@ -94,6 +94,8 @@ internal static class Vcdm20PresentationEndpoints
         ArgumentNullException.ThrowIfNull(encryption);
         ArgumentNullException.ThrowIfNull(clock);
 
+        bool includePolicy = request.ExpectedCredentialType is not null ||
+            request.SubjectContextUri is not null;
         if (!ValidAudience(request.Audience) ||
             string.IsNullOrWhiteSpace(request.VerifierDid) ||
             request.VerifierDid.Length > 255 ||
@@ -101,7 +103,9 @@ internal static class Vcdm20PresentationEndpoints
             string.IsNullOrWhiteSpace(request.TrustedIssuerDid) ||
             request.TrustedIssuerDid.Length > 255 ||
             !new DidKeyMethod().IsValid(request.TrustedIssuerDid) ||
-            request.LifetimeSeconds is < 1 or > 300)
+            request.LifetimeSeconds is < 1 or > 300 ||
+            (includePolicy && !ValidSignedPolicy(request.ExpectedCredentialType,
+                request.SubjectContextUri)))
         {
             return BadSignedRequest();
         }
@@ -137,8 +141,13 @@ internal static class Vcdm20PresentationEndpoints
             var challenge = challenges.Issue(
                 tenantId, request.Audience!, request.TrustedIssuerDid!,
                 TimeSpan.FromSeconds(request.LifetimeSeconds));
+            var signedChallenge = includePolicy ? challenge with
+            {
+                CredentialType = request.ExpectedCredentialType,
+                SubjectContextUri = request.SubjectContextUri
+            } : challenge;
             string signed = OfflineSignedPresentationRequest.Create(
-                challenge, request.VerifierDid!, privateKey, clock);
+                signedChallenge, request.VerifierDid!, privateKey, clock);
             return Results.Json(new IssueVcdm20SignedPresentationRequestResponse(
                 signed, request.VerifierDid!, challenge.Audience, challenge.Nonce,
                 challenge.TrustedIssuerDid, challenge.ExpiresAt),
@@ -366,6 +375,15 @@ internal static class Vcdm20PresentationEndpoints
         }
     }
 
+    private static bool ValidSignedPolicy(string? credentialType, Uri? context) =>
+        !string.IsNullOrWhiteSpace(credentialType) &&
+        credentialType.Length <= 128 &&
+        !credentialType.Any(char.IsWhiteSpace) &&
+        context is not null && context.IsAbsoluteUri &&
+        string.Equals(context.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) &&
+        string.IsNullOrEmpty(context.UserInfo) && string.IsNullOrEmpty(context.Fragment) &&
+        context.AbsoluteUri.Length <= 2048;
+
     private static bool ValidAudience(string? audience) =>
         !string.IsNullOrWhiteSpace(audience) && audience.Length <= 2048 &&
         Uri.TryCreate(audience, UriKind.Absolute, out var uri) &&
@@ -375,7 +393,7 @@ internal static class Vcdm20PresentationEndpoints
 
     private static IResult BadSignedRequest() => Results.Problem(
         title: "Invalid Signed Request",
-        detail: "An owned active Ed25519 verifier did:key, exact HTTPS audience, valid trusted issuer did:key and lifetime of 1–300 seconds are required.",
+        detail: "An active owned verifier DID, HTTPS audience, trusted issuer DID and 1–300-second lifetime are required. Optional signed credential type and HTTPS context must be supplied together.",
         statusCode: StatusCodes.Status400BadRequest);
 
     private static IResult BadChallenge() => Results.Problem(
@@ -395,6 +413,8 @@ public sealed class IssueVcdm20SignedPresentationRequestRequest
     public string? VerifierDid { get; init; }
     public string? Audience { get; init; }
     public string? TrustedIssuerDid { get; init; }
+    public string? ExpectedCredentialType { get; init; }
+    public Uri? SubjectContextUri { get; init; }
     public int LifetimeSeconds { get; init; } = 120;
 }
 

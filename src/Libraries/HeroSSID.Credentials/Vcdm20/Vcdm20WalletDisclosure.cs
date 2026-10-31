@@ -58,8 +58,11 @@ public static class Vcdm20WalletDisclosure
             string.IsNullOrWhiteSpace(expectedCredentialType) ||
             string.IsNullOrWhiteSpace(credentialJwt) ||
             string.IsNullOrWhiteSpace(holderDid) ||
-            !OfflineSignedPresentationRequest.TryRead(signedRequestJwt,
-                expectedVerifierDid, expectedAudience, clock, out var challenge) ||
+            (!OfflineSignedPresentationRequest.TryRead(signedRequestJwt,
+                expectedVerifierDid, expectedAudience, clock, out var challenge) &&
+             !OfflineSignedPresentationRequest.TryReadPolicyBound(signedRequestJwt,
+                expectedVerifierDid, expectedAudience, expectedCredentialType,
+                expectedContextUri, clock, out challenge)) ||
             challenge is null ||
             !string.Equals(challenge.TrustedIssuerDid, expectedIssuerDid,
                 StringComparison.Ordinal) ||
@@ -82,6 +85,27 @@ public static class Vcdm20WalletDisclosure
             Sha256(signedRequestJwt),
             Sha256(credentialJwt));
         return true;
+    }
+
+    /// <summary>
+    /// Reject legacy signed requests that do not bind a verifier-selected credential
+    /// type and HTTPS subject context. The Wallet must independently pin this policy
+    /// to avoid accepting an authentic but downgraded unbound verifier request.
+    /// </summary>
+    public static bool TryPrepareRequiringSignedPolicy(
+        string signedRequestJwt, string expectedVerifierDid, string expectedAudience,
+        string expectedCredentialType, Uri expectedContextUri, string expectedIssuerDid,
+        string credentialJwt, string holderDid, TimeProvider clock,
+        out Vcdm20WalletDisclosurePreview? preview)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        preview = null;
+        return OfflineSignedPresentationRequest.TryReadPolicyBound(
+                signedRequestJwt, expectedVerifierDid, expectedAudience,
+                expectedCredentialType, expectedContextUri, clock, out _) &&
+            TryPrepare(signedRequestJwt, expectedVerifierDid, expectedAudience,
+                expectedCredentialType, expectedContextUri, expectedIssuerDid,
+                credentialJwt, holderDid, clock, out preview);
     }
 
     /// <summary>
