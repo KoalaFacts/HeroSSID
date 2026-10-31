@@ -11,7 +11,7 @@ import sys
 from urllib.request import Request, urlopen
 
 BASE = "bb606576888e37631ee1e513294109564f16c40d"
-HEAD = "f70bdabda307d4eab8fc07a087ffc67e40ae3df6"
+HEAD = "c1dca10b46f6c681b8a3649cd55b42124ea36a18"
 MODEL = "qwen2.5-coder:7b"
 PARTS = 2
 CHANGED_FILES = {
@@ -20,8 +20,10 @@ CHANGED_FILES = {
     "src/Libraries/HeroSSID.Credentials/Utilities/StrictJwtReader.cs",
     "src/Libraries/HeroSSID.Credentials/Vcdm20/Vcdm20JoseCredential.cs",
     "src/Libraries/HeroSSID.Credentials/Vcdm20/Vcdm20JosePresentation.cs",
+    "src/Libraries/HeroSSID.Credentials/Vcdm20/Vcdm20RevocationSnapshot.cs",
     "tests/Unit/HeroSSID.Credentials.Tests/Vcdm20JoseCredentialTests.cs",
     "tests/Unit/HeroSSID.Credentials.Tests/Vcdm20JosePresentationTests.cs",
+    "tests/Unit/HeroSSID.Credentials.Tests/Vcdm20RevocationSnapshotTests.cs",
 }
 
 SCHEMA = {

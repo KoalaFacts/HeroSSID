@@ -9,7 +9,7 @@ permissions: {}
 
 jobs:
   review:
-    name: Independent model security review of complete seven-file VC2 signed-policy HTTP verification patch
+    name: Independent model security review of complete nine-file VC2 signed-policy HTTP verification patch
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
@@ -19,13 +19,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Verify immutable source and complete seven-file diff
+      - name: Verify immutable source and complete nine-file diff
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse f70bdabda307d4eab8fc07a087ffc67e40ae3df6^{commit})" = "f70bdabda307d4eab8fc07a087ffc67e40ae3df6"
+          test "$(git rev-parse c1dca10b46f6c681b8a3649cd55b42124ea36a18^{commit})" = "c1dca10b46f6c681b8a3649cd55b42124ea36a18"
           test "$(git rev-parse bb606576888e37631ee1e513294109564f16c40d^{commit})" = "bb606576888e37631ee1e513294109564f16c40d"
-          test "$(git diff --name-only bb606576888e37631ee1e513294109564f16c40d f70bdabda307d4eab8fc07a087ffc67e40ae3df6 | wc -l)" -eq 7
+          test "$(git diff --name-only bb606576888e37631ee1e513294109564f16c40d c1dca10b46f6c681b8a3649cd55b42124ea36a18 | wc -l)" -eq 9
       - name: Install independent local model
         shell: bash
         run: |
@@ -39,7 +39,7 @@ jobs:
           done
           curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null
           ollama pull qwen2.5-coder:7b
-      - name: Independently inspect all seven JOSE content-type source test and documentation patches
+      - name: Independently inspect all nine JOSE content-type source test and documentation patches
         shell: bash
         run: |
           set -euo pipefail
@@ -49,7 +49,7 @@ jobs:
             test -s "review-$part.md"
             test -s "review-$part.json"
             test -s "review-model-$part.json"
-            test "$(cat "review-head-$part.txt")" = "f70bdabda307d4eab8fc07a087ffc67e40ae3df6"
+            test "$(cat "review-head-$part.txt")" = "c1dca10b46f6c681b8a3649cd55b42124ea36a18"
           done
       - name: Retain raw model artifact and exact-head provenance
         if: always()
@@ -77,26 +77,28 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: independent-pr73-review
-      - name: Verify PR head and exact seven-file model coverage
+      - name: Verify PR head and exact nine-file model coverage
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/73 --jq '.head.sha')"
-          test "$actual" = "f70bdabda307d4eab8fc07a087ffc67e40ae3df6"
+          test "$actual" = "c1dca10b46f6c681b8a3649cd55b42124ea36a18"
           python3 - <<'PY'
           import json
           from pathlib import Path
-          head = "f70bdabda307d4eab8fc07a087ffc67e40ae3df6"
+          head = "c1dca10b46f6c681b8a3649cd55b42124ea36a18"
           expected = {
             "docs/vcdm20-jose-presentation-profile.md",
             "docs/vcdm20-jose-profile.md",
             "src/Libraries/HeroSSID.Credentials/Utilities/StrictJwtReader.cs",
             "src/Libraries/HeroSSID.Credentials/Vcdm20/Vcdm20JoseCredential.cs",
             "src/Libraries/HeroSSID.Credentials/Vcdm20/Vcdm20JosePresentation.cs",
+            "src/Libraries/HeroSSID.Credentials/Vcdm20/Vcdm20RevocationSnapshot.cs",
             "tests/Unit/HeroSSID.Credentials.Tests/Vcdm20JoseCredentialTests.cs",
             "tests/Unit/HeroSSID.Credentials.Tests/Vcdm20JosePresentationTests.cs",
+            "tests/Unit/HeroSSID.Credentials.Tests/Vcdm20RevocationSnapshotTests.cs",
           }
           examined = []
           for part in (1, 2):
@@ -118,9 +120,9 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo 'Independent Qwen2.5-Coder 7B security/code review of all seven changed PR #73 VC2 signed verifier request-policy files.'
+            echo 'Independent Qwen2.5-Coder 7B security/code review of all nine changed PR #73 VC2 signed verifier request-policy files.'
             echo
-            echo 'Reviewed exact head: f70bdabda307d4eab8fc07a087ffc67e40ae3df6.'
+            echo 'Reviewed exact head: c1dca10b46f6c681b8a3649cd55b42124ea36a18.'
             echo 'Baseline: bb606576888e37631ee1e513294109564f16c40d.'
             echo 'This is a submitted independent MODEL review, not human approval or external cryptographic certification.'
             echo 'All findings require explicit source/test verification before merge.'
@@ -130,6 +132,6 @@ jobs:
             cat review-2.md
           } > /tmp/pr73-review.md
           gh api --method POST repos/KoalaFacts/HeroSSID/pulls/73/reviews \
-            -f event=COMMENT -f commit_id=f70bdabda307d4eab8fc07a087ffc67e40ae3df6 \
+            -f event=COMMENT -f commit_id=c1dca10b46f6c681b8a3649cd55b42124ea36a18 \
             -f body="$(cat /tmp/pr73-review.md)" \
             --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
