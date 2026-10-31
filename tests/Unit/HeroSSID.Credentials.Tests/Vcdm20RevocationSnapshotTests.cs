@@ -149,6 +149,51 @@ public sealed class Vcdm20RevocationSnapshotTests
         Assert.Equal("active", accepted.GetProperty("membership").GetString());
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void IndependentVerifierRefusesPreCutoffAuthenticStatus(bool revoked)
+    {
+        DateTimeOffset now = _clock.GetUtcNow();
+        string credential = Issue("member");
+        string snapshot = Vcdm20RevocationSnapshot.Create(
+            _issuer.Did, revoked ? [credential] : [], _issuer.Seed,
+            now.AddSeconds(-25), _clock);
+
+        // The existing 60-second check accepts both authentic old states.
+        Assert.Equal(revoked ? Vcdm20RevocationCheckResult.Revoked :
+            Vcdm20RevocationCheckResult.SignedNotListed,
+            Vcdm20RevocationSnapshot.Check(snapshot, credential, _issuer.Did, now));
+
+        // The relying party learned of an incident ten seconds ago and must
+        // refuse even a signed clean status observed before that incident.
+        Assert.Equal(Vcdm20RevocationCheckResult.Invalid,
+            CheckAfterVerifierCutoff(snapshot, credential, now, now.AddSeconds(-10)));
+    }
+
+    [Fact]
+    public void NewIssuerObservationPassesVerifierCutoffAndFutureCutoffIsDenied()
+    {
+        DateTimeOffset now = _clock.GetUtcNow();
+        string credential = Issue("member");
+        string snapshot = Vcdm20RevocationSnapshot.Create(
+            _issuer.Did, [], _issuer.Seed, now, _clock);
+        Assert.Equal(Vcdm20RevocationCheckResult.SignedNotListed,
+            CheckAfterVerifierCutoff(snapshot, credential, now, now.AddSeconds(-10)));
+        Assert.Equal(Vcdm20RevocationCheckResult.Invalid,
+            CheckAfterVerifierCutoff(snapshot, credential, now, now.AddSeconds(1)));
+    }
+
+    // Deliberate red-stage adapter: current SDK has no relying-party observation
+    // floor. It demonstrates its existing real runtime behavior, not a mock crypto
+    // result. Replace with production CheckWithObservationCutoff after red CI.
+    private Vcdm20RevocationCheckResult CheckAfterVerifierCutoff(
+        string snapshot, string credential, DateTimeOffset now, DateTimeOffset minimumObservedAt)
+    {
+        _ = minimumObservedAt;
+        return Vcdm20RevocationSnapshot.Check(snapshot, credential, _issuer.Did, now);
+    }
+
     private string Issue(string membership)
     {
         var now = _clock.GetUtcNow();
