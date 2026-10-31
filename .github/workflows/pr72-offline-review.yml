@@ -1,0 +1,132 @@
+name: Independent exact-head PR72 VC2 signed verifier-request policy review
+
+on:
+  push:
+    branches:
+      - review/pr72-vc2-signed-policy-20261031
+
+permissions: {}
+
+jobs:
+  review:
+    name: Independent model security review of complete four-file VC2 signed verifier policy patch
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout pinned candidate and helper
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify immutable source and complete four-file diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse 9a0463cfd1d6654c33fdf5be7afad43ea1dac421^{commit})" = "9a0463cfd1d6654c33fdf5be7afad43ea1dac421"
+          test "$(git rev-parse 85646761569f75f3650230df57b2bb3a3befab96^{commit})" = "85646761569f75f3650230df57b2bb3a3befab96"
+          test "$(git diff --name-only 85646761569f75f3650230df57b2bb3a3befab96 9a0463cfd1d6654c33fdf5be7afad43ea1dac421 | wc -l)" -eq 4
+      - name: Install independent local model
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location https://ollama.com/install.sh --output /tmp/ollama-install.sh
+          sh /tmp/ollama-install.sh
+          nohup ollama serve >/tmp/ollama-server.log 2>&1 </dev/null &
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null
+          ollama pull qwen2.5-coder:7b
+      - name: Independently inspect all nine signed-policy source test and documentation patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          REVIEW_PART=1 python3 tools/offline_pr72_review.py
+          REVIEW_PART=2 python3 tools/offline_pr72_review.py
+          for part in 1 2; do
+            test -s "review-$part.md"
+            test -s "review-$part.json"
+            test -s "review-model-$part.json"
+            test "$(cat "review-head-$part.txt")" = "9a0463cfd1d6654c33fdf5be7afad43ea1dac421"
+          done
+      - name: Retain raw model artifact and exact-head provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-pr72-review
+          path: |
+            review-*.md
+            review-*.json
+            review-head-*.txt
+            review-model-*.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  publish:
+    name: Submit exact-head independent COMMENTED review
+    needs: review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Download raw review and structured findings
+        uses: actions/download-artifact@v4
+        with:
+          name: independent-pr72-review
+      - name: Verify PR head and exact four-file model coverage
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/72 --jq '.head.sha')"
+          test "$actual" = "9a0463cfd1d6654c33fdf5be7afad43ea1dac421"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          head = "9a0463cfd1d6654c33fdf5be7afad43ea1dac421"
+          expected = {
+            "README.md",
+            "docs/vcdm20-presentation-http-profile.md",
+            "src/Services/HeroSSID.Api/Features/Credentials/Vcdm20PresentationEndpoints.cs",
+            "tests/Integration/HeroSSID.Integration.Tests/Vcdm20SignedVerifierRequestHttpTests.cs",
+          }
+          examined = []
+          for part in (1, 2):
+            result = json.loads(Path(f"review-{part}.json").read_text())
+            raw = json.loads(Path(f"review-model-{part}.json").read_text())
+            assert result["head"] == head and result["part"] == part
+            assert result["review"]["verdict"] == raw["verdict"]
+            assert raw["verdict"] in ("no_actionable_findings", "actionable_findings", "inconclusive")
+            assert len(Path(f"review-{part}.md").read_text()) > 200
+            assert Path(f"review-head-{part}.txt").read_text().strip() == head
+            examined.extend(result["files"])
+          assert len(examined) == len(expected), (len(examined), len(expected))
+          assert set(examined) == expected, set(examined) ^ expected
+          PY
+      - name: Submit independent model findings without claiming human approval
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo 'Independent Qwen2.5-Coder 7B security/code review of all four changed PR #72 VC2 signed verifier request-policy files.'
+            echo
+            echo 'Reviewed exact head: 9a0463cfd1d6654c33fdf5be7afad43ea1dac421.'
+            echo 'Baseline: 85646761569f75f3650230df57b2bb3a3befab96.'
+            echo 'This is a submitted independent MODEL review, not human approval or external cryptographic certification.'
+            echo 'All findings require explicit source/test verification before merge.'
+            echo
+            cat review-1.md
+            printf "\n\n"
+            cat review-2.md
+          } > /tmp/pr72-review.md
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/72/reviews \
+            -f event=COMMENT -f commit_id=9a0463cfd1d6654c33fdf5be7afad43ea1dac421 \
+            -f body="$(cat /tmp/pr72-review.md)" \
+            --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
