@@ -1,38 +1,45 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace HeroSSID.Credentials.JwtVcJson;
 
 /// <summary>
-/// Separates a verifier's independent emergency credential denial decision
-/// from an issuer-signed private revocation snapshot.
+/// Result of a verifier-owned emergency denial decision, distinct from
+/// what a separate issuer-signed private status snapshot reports.
 /// </summary>
 public enum JwtVcJsonVerifierPolicyResult
 {
-    /// <summary>No verified credential or invalid verifier policy.</summary>
+    /// <summary>Untrusted, malformed or expired credential, or invalid policy.</summary>
     Invalid,
 
-    /// <summary>The verifier independently denied the exact original JWT.</summary>
+    /// <summary>Verifier independently blocked the exact authenticated compact JWT.</summary>
     DeniedByVerifier,
 
-    /// <summary>The actual issuer's authenticated private status snapshot reported revocation.</summary>
+    /// <summary>Actual issuer's signed private snapshot reported revocation.</summary>
     IssuerReportedRevoked,
 
-    /// <summary>Issuer authenticated; revocation was not checked.</summary>
+    /// <summary>Issuer authenticated; status was not checked.</summary>
     SignedButStatusUnchecked,
 
-    /// <summary>The issuer-signed private snapshot did not list this JWT; completeness is unproven.</summary>
+    /// <summary>Issuer's private signed snapshot did not list the JWT; completeness unproven.</summary>
     SignedNotListed
 }
 
 /// <summary>
-/// Verifier-controlled, exact-original-JWT denial policy for active and retired
-/// VC1.1 issuers. It does not prove holder control or human/business authorization.
+/// Verifier-owned, exact-original-JWT emergency denial for active and retired
+/// issuer credentials. This is an independent local trust policy, not a
+/// network revocation registry, wallet or holder-key-control proof.
 /// </summary>
 public static class JwtVcJsonVerifierDenylist
 {
+    private const int MaximumDeniedCredentialDigests = 256;
+
     /// <summary>
-    /// Authenticates issuer, holder and credential before returning claims; a
-    /// verifier-managed exact-JWT SHA-256 denial overrides authenticated trust.
+    /// Verify real Ed25519 provenance and all caller-owned issuer/holder,
+    /// type/context/time policies, then apply an independently provisioned
+    /// exact-JWT SHA-256 denylist before disclosing any issuer or subject.
+    /// A pin in the RETIRED credential inventory does not override denial.
     /// </summary>
     public static JwtVcJsonVerifierPolicyResult Check(
         string credentialJwt,
@@ -44,16 +51,15 @@ public static class JwtVcJsonVerifierDenylist
         Uri expectedSubjectContextUri,
         DateTimeOffset now,
         out string verifiedIssuerDid,
-        out JsonElement verifiedSubject)
-    {
-        verifiedIssuerDid = string.Empty;
-        verifiedSubject = default;
-        throw new NotSupportedException("The verifier-controlled denylist is not implemented.");
-    }
+        out JsonElement verifiedSubject) =>
+        CheckCore(credentialJwt, null, activeIssuerDids, retiredCredentialPins,
+            deniedCredentialSha256, expectedHolderDid, expectedCredentialType,
+            expectedSubjectContextUri, now, out verifiedIssuerDid, out verifiedSubject);
 
     /// <summary>
-    /// As Check, but also requires an authentic, same-issuer private 60-second
-    /// revocation snapshot. A clean snapshot cannot override local denial.
+    /// Additionally require a genuine same-issuer 60-second private status
+    /// snapshot. A clean issuer snapshot cannot override independent local
+    /// denial. Neither signed absence nor local non-denial proves live status.
     /// </summary>
     public static JwtVcJsonVerifierPolicyResult CheckWithStatus(
         string credentialJwt,
@@ -68,8 +74,104 @@ public static class JwtVcJsonVerifierDenylist
         out string verifiedIssuerDid,
         out JsonElement verifiedSubject)
     {
+        ArgumentNullException.ThrowIfNull(revocationSnapshotJwt);
+        return CheckCore(credentialJwt, revocationSnapshotJwt,
+            activeIssuerDids, retiredCredentialPins, deniedCredentialSha256,
+            expectedHolderDid, expectedCredentialType, expectedSubjectContextUri,
+            now, out verifiedIssuerDid, out verifiedSubject);
+    }
+
+    private static JwtVcJsonVerifierPolicyResult CheckCore(
+        string credentialJwt,
+        string? revocationSnapshotJwt,
+        IReadOnlyCollection<string> activeIssuerDids,
+        IReadOnlyCollection<JwtVcJsonRetiredCredentialPin> retiredCredentialPins,
+        IReadOnlyCollection<string> deniedCredentialSha256,
+        string expectedHolderDid,
+        string expectedCredentialType,
+        Uri expectedSubjectContextUri,
+        DateTimeOffset now,
+        out string verifiedIssuerDid,
+        out JsonElement verifiedSubject)
+    {
+        ArgumentNullException.ThrowIfNull(credentialJwt);
+        ArgumentNullException.ThrowIfNull(activeIssuerDids);
+        ArgumentNullException.ThrowIfNull(retiredCredentialPins);
+        ArgumentNullException.ThrowIfNull(deniedCredentialSha256);
+        ArgumentNullException.ThrowIfNull(expectedHolderDid);
+        ArgumentNullException.ThrowIfNull(expectedCredentialType);
+        ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
+
         verifiedIssuerDid = string.Empty;
         verifiedSubject = default;
-        throw new NotSupportedException("The verifier-controlled denylist is not implemented.");
+
+        // Treat every entry as verifier-owned security policy, not as a hint.
+        // Snapshot and validate the ENTIRE list even when the first entry
+        // already blocks this token; malformed/duplicate later entries fail.
+        if (deniedCredentialSha256.Count > MaximumDeniedCredentialDigests)
+        {
+            return JwtVcJsonVerifierPolicyResult.Invalid;
+        }
+
+        string[] denied = deniedCredentialSha256.ToArray();
+        if (denied.Length != deniedCredentialSha256.Count)
+        {
+            return JwtVcJsonVerifierPolicyResult.Invalid;
+        }
+
+        var unique = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string digest in denied)
+        {
+            if (!IsCanonicalDigest(digest) || !unique.Add(digest))
+            {
+                return JwtVcJsonVerifierPolicyResult.Invalid;
+            }
+        }
+
+        // Authenticating the issuer and holder policy BEFORE applying local
+        // denial prevents an arbitrary unverified token from being reported
+        // as a revoked/denied issuer credential. Retired acceptance itself
+        // still requires a separately registered exact signed-JWT fingerprint.
+        JwtVcJsonTrustedIssuerCheckResult checkedResult =
+            revocationSnapshotJwt is null
+                ? JwtVcJsonRetiredIssuerVerifier.Check(
+                    credentialJwt, activeIssuerDids, retiredCredentialPins,
+                    expectedHolderDid, expectedCredentialType,
+                    expectedSubjectContextUri, now, out var actualIssuerDid,
+                    out var actualSubject)
+                : JwtVcJsonRetiredIssuerVerifier.CheckWithStatus(
+                    credentialJwt, revocationSnapshotJwt,
+                    activeIssuerDids, retiredCredentialPins,
+                    expectedHolderDid, expectedCredentialType,
+                    expectedSubjectContextUri, now, out actualIssuerDid,
+                    out actualSubject);
+
+        if (checkedResult == JwtVcJsonTrustedIssuerCheckResult.Revoked)
+        {
+            return JwtVcJsonVerifierPolicyResult.IssuerReportedRevoked;
+        }
+
+        if (checkedResult is not (JwtVcJsonTrustedIssuerCheckResult.SignedButStatusUnchecked
+            or JwtVcJsonTrustedIssuerCheckResult.SignedNotListed))
+        {
+            return JwtVcJsonVerifierPolicyResult.Invalid;
+        }
+
+        string originalDigest = Convert.ToHexStringLower(
+            SHA256.HashData(Encoding.UTF8.GetBytes(credentialJwt)));
+        if (unique.Contains(originalDigest))
+        {
+            return JwtVcJsonVerifierPolicyResult.DeniedByVerifier;
+        }
+
+        verifiedIssuerDid = actualIssuerDid;
+        verifiedSubject = actualSubject;
+        return checkedResult == JwtVcJsonTrustedIssuerCheckResult.SignedNotListed
+            ? JwtVcJsonVerifierPolicyResult.SignedNotListed
+            : JwtVcJsonVerifierPolicyResult.SignedButStatusUnchecked;
     }
+
+    private static bool IsCanonicalDigest(string? value) =>
+        value is { Length: 64 } &&
+        value.All(static character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
 }
