@@ -3,7 +3,7 @@ name: Independent PR83 retired issuer exact-JWT candidate review
 on:
   push:
     branches:
-      - review/pr83-retired-jwt-pins-20261101
+      - review/pr83-retired-jwt-http-20261101
 
 permissions: {}
 
@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Verify immutable candidate and complete four-file diff
+      - name: Verify immutable candidate and complete six-file diff
         shell: bash
         run: |
           set -euo pipefail
