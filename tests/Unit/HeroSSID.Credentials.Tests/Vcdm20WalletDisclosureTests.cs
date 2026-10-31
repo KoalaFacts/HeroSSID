@@ -151,6 +151,88 @@ public sealed class Vcdm20WalletDisclosureTests
                 preview!, request, credential, _holder.Seed, _clock));
     }
 
+    [Fact]
+    public void VerifierSignsVc2CredentialTypeAndExactContextBeforeWalletDisclosure()
+    {
+        Guid tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did) with
+        {
+            CredentialType = CredentialType,
+            SubjectContextUri = Context
+        };
+        string request = SignRequest(challenge);
+        using var document = JsonDocument.Parse(Ed25519JwtSigner.ExtractPayload(request));
+        Assert.Equal(CredentialType,
+            document.RootElement.GetProperty("credentialType").GetString());
+        Assert.Equal(Context.AbsoluteUri,
+            document.RootElement.GetProperty("subjectContextUri").GetString());
+
+        string credential = IssueCredential("member");
+        Assert.True(Prepare(request, credential, _verifier.Did, Audience, CredentialType,
+            Context, _issuer.Did, _holder.Did, out var preview));
+        Assert.NotNull(preview);
+        string presentation = Vcdm20WalletDisclosure.CreateHolderPresentationAfterPreview(
+            preview!, request, credential, _holder.Seed, _clock);
+        Assert.Equal(Vcdm20PresentationCheckResult.SignedButStatusUnchecked,
+            Vcdm20JosePresentation.Check(presentation, tenant, Audience, challenge.Nonce,
+                CredentialType, Context, store, _clock, out var claims));
+        Assert.Equal("member", claims.GetProperty("membership").GetString());
+    }
+
+    [Fact]
+    public void BoundVerifierPolicyRefusesSubstitutedAuthenticCredentialType()
+    {
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(Guid.NewGuid(), Audience, _issuer.Did) with
+        {
+            CredentialType = CredentialType,
+            SubjectContextUri = Context
+        };
+        string request = SignRequest(challenge);
+        string otherCredential = IssueCredentialWithPolicy(
+            "AdministratorCredential", Context, "administrator");
+        Assert.False(Prepare(request, otherCredential, _verifier.Did, Audience,
+            "AdministratorCredential", Context, _issuer.Did, _holder.Did, out var preview));
+        Assert.Null(preview);
+        Assert.Throws<ArgumentException>(() =>
+            Vcdm20JosePresentation.Create(request, _verifier.Did, Audience,
+                otherCredential, "AdministratorCredential", Context,
+                _holder.Did, _holder.Seed, _clock));
+    }
+
+    [Fact]
+    public void BoundVerifierPolicyRefusesSubstitutedAuthenticSubjectVocabulary()
+    {
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(Guid.NewGuid(), Audience, _issuer.Did) with
+        {
+            CredentialType = CredentialType,
+            SubjectContextUri = Context
+        };
+        string request = SignRequest(challenge);
+        var alternateContext = new Uri("https://issuer.example/contexts/admin/v1");
+        string otherCredential = IssueCredentialWithPolicy(
+            CredentialType, alternateContext, "administrator");
+        Assert.False(Prepare(request, otherCredential, _verifier.Did, Audience,
+            CredentialType, alternateContext, _issuer.Did, _holder.Did, out var preview));
+        Assert.Null(preview);
+        Assert.Throws<ArgumentException>(() =>
+            Vcdm20JosePresentation.Create(request, _verifier.Did, Audience,
+                otherCredential, CredentialType, alternateContext,
+                _holder.Did, _holder.Seed, _clock));
+    }
+
+    private string IssueCredentialWithPolicy(string type, Uri vocabulary, string membership)
+    {
+        using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
+            new { id = _holder.Did, membership }));
+        return Vcdm20JoseCredential.Create(
+            _issuer.Did, _holder.Did, type, vocabulary,
+            subject.RootElement, _issuer.Seed,
+            _clock.GetUtcNow().AddMinutes(-1), _clock.GetUtcNow().AddMinutes(5));
+    }
+
     private bool Prepare(string request, string credential, string verifierDid,
         string audience, string type, Uri context, string issuerDid, string holderDid,
         out Vcdm20WalletDisclosurePreview? preview) =>
