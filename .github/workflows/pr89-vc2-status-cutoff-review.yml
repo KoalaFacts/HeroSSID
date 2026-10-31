@@ -1,0 +1,139 @@
+name: Independent PR89 authenticated VC2 status cutoff review
+
+on:
+  push:
+    branches:
+      - review/pr89-vc2-status-cutoff-20261101
+
+permissions: {}
+
+jobs:
+  review:
+    name: Independent Qwen two-part exact-head VC2 status cutoff security review
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout independent review helper and immutable candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate pinned candidate and all six changed files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse 85a29953f7915de11c182154adb3be10aa8f43f9^{commit})" = "85a29953f7915de11c182154adb3be10aa8f43f9"
+          test "$(git rev-parse d85a4b5cc9c8e6f9923c1b817729150ea3ea5b43^{commit})" = "d85a4b5cc9c8e6f9923c1b817729150ea3ea5b43"
+          test "$(git diff --name-only d85a4b5cc9c8e6f9923c1b817729150ea3ea5b43 85a29953f7915de11c182154adb3be10aa8f43f9 | wc -l)" -eq 6
+      - name: Install independent local model
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location https://ollama.com/install.sh --output /tmp/ollama-install.sh
+          sh /tmp/ollama-install.sh
+          nohup ollama serve >/tmp/ollama-server.log 2>&1 </dev/null &
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null
+          ollama pull qwen2.5-coder:7b
+      - name: Independent model review part 1
+        shell: bash
+        run: |
+          set -euo pipefail
+          REVIEW_PART=1 python3 tools/offline_pr89_review.py
+          test -s review-1.md
+          test -s review-1.json
+          test -s review-model-1.json
+          test "$(cat review-head-1.txt)" = "85a29953f7915de11c182154adb3be10aa8f43f9"
+      - name: Independent model review part 2
+        shell: bash
+        run: |
+          set -euo pipefail
+          REVIEW_PART=2 python3 tools/offline_pr89_review.py
+          test -s review-2.md
+          test -s review-2.json
+          test -s review-model-2.json
+          test "$(cat review-head-2.txt)" = "85a29953f7915de11c182154adb3be10aa8f43f9"
+      - name: Preserve full original model results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-pr89-review
+          path: |
+            review-*.md
+            review-*.json
+            review-head-*.txt
+            review-model-*.json
+          retention-days: 30
+          if-no-files-found: warn
+
+  publish:
+    name: Submit actual exact-head independent COMMENTED review
+    needs: review
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Download original model output without rerunning model
+        uses: actions/download-artifact@v4
+        with:
+          name: independent-pr89-review
+      - name: Verify PR89 head and all six changed source/doc/test files
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/89 --jq '.head.sha')"
+          test "$actual" = "85a29953f7915de11c182154adb3be10aa8f43f9"
+          gh api repos/KoalaFacts/HeroSSID/pulls/89/files --paginate --jq '.[].filename' | sort >/tmp/pr89-actual-files.txt
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          expected_head = "85a29953f7915de11c182154adb3be10aa8f43f9"
+          expected = {
+              "docs/vcdm20-http-status-verify-profile.md",
+              "docs/vcdm20-revocation-snapshot-profile.md",
+              "src/Libraries/HeroSSID.Credentials/Vcdm20/Vcdm20RevocationSnapshot.cs",
+              "src/Services/HeroSSID.Api/Features/Credentials/Vcdm20CredentialVerificationEndpoint.cs",
+              "tests/Contract/HeroSSID.OpenID4VC.Contract.Tests/Vcdm20CredentialStatusVerificationHttpTests.cs",
+              "tests/Unit/HeroSSID.Credentials.Tests/Vcdm20RevocationSnapshotTests.cs",
+          }          assert set(Path("/tmp/pr89-actual-files.txt").read_text().splitlines()) == expected
+          seen = []
+          for part in (1, 2):
+              data = json.loads(Path(f"review-{part}.json").read_text())
+              raw = json.loads(Path(f"review-model-{part}.json").read_text())
+              assert data["head"] == expected_head and data["part"] == part
+              assert data["review"]["verdict"] == raw["verdict"]
+              assert raw["verdict"] in ("no_actionable_findings", "actionable_findings", "inconclusive")
+              assert len(Path(f"review-{part}.md").read_text()) > 200
+              assert Path(f"review-head-{part}.txt").read_text().strip() == expected_head
+              seen.extend(data["files"])
+          assert len(seen) == len(expected) and set(seen) == expected
+          PY
+      - name: Publish raw truthful verdict and findings to PR89
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo "Independent Qwen2.5-Coder 7B review of ALL SIX changed PR #89 authenticated direct VC2 status-cutoff files."
+            echo
+            echo "Reviewed exact HEAD: 85a29953f7915de11c182154adb3be10aa8f43f9."
+            echo "Base: d85a4b5cc9c8e6f9923c1b817729150ea3ea5b43."
+            echo "Automated local model review, NOT human approval, wallet conformance or external cryptographic audit."
+            echo "All findings require itemized source/test disposition before merge."
+            echo
+            cat review-1.md
+            echo
+            cat review-2.md
+          } >/tmp/pr89-review.md
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/89/reviews \
+            -f event=COMMENT -f commit_id=85a29953f7915de11c182154adb3be10aa8f43f9 \
+            -f body="$(cat /tmp/pr89-review.md)" \
+            --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
