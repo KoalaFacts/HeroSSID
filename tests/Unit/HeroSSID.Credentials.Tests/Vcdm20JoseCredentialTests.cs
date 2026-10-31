@@ -73,6 +73,37 @@ public sealed class Vcdm20JoseCredentialTests
     }
 
     [Fact]
+    public void ExtraIssuerSignedTopLevelVc2PolicyFieldsAreNotSilentlyAccepted()
+    {
+        // A valid signature alone cannot authorize unimplemented VC2 credentialStatus,
+        // evidence, proof or other extension semantics in the strict direct-JOSE profile.
+        // An integrating verifier must not mistake an ignored signed policy for enforced status.
+        string original = Issue();
+        Assert.True(Vcdm20JoseCredential.TryVerify(
+            original, _issuerDid, _holderDid, CredentialType, Context, Now, out _));
+        string header = Ed25519JwtSigner.ExtractHeader(original);
+        string payload = Ed25519JwtSigner.ExtractPayload(original);
+        foreach (string extension in new[]
+        {
+            "\"credentialStatus\":{\"id\":\"https://example.org/status/1\",\"type\":\"BitstringStatusListEntry\"},",
+            "\"proof\":{\"type\":\"DataIntegrityProof\"},",
+            "\"evidence\":[{\"type\":\"DocumentVerification\"}],"
+        })
+        {
+            string extendedPayload = payload.Replace(
+                "\"credentialSubject\":", extension + "\"credentialSubject\":",
+                StringComparison.Ordinal);
+            Assert.NotEqual(payload, extendedPayload);
+            string authenticButOutsideProfile = Ed25519JwtSigner.CreateSignedJwt(
+                header, extendedPayload, _issuerSeed);
+            Assert.False(Vcdm20JoseCredential.TryVerify(
+                authenticButOutsideProfile, _issuerDid, _holderDid,
+                CredentialType, Context, Now, out var disclosed));
+            Assert.Equal(JsonValueKind.Undefined, disclosed.ValueKind);
+        }
+    }
+
+    [Fact]
     public void TamperedOrExpiredTokenAndLegacyNestedVcNeverExposeClaims()
     {
         string valid = Issue();

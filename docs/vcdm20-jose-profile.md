@@ -20,6 +20,17 @@ Unlike the existing local credential, the payload directly contains
 `@context`, `type`, `issuer`, `validFrom`, `validUntil` and
 `credentialSubject`. It MUST NOT contain the legacy JWT `vc` or `vp` member.
 
+This opt-in **strict direct-JOSE subprofile accepts exactly those six top-level
+VC members** and no other top-level members. A genuinely issuer-signed token
+containing a `credentialStatus`, `proof`, `evidence`, `credentialSchema` or
+other additional top-level claim fails verification **without releasing subject
+claims**. These additional fields can be legitimate in general W3C VC 2.0,
+but HeroSSID does not implement their meaning or validation in this profile.
+In particular, a signed `credentialStatus` is **not** substituted for the
+separately validated HeroSSID issuer revocation snapshot. Integrators needing
+extended standard VC2 fields require a separately implemented and verified
+profile; this is deliberately not a universal W3C VC2 parser.
+
 The API accepts a versioned HTTPS vocabulary context URI, a credential type
 and subject JSON supplied by the issuer. The first `@context` entry is
 `https://www.w3.org/ns/credentials/v2`, followed by the caller's context.
