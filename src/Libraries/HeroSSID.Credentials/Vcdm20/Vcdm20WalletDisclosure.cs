@@ -153,6 +153,35 @@ public static class Vcdm20WalletDisclosure
     }
 
     /// <summary>
+    /// Strict status-aware Wallet preflight requiring an issuer status snapshot AND
+    /// a verifier-signed credential type and exact HTTPS context. The legacy
+    /// status-aware entry point remains available for existing integrations.
+    /// </summary>
+    public static bool TryPrepareWithStatusRequiringSignedPolicy(
+        string signedRequestJwt, string expectedVerifierDid, string expectedAudience,
+        string expectedCredentialType, Uri expectedContextUri, string expectedIssuerDid,
+        string credentialJwt, string holderDid, string issuerSignedSnapshotJwt,
+        TimeProvider clock, out Vcdm20WalletStatusDisclosurePreview? preview)
+    {
+        ArgumentNullException.ThrowIfNull(expectedContextUri);
+        ArgumentNullException.ThrowIfNull(clock);
+        preview = null;
+
+        // Enforce the verifier's independently pinned type and vocabulary BEFORE
+        // the status-aware path can expose any issuer-authenticated subject claims.
+        // The compatible status-aware entry point intentionally also accepts legacy
+        // requests; the strict API must not silently downgrade to those requests.
+        return OfflineSignedPresentationRequest.TryReadPolicyBound(
+                signedRequestJwt, expectedVerifierDid, expectedAudience,
+                expectedCredentialType, expectedContextUri, clock, out _) &&
+            TryPrepareWithStatus(
+                signedRequestJwt, expectedVerifierDid, expectedAudience,
+                expectedCredentialType, expectedContextUri, expectedIssuerDid,
+                credentialJwt, holderDid, issuerSignedSnapshotJwt, clock,
+                out preview);
+    }
+
+    /// <summary>
     /// Verify an independently pinned issuer and verifier, full-disclosure VC2
     /// claims and an authentic, current same-issuer revocation snapshot without
     /// a holder private key. Only an authentic SignedNotListed set can preview.
@@ -183,6 +212,47 @@ public static class Vcdm20WalletDisclosure
         preview = new Vcdm20WalletStatusDisclosurePreview(
             disclosure, Sha256(issuerSignedSnapshotJwt));
         return true;
+    }
+
+    /// <summary>
+    /// After informed consent, recheck both independent signed policies and the
+    /// exact issuer status before signing with the holder's private seed.
+    /// </summary>
+    public static string CreateHolderPresentationAfterStatusPreviewRequiringSignedPolicy(
+        Vcdm20WalletStatusDisclosurePreview preview, string signedRequestJwt,
+        string credentialJwt, string issuerSignedSnapshotJwt,
+        byte[] holderSeed, TimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(preview);
+        ArgumentNullException.ThrowIfNull(holderSeed);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        // A preview record is caller-controlled data. At signing time enforce the
+        // policy-bound verifier signature again, even when the caller passes a
+        // status preview produced by the permissive legacy-compatible API.
+        if (preview.Disclosure is null ||
+            preview.Disclosure.SubjectContextUri is null ||
+            !OfflineSignedPresentationRequest.TryReadPolicyBound(
+                signedRequestJwt, preview.Disclosure.VerifierDid,
+                preview.Disclosure.VerifierAudience,
+                preview.Disclosure.CredentialType,
+                preview.Disclosure.SubjectContextUri, clock, out var challenge) ||
+            challenge is null ||
+            !string.Equals(challenge.TrustedIssuerDid,
+                preview.Disclosure.TrustedIssuerDid, StringComparison.Ordinal) ||
+            challenge.ExpiresAt != preview.Disclosure.RequestExpiresAt)
+        {
+            throw new ArgumentException(
+                "A live verifier-signed credential type and HTTPS context policy is required.",
+                nameof(preview));
+        }
+
+        // Revalidate the exact issuer-signed status, unchanged request/credential,
+        // displayed subject, expiry and the real holder Ed25519 key in the
+        // existing fail-closed signer after the stronger verifier-policy check.
+        return CreateHolderPresentationAfterStatusPreview(
+            preview, signedRequestJwt, credentialJwt, issuerSignedSnapshotJwt,
+            holderSeed, clock);
     }
 
     /// <summary>

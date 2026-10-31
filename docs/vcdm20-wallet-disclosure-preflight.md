@@ -76,6 +76,62 @@ string holderSignedVp = Vcdm20WalletDisclosure.CreateHolderPresentationAfterStat
 
 This is an **issuer-provided HeroSSID private status profile**, not a standard VC2 `credentialStatus` or W3C Bitstring Status List. `SignedNotListed` means only that a genuinely signed snapshot omits this credential digest. It **cannot prove upstream set completeness, the truth of the issuer's observation time, or live non-revocation**. The issuer must operate an independently trusted complete status source; absent/expired status fails closed. The verifier separately verifies holder control, one-use challenge and the signed status for the exact enclosed credential (see [VC2 signed status](vcdm20-revocation-snapshot-profile.md)). It is not evidence of user consent, identity verification, agency/business authorization or independent wallet interoperability.
 
+## Strict signed verifier vocabulary **and** issuer status (opt-in)
+
+For a Wallet that requires BOTH the verifier's authentic signed credential type and
+exact HTTPS subject vocabulary **and** a current, independently pinned issuer-signed
+HeroSSID VC2 status snapshot, use the strict counterparts. The original
+`TryPrepareWithStatus` remains backward compatible with older verifier requests
+that do not sign type/context; it is **not sufficient** for a strict policy.
+
+The verifier must first create its retained one-use challenge with
+`CredentialType = expectedCredentialType` and
+`SubjectContextUri = expectedSubjectContextUri` before signing it with
+`OfflineSignedPresentationRequest.Create`. The Wallet must independently pin
+the verifier DID, audience, issuer DID, holder DID, type and vocabulary; do not
+accept these trust pins solely from the request/credential.
+
+```csharp
+if (!Vcdm20WalletDisclosure.TryPrepareWithStatusRequiringSignedPolicy(
+        signedVerifierRequestJwt, expectedVerifierDid, expectedAudience,
+        expectedCredentialType, expectedSubjectContextUri, expectedIssuerDid,
+        originalIssuerSignedDirectVc2Jwt, holderDid,
+        issuerSignedVc2RevocationSnapshotJwt, TimeProvider.System,
+        out var strictStatusPreview) || strictStatusPreview is null)
+{
+    // Includes authentic-but-legacy unbound requests, bad signatures,
+    // wrong signed vocabulary, missing/expired/revoked status: no claims.
+    return;
+}
+
+// Display the destination and EVERY verified subject claim. This is full
+// disclosure: the Wallet app, not this library, obtains informed consent.
+if (!await ShowEveryClaimAndObtainInformedConsentAsync(
+        strictStatusPreview.Disclosure))
+{
+    return;
+}
+
+string holderSignedVp =
+    Vcdm20WalletDisclosure.CreateHolderPresentationAfterStatusPreviewRequiringSignedPolicy(
+        strictStatusPreview, signedVerifierRequestJwt,
+        originalIssuerSignedDirectVc2Jwt, issuerSignedVc2RevocationSnapshotJwt,
+        holderOwnedEd25519Seed, TimeProvider.System);
+```
+
+The strict preflight rejects a correctly signed **legacy** request before
+exposing a subject; it also authenticates the original issuer Ed25519 VC2 JWT,
+the pinned type/context and the issuer's exact 60-second signed status.
+The strict signer independently revalidates the type/context signature even
+when given a caller-created preview or a preview from the legacy-compatible
+entry point, then rechecks the unchanged signed artifacts, status, expiry and
+real holder key. No new database schema, service endpoint, consent UI, key
+custody or automatic issuer trust is introduced. The relying verifier still
+must enforce its own atomic one-use challenge and status policy. A signed
+not-listed set does not prove status completeness or real-time non-revocation;
+neither signed policy nor holder proof establishes real identity or business
+authorization.
+
 ## Trust and product boundaries
 
 - Authenticated issuer claims alone do not establish holder private-key control. The holder signs only after its integrating app decides to call signing, and the application must provide genuine disclosure and user consent itself. Digest matching is not evidence the user saw the claims. The original direct signing entry point remains available.
