@@ -59,6 +59,7 @@ public static class Vcdm20JoseCredential
         {
             alg = "EdDSA",
             typ = CredentialHeaderType,
+            cty = "vc",
             kid = KeyId(issuerDid)
         });
         string payload = JsonSerializer.Serialize(new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -103,7 +104,7 @@ public static class Vcdm20JoseCredential
             !ValidType(expectedCredentialType) ||
             !ValidContext(expectedSubjectContextUri) ||
             !StrictJwtReader.TryRead(jwt, CredentialHeaderType, MaximumJwtLength,
-                out var credential, KeyId(trustedIssuerDid)) ||
+                out var credential, KeyId(trustedIssuerDid), "vc") ||
             !Ed25519JwtSigner.VerifySignedJwt(jwt, issuerPublicKey) ||
             credential.TryGetProperty("vc", out _) ||
             credential.TryGetProperty("vp", out _) ||

@@ -9,8 +9,13 @@ OpenID4VC interoperability or third-party wallet tests.
 ## Issuer and verifier behavior
 
 `HeroSSID.Credentials.Vcdm20.Vcdm20JoseCredential.Create` signs a **direct**
-VC 2.0 JSON object as a compact Ed25519 JWS. Its `typ` is `vc+jwt`;
-the `kid` identifies the issuer's Ed25519 `did:key` verification method.
+VC 2.0 JSON object as a compact Ed25519 JWS. Its `typ` is `vc+jwt`,
+`cty` is `vc` and `kid` identifies the issuer's Ed25519 `did:key`
+verification method, matching the content-type recommendation in
+[W3C VC-JOSE-COSE Recommendation §3.1.1 (13 October 2026)](https://www.w3.org/TR/2026/REC-vc-jose-cose-20261013/#securing-json-ld-verifiable-credentials-with-jose).
+The verifier accepts older authentic direct `vc+jwt` tokens with no optional
+`cty`, but rejects a *present* mismatched, duplicate or malformed content type.
+This is a bounded profile improvement, **not** independent VC conformance or wallet interoperability.
 Unlike the existing local credential, the payload directly contains
 `@context`, `type`, `issuer`, `validFrom`, `validUntil` and
 `credentialSubject`. It MUST NOT contain the legacy JWT `vc` or `vp` member.
