@@ -184,14 +184,25 @@ public sealed class Vcdm20RevocationSnapshotTests
             CheckAfterVerifierCutoff(snapshot, credential, now, now.AddSeconds(1)));
     }
 
-    // Deliberate red-stage adapter: current SDK has no relying-party observation
-    // floor. It demonstrates its existing real runtime behavior, not a mock crypto
-    // result. Replace with production CheckWithObservationCutoff after red CI.
     private Vcdm20RevocationCheckResult CheckAfterVerifierCutoff(
-        string snapshot, string credential, DateTimeOffset now, DateTimeOffset minimumObservedAt)
+        string snapshot, string credential, DateTimeOffset now, DateTimeOffset minimumObservedAt) =>
+        Vcdm20RevocationSnapshot.CheckWithObservationCutoff(
+            snapshot, credential, _issuer.Did, now, minimumObservedAt);
+
+    [Fact]
+    public void FractionalSecondCutoffNeverRoundsBackwardToAcceptOlderStatus()
     {
-        _ = minimumObservedAt;
-        return Vcdm20RevocationSnapshot.Check(snapshot, credential, _issuer.Did, now);
+        DateTimeOffset now = _clock.GetUtcNow();
+        string credential = Issue("member");
+        string snapshot = Vcdm20RevocationSnapshot.Create(
+            _issuer.Did, [], _issuer.Seed, now, _clock);
+
+        // Signed iat is recorded only to seconds. Never silently round a
+        // caller's fractional-second cutoff backward to trust older status.
+        DateTimeOffset cutoff = DateTimeOffset
+            .FromUnixTimeSeconds(now.ToUnixTimeSeconds()).AddTicks(1);
+        Assert.Equal(Vcdm20RevocationCheckResult.Invalid,
+            CheckAfterVerifierCutoff(snapshot, credential, now, cutoff));
     }
 
     private string Issue(string membership)

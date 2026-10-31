@@ -45,6 +45,15 @@ internal static class Vcdm20CredentialVerificationEndpoint
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(clock);
         var context = request.SubjectContextUri;
+        // The status-unchecked route must not silently ignore caller-supplied
+        // issuer freshness requirements.
+        if (request.MinimumStatusObservedAt is not null)
+        {
+            return Results.Problem(title: "Status Policy Requires Snapshot",
+                detail: "MinimumStatusObservedAt requires the /vcdm20/verify-with-status route.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
         if (string.IsNullOrWhiteSpace(request.Credential) ||
             request.Credential.Length > MaximumJwtLength ||
             string.IsNullOrWhiteSpace(request.TrustedIssuerDid) ||
@@ -89,6 +98,7 @@ internal static class Vcdm20CredentialVerificationEndpoint
         ArgumentNullException.ThrowIfNull(clock);
 
         Uri? context = request.SubjectContextUri;
+        DateTimeOffset now = clock.GetUtcNow();
         if (string.IsNullOrWhiteSpace(request.Credential) ||
             request.Credential.Length > MaximumJwtLength ||
             string.IsNullOrWhiteSpace(request.RevocationSnapshot) ||
@@ -103,14 +113,15 @@ internal static class Vcdm20CredentialVerificationEndpoint
             context.Scheme != Uri.UriSchemeHttps ||
             !string.IsNullOrEmpty(context.UserInfo) ||
             !string.IsNullOrEmpty(context.Fragment) ||
-            context.AbsoluteUri.Length > 2048)
+            context.AbsoluteUri.Length > 2048 ||
+            (request.MinimumStatusObservedAt is DateTimeOffset requestedCutoff &&
+                (requestedCutoff < DateTimeOffset.UnixEpoch || requestedCutoff > now)))
         {
             return Results.Problem(title: "Invalid Request",
-                detail: "A bounded direct VC2 credential, issuer-signed status snapshot, and independently pinned issuer, holder, type and HTTPS vocabulary are required.",
+                detail: "A bounded direct VC2 credential, issuer-signed status snapshot, pinned issuer/holder/type/context and nonfuture UTC observation cutoff are required.",
                 statusCode: StatusCodes.Status400BadRequest);
         }
 
-        DateTimeOffset now = clock.GetUtcNow();
         // First authenticate the exact issuer credential against independent
         // caller policy. A valid snapshot alone must never validate the claims.
         if (!Vcdm20JoseCredential.TryVerify(request.Credential,
@@ -122,8 +133,12 @@ internal static class Vcdm20CredentialVerificationEndpoint
 
         // This authenticates the status snapshot with the SAME pinned issuer
         // and exact credential bytes, never a signer specified by the snapshot.
-        var status = Vcdm20RevocationSnapshot.Check(
-            request.RevocationSnapshot, request.Credential, request.TrustedIssuerDid, now);
+        var status = request.MinimumStatusObservedAt is DateTimeOffset minimumObservedAt
+            ? Vcdm20RevocationSnapshot.CheckWithObservationCutoff(
+                request.RevocationSnapshot, request.Credential,
+                request.TrustedIssuerDid, now, minimumObservedAt)
+            : Vcdm20RevocationSnapshot.Check(
+                request.RevocationSnapshot, request.Credential, request.TrustedIssuerDid, now);
         return Results.Ok(new VerifyVcdm20CredentialResponse(
             status.ToString(),
             status == Vcdm20RevocationCheckResult.SignedNotListed ? subject : null));
@@ -138,6 +153,8 @@ public sealed class VerifyVcdm20CredentialRequest
     public string? ExpectedHolderDid { get; init; }
     public string? ExpectedCredentialType { get; init; }
     public Uri? SubjectContextUri { get; init; }
+    // Explicitly reject this on the status-unchecked route.
+    public DateTimeOffset? MinimumStatusObservedAt { get; init; }
 }
 
 /// <summary>Never grants business authorization, holder control or proof of current non-revocation.</summary>
@@ -152,4 +169,6 @@ public sealed class VerifyVcdm20CredentialWithStatusRequest
     public string? ExpectedCredentialType { get; init; }
     public Uri? SubjectContextUri { get; init; }
     public string? RevocationSnapshot { get; init; }
+    // Verifier-owned inclusive lower bound on signed observation time.
+    public DateTimeOffset? MinimumStatusObservedAt { get; init; }
 }

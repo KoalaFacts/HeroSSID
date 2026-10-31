@@ -190,6 +190,25 @@ public sealed class Vcdm20CredentialStatusVerificationHttpTests(AspireWebApplica
         Assert.Equal(HttpStatusCode.BadRequest, future.StatusCode);
     }
 
+    [Fact]
+    public async Task StatusUncheckedRouteDoesNotSilentlyIgnoreVerifierCutoff()
+    {
+        using var issuer = NewKey();
+        using var holder = NewKey();
+        string issuerDid = Did(issuer);
+        string holderDid = Did(holder);
+        string credential = Issue(issuer, issuerDid, holderDid);
+        DateTimeOffset now = TimeProvider.System.GetUtcNow();
+        string status = Vcdm20RevocationSnapshot.Create(
+            issuerDid, [], Seed(issuer), now, TimeProvider.System);
+
+        using var response = await _client.AuthorizedPostAsJsonAsync(
+            "/api/v1/credentials/vcdm20/verify",
+            CutoffRequest(credential, issuerDid, holderDid, status,
+                now.AddSeconds(-10))).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     private static object CutoffRequest(string credential, string issuerDid,
         string holderDid, string snapshot, DateTimeOffset minimumObservedAt) =>
         new

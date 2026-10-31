@@ -22,6 +22,25 @@ var status = Vcdm20RevocationSnapshot.Check(
     snapshot, originalIssuerSignedVc2Jwt, independentlyTrustedIssuerDid, clock.GetUtcNow());
 ```
 
+When a relying verifier has independently recorded an incident or status-refresh
+cutoff, it can require signed issuer observation **at or after that time**,
+instead of merely trusting an unexpired snapshot from before the incident:
+
+```csharp
+DateTimeOffset incidentCutoff = /* trusted verifier policy timestamp */;
+var status = Vcdm20RevocationSnapshot.CheckWithObservationCutoff(
+    snapshot, originalIssuerSignedVc2Jwt, independentlyTrustedIssuerDid,
+    clock.GetUtcNow(), incidentCutoff);
+```
+
+An authentic but older snapshot returns `Invalid`, whether it lists the exact
+JWT as revoked or leaves it unlisted. A future or pre-Unix-epoch cutoff is
+invalid. Signed `iat` has whole-second precision; fractional-second cutoffs
+are enforced conservatively rather than rounded backward. The verifier must
+establish its cutoff independently; accepting a holder-provided freshness
+requirement defeats its purpose. A snapshot signature does not establish that
+the upstream revocation database was actually observed or complete.
+
 `Revoked` means the digest appears in a fresh authentic issuer-signed snapshot; `SignedNotListed` means only that the authentic snapshot omitted it. A forged/wrong-issuer/malformed/expired snapshot returns `Invalid`. This check is **not** a replacement for `Vcdm20JoseCredential.TryVerify` (holder, context, type, credential validity), real-world identity checks, or business authorization.
 
 For a full holder presentation, the verifier can perform one atomic, fail-closed operation:

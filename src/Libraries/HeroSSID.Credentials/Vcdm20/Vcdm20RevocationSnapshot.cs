@@ -111,7 +111,30 @@ public static class Vcdm20RevocationSnapshot
     /// NotListed is NOT proof the issuer exported its complete revocation set.
     /// </summary>
     public static Vcdm20RevocationCheckResult Check(
-        string snapshotJwt, string credentialJwt, string trustedIssuerDid, DateTimeOffset now)
+        string snapshotJwt, string credentialJwt, string trustedIssuerDid, DateTimeOffset now) =>
+        CheckCore(snapshotJwt, credentialJwt, trustedIssuerDid, now, null);
+
+    /// <summary>
+    /// Apply a verifier-owned minimum issuer observation time to authentic VC2
+    /// status. Even an unexpired pre-incident snapshot fails this policy.
+    /// Signed timestamps have one-second precision, with fractional cutoffs
+    /// handled conservatively. This does not prove live or complete status.
+    /// </summary>
+    public static Vcdm20RevocationCheckResult CheckWithObservationCutoff(
+        string snapshotJwt, string credentialJwt, string trustedIssuerDid,
+        DateTimeOffset now, DateTimeOffset minimumObservedAt)
+    {
+        if (minimumObservedAt < DateTimeOffset.UnixEpoch || minimumObservedAt > now)
+        {
+            return Vcdm20RevocationCheckResult.Invalid;
+        }
+
+        return CheckCore(snapshotJwt, credentialJwt, trustedIssuerDid, now, minimumObservedAt);
+    }
+
+    private static Vcdm20RevocationCheckResult CheckCore(
+        string snapshotJwt, string credentialJwt, string trustedIssuerDid,
+        DateTimeOffset now, DateTimeOffset? minimumObservedAt)
     {
         ArgumentNullException.ThrowIfNull(snapshotJwt);
         ArgumentNullException.ThrowIfNull(credentialJwt);
@@ -129,7 +152,10 @@ public static class Vcdm20RevocationSnapshot
             versionNumber != 1 ||
             !StrictJwtReader.TryGetTimestamp(payload, "iat", out long issued) ||
             !StrictJwtReader.TryGetTimestamp(payload, "exp", out long expires) ||
-            issued > now.ToUnixTimeSeconds() || expires <= now.ToUnixTimeSeconds() ||
+            issued < 0 || issued > now.ToUnixTimeSeconds() ||
+            (minimumObservedAt is DateTimeOffset cutoff &&
+                DateTimeOffset.FromUnixTimeSeconds(issued) < cutoff) ||
+            expires <= now.ToUnixTimeSeconds() ||
             expires <= issued || expires - issued > MaximumSnapshotAgeSeconds ||
             !payload.TryGetProperty("revoked", out var revoked) ||
             revoked.ValueKind != JsonValueKind.Array || revoked.GetArrayLength() > MaximumEntries)
