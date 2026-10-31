@@ -192,15 +192,19 @@ public sealed class Vcdm20RevocationSnapshotTests
     [Fact]
     public void FractionalSecondCutoffNeverRoundsBackwardToAcceptOlderStatus()
     {
-        DateTimeOffset now = _clock.GetUtcNow();
+        DateTimeOffset signedAt = _clock.GetUtcNow();
         string credential = Issue("member");
         string snapshot = Vcdm20RevocationSnapshot.Create(
-            _issuer.Did, [], _issuer.Seed, now, _clock);
+            _issuer.Did, [], _issuer.Seed, signedAt, _clock);
 
-        // Signed iat is recorded only to seconds. Never silently round a
-        // caller's fractional-second cutoff backward to trust older status.
-        DateTimeOffset cutoff = DateTimeOffset
-            .FromUnixTimeSeconds(now.ToUnixTimeSeconds()).AddTicks(1);
+        // The verifier time is LATER than the fractional cutoff, so this
+        // regression reaches the signed iat comparison rather than merely
+        // rejecting a cutoff in the future.
+        DateTimeOffset now = signedAt.AddMilliseconds(500);
+        DateTimeOffset cutoff = signedAt.AddTicks(1);
+        Assert.True(cutoff < now);
+        Assert.Equal(Vcdm20RevocationCheckResult.SignedNotListed,
+            CheckAfterVerifierCutoff(snapshot, credential, now, signedAt));
         Assert.Equal(Vcdm20RevocationCheckResult.Invalid,
             CheckAfterVerifierCutoff(snapshot, credential, now, cutoff));
     }
