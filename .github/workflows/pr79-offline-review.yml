@@ -1,0 +1,138 @@
+name: Independent PR79 VC1.1 multi-issuer HTTP exact-head review
+
+on:
+  push:
+    branches:
+      - review/pr79-vc11-trusted-http-20261031
+
+permissions: {}
+
+jobs:
+  review:
+    name: Independent Qwen code review of six original VC1.1 JWT trust/status patches
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout pinned candidate and helper
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify immutable candidate and complete six-file diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse 47e6a2e58e52b18e3f05652e987c61ddc53050e8^{commit})" = "47e6a2e58e52b18e3f05652e987c61ddc53050e8"
+          test "$(git rev-parse 0ba010591eeec998adca6cdff27dcd19c34dbcd9^{commit})" = "0ba010591eeec998adca6cdff27dcd19c34dbcd9"
+          test "$(git diff --name-only 0ba010591eeec998adca6cdff27dcd19c34dbcd9 47e6a2e58e52b18e3f05652e987c61ddc53050e8 | wc -l)" -eq 6
+      - name: Install local independent code review model
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location https://ollama.com/install.sh --output /tmp/ollama-install.sh
+          sh /tmp/ollama-install.sh
+          nohup ollama serve >/tmp/ollama-server.log 2>&1 </dev/null &
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null
+          ollama pull qwen2.5-coder:7b
+      - name: Review part 1 of 2 (real source patches, not a mock)
+        shell: bash
+        run: |
+          set -euo pipefail
+          REVIEW_PART=1 python3 tools/offline_pr79_review.py
+          test -s review-1.md
+          test -s review-1.json
+          test -s review-model-1.json
+          test "$(cat review-head-1.txt)" = "47e6a2e58e52b18e3f05652e987c61ddc53050e8"
+      - name: Review part 2 of 2 (full remaining source patches)
+        shell: bash
+        run: |
+          set -euo pipefail
+          REVIEW_PART=2 python3 tools/offline_pr79_review.py
+          test -s review-2.md
+          test -s review-2.json
+          test -s review-model-2.json
+          test "$(cat review-head-2.txt)" = "47e6a2e58e52b18e3f05652e987c61ddc53050e8"
+      - name: Retain independent raw model results and exact-head evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-pr79-review
+          path: |
+            review-*.md
+            review-*.json
+            review-head-*.txt
+            review-model-*.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  publish:
+    name: Submit independent exact-head COMMENTED review, not approval
+    needs: review
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Download actual independent model artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: independent-pr79-review
+      - name: Verify exact head and that all six changed files were inspected
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/79 --jq '.head.sha')"
+          test "$actual" = "47e6a2e58e52b18e3f05652e987c61ddc53050e8"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          head = "47e6a2e58e52b18e3f05652e987c61ddc53050e8"
+          expected = {
+            "README.md",
+            "docs/jwt-vc-json-http-verify-profile.md",
+            "src/Services/HeroSSID.Api/Features/Credentials/CredentialEndpoints.cs",
+            "src/Services/HeroSSID.Api/Features/Credentials/JwtVcJsonTrustedIssuerVerificationEndpoint.cs",
+            "tests/Contract/HeroSSID.OpenID4VC.Contract.Tests/JwtVcJsonCredentialVerificationHttpTests.cs",
+            "tests/Unit/HeroSSID.Api.Tests/JwtVcJsonTrustedIssuerVerificationEndpointTests.cs",
+          }
+          seen = []
+          for part in (1, 2):
+              data = json.loads(Path(f"review-{part}.json").read_text())
+              raw = json.loads(Path(f"review-model-{part}.json").read_text())
+              assert data["head"] == head and data["part"] == part
+              assert data["review"]["verdict"] == raw["verdict"]
+              assert raw["verdict"] in ("no_actionable_findings", "actionable_findings", "inconclusive")
+              assert len(Path(f"review-{part}.md").read_text()) > 200
+              assert Path(f"review-head-{part}.txt").read_text().strip() == head
+              seen.extend(data["files"])
+          assert len(seen) == len(expected) and set(seen) == expected, (seen, expected)
+          PY
+      - name: Submit model's actual verdicts and findings to GitHub PR79
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo 'Independent Qwen2.5-Coder 7B security/code review of ALL SIX changed PR #79 historical/current VC1.1 issuer HTTP files.'
+            echo
+            echo 'Reviewed exact source head: 47e6a2e58e52b18e3f05652e987c61ddc53050e8.'
+            echo 'Baseline: 0ba010591eeec998adca6cdff27dcd19c34dbcd9.'
+            echo 'Model execution, NOT human approval, independent wallet conformance or external cryptographic certification.'
+            echo 'Every finding requires itemized source/test reconciliation before merge.'
+            echo
+            cat review-1.md
+            echo
+            cat review-2.md
+          } >/tmp/pr79-independent-review.md
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/79/reviews \
+            -f event=COMMENT -f commit_id=47e6a2e58e52b18e3f05652e987c61ddc53050e8 \
+            -f body="$(cat /tmp/pr79-independent-review.md)" \
+            --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
