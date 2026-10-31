@@ -341,6 +341,39 @@ public sealed class Vcdm20SignedVerifierRequestHttpTests(DatabaseFixture fixture
             subjectContextUri = Vocabulary.AbsoluteUri,
             presentation, revocationSnapshot = status
         };
+        // A valid verifier-signed request cannot be repurposed by supplying
+        // an independently signed credential of a different type or vocabulary.
+        // Denials before signature/status verification must not spend the nonce.
+        using var wrongType = await PostAsync(client, verificationRoute, new
+        {
+            signedRequestJwt, verifierDid, audience = Audience,
+            expectedCredentialType = "AdministratorCredential",
+            subjectContextUri = Vocabulary.AbsoluteUri,
+            presentation, revocationSnapshot = status
+        }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, wrongType.StatusCode);
+        using (var deniedType = JsonDocument.Parse(
+            await wrongType.Content.ReadAsStringAsync(TestContext.Current.CancellationToken).ConfigureAwait(true)))
+        {
+            Assert.Equal("Invalid", deniedType.RootElement.GetProperty("status").GetString());
+            Assert.Equal(JsonValueKind.Null, deniedType.RootElement.GetProperty("verifiedSubject").ValueKind);
+        }
+
+        using var wrongContext = await PostAsync(client, verificationRoute, new
+        {
+            signedRequestJwt, verifierDid, audience = Audience,
+            expectedCredentialType = "MembershipCredential",
+            subjectContextUri = "https://issuer.example/contexts/admin/v1",
+            presentation, revocationSnapshot = status
+        }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, wrongContext.StatusCode);
+        using (var deniedContext = JsonDocument.Parse(
+            await wrongContext.Content.ReadAsStringAsync(TestContext.Current.CancellationToken).ConfigureAwait(true)))
+        {
+            Assert.Equal("Invalid", deniedContext.RootElement.GetProperty("status").GetString());
+            Assert.Equal(JsonValueKind.Null, deniedContext.RootElement.GetProperty("verifiedSubject").ValueKind);
+        }
+
         string[] tamperedParts = signedRequestJwt.Split('.');
         tamperedParts[1] = Base64UrlEncoder.Encode(
             Ed25519JwtSigner.ExtractPayload(signedRequestJwt).Replace(
@@ -376,6 +409,51 @@ public sealed class Vcdm20SignedVerifierRequestHttpTests(DatabaseFixture fixture
             await replay.Content.ReadAsStringAsync(TestContext.Current.CancellationToken).ConfigureAwait(true));
         Assert.Equal("Invalid", replayResult.RootElement.GetProperty("status").GetString());
         Assert.Equal(JsonValueKind.Null, replayResult.RootElement.GetProperty("verifiedSubject").ValueKind);
+    }
+
+    [Fact]
+    public async Task SignedPolicyVerificationRejectsAuthenticLegacyUnboundRequest()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        await using var host = NewHost();
+        using var client = host.CreateClient();
+        string token = await GetTokenAsync(client, "did:manage credential:verify").ConfigureAwait(true);
+        string verifierDid = await CreateDidAsync(client, token).ConfigureAwait(true);
+        using var issuerKey = NewKey();
+        using var holderKey = NewKey();
+        string issuerDid = DidFromKey(issuerKey);
+        string holderDid = DidFromKey(holderKey);
+
+        using var legacyResponse = await PostAsync(client, Route, new
+        {
+            verifierDid, audience = Audience, trustedIssuerDid = issuerDid, lifetimeSeconds = 120
+        }, token).ConfigureAwait(true);
+        string legacyRequest = await ReadStringAsync(
+            legacyResponse, HttpStatusCode.Created, "signedRequestJwt").ConfigureAwait(true);
+        using var subject = JsonDocument.Parse(
+            JsonSerializer.Serialize(new { id = holderDid, role = "member" }));
+        DateTimeOffset now = TimeProvider.System.GetUtcNow();
+        string credential = Vcdm20JoseCredential.Create(
+            issuerDid, holderDid, "MembershipCredential", Vocabulary, subject.RootElement,
+            issuerKey.Export(KeyBlobFormat.RawPrivateKey), now.AddMinutes(-1), now.AddMinutes(10));
+        string presentation = Vcdm20JosePresentation.Create(
+            legacyRequest, verifierDid, Audience, credential, "MembershipCredential",
+            Vocabulary, holderDid, holderKey.Export(KeyBlobFormat.RawPrivateKey), TimeProvider.System);
+        string status = Vcdm20RevocationSnapshot.Create(issuerDid, [],
+            issuerKey.Export(KeyBlobFormat.RawPrivateKey), now, TimeProvider.System);
+
+        using var rejected = await PostAsync(client,
+            "/api/v1/credentials/vcdm20/verify-signed-policy-presentation", new
+            {
+                signedRequestJwt = legacyRequest, verifierDid, audience = Audience,
+                expectedCredentialType = "MembershipCredential",
+                subjectContextUri = Vocabulary.AbsoluteUri, presentation, revocationSnapshot = status
+            }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, rejected.StatusCode);
+        using var denied = JsonDocument.Parse(
+            await rejected.Content.ReadAsStringAsync(TestContext.Current.CancellationToken).ConfigureAwait(true));
+        Assert.Equal("Invalid", denied.RootElement.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, denied.RootElement.GetProperty("verifiedSubject").ValueKind);
     }
 
     [Fact]
