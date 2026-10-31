@@ -1,3 +1,4 @@
+using System.Text.Json;
 using HeroSSID.Api.Authentication;
 using HeroSSID.Credentials.CredentialVerification;
 using HeroSSID.Credentials.JwtVcJson;
@@ -66,22 +67,24 @@ internal static class JwtVcJsonRetiredIssuerVerificationEndpoint
         // The SDK authenticates the actual Ed25519 signer, original exact-JWT
         // pin (when retired), holder, type, context, validity and optional
         // same-issuer signed status. The HTTP boundary cannot promote a signer.
+        string verifiedIssuer;
+        JsonElement verifiedSubject;
         var result = withStatus
             ? JwtVcJsonRetiredIssuerVerifier.CheckWithStatus(
                 request.Credential!, request.RevocationSnapshot!, active, retired,
                 request.ExpectedHolderDid!, request.ExpectedCredentialType!,
                 request.SubjectContextUri!, clock.GetUtcNow(),
-                out string issuerWithStatus, out var subjectWithStatus)
+                out verifiedIssuer, out verifiedSubject)
             : JwtVcJsonRetiredIssuerVerifier.Check(
                 request.Credential!, active, retired, request.ExpectedHolderDid!,
                 request.ExpectedCredentialType!, request.SubjectContextUri!,
-                clock.GetUtcNow(), out issuerWithStatus, out subjectWithStatus);
+                clock.GetUtcNow(), out verifiedIssuer, out verifiedSubject);
 
         if (result is JwtVcJsonTrustedIssuerCheckResult.SignedButStatusUnchecked or
             JwtVcJsonTrustedIssuerCheckResult.SignedNotListed)
         {
             return Results.Ok(new VerifyJwtVcJsonTrustedIssuersResponse(
-                result.ToString(), issuerWithStatus, subjectWithStatus));
+                result.ToString(), verifiedIssuer, verifiedSubject));
         }
 
         // Invalid and Revoked never disclose even the authenticated signer.
