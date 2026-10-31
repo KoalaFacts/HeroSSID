@@ -83,7 +83,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/70 --jq '.head.sha')"
+          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/71 --jq '.head.sha')"
           test "$actual" = "5860f972f0712ecf4226c254681f92728afd2532"
           python3 - <<'PY'
           import json
@@ -120,7 +120,7 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo 'Independent Qwen2.5-Coder 7B security/code review of all four changed PR #71 VC2 authenticated verifier cancellation files.'
+            echo 'Independent Qwen2.5-Coder 7B security/code review of all nine changed PR #71 VC2 signed verifier request-policy files.'
             echo
             echo 'Reviewed exact head: 5860f972f0712ecf4226c254681f92728afd2532.'
             echo 'Baseline: 6ce466f2666732150eb0aa8740e0feb86e70c0f4.'
@@ -131,7 +131,7 @@ jobs:
             printf "\n\n"
             cat review-2.md
           } > /tmp/pr71-review.md
-          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/70/reviews \
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/71/reviews \
             -f event=COMMENT -f commit_id=5860f972f0712ecf4226c254681f92728afd2532 \
             -f body="$(cat /tmp/pr71-review.md)" \
             --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
