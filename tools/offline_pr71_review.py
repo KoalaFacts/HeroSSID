@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Independently review exact-head PR #71 VC2 verifier cancellation patch."""
+"""Independently review exact-head PR #71 VC2 signed verifier policy patch."""
 from __future__ import annotations
 
 import json
@@ -11,7 +11,7 @@ import sys
 from urllib.request import Request, urlopen
 
 BASE = "6ce466f2666732150eb0aa8740e0feb86e70c0f4"
-HEAD = "5860f972f0712ecf4226c254681f92728afd2532"
+HEAD = "5a7c95ba8988862b5b50a03ab94c60afd469cfbc"
 MODEL = "qwen2.5-coder:7b"
 PARTS = 2
 CHANGED_FILES = {
