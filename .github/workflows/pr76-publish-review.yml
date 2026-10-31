@@ -1,0 +1,74 @@
+name: Publish retained independent PR76 model review
+
+on:
+  push:
+    branches:
+      - review/pr76-publish-20261031
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+
+jobs:
+  publish:
+    name: Submit already-executed exact-head independent model review
+    runs-on: ubuntu-latest
+    steps:
+      - name: Retrieve completed original independent model artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: independent-pr76-review
+          run-id: 41189640536
+          github-token: ${{ github.token }}
+      - name: Validate retained model result, exact PR source, and all six files
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head="$(gh api repos/KoalaFacts/HeroSSID/pulls/76 --jq '.head.sha')"
+          test "$head" = 'bf89c8a0f843a56b8b4f4b70e4b4688601894066'
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          head = 'bf89c8a0f843a56b8b4f4b70e4b4688601894066'
+          expected = {
+            "docs/jwt-vc-json-profile.md",
+            "docs/vcdm20-jose-profile.md",
+            "src/Libraries/HeroSSID.Credentials/JwtVcJson/JwtVcJsonCredential.cs",
+            "src/Libraries/HeroSSID.Credentials/Utilities/StrictJwtReader.cs",
+            "src/Libraries/HeroSSID.Credentials/Vcdm20/Vcdm20JoseCredential.cs",
+            "tests/Unit/HeroSSID.Credentials.Tests/CredentialSubjectContextBoundaryTests.cs",
+          }
+          result = json.loads(Path('review-1.json').read_text())
+          raw = json.loads(Path('review-model-1.json').read_text())
+          assert result['head'] == head and result['part'] == 1
+          assert result['review']['verdict'] == raw['verdict']
+          assert result['review']['findings'] == raw['findings']
+          assert raw['verdict'] in ('no_actionable_findings', 'actionable_findings', 'inconclusive')
+          assert set(result['files']) == expected and len(result['files']) == 6
+          assert len(Path('review-1.md').read_text()) > 200
+          assert Path('review-head-1.txt').read_text().strip() == head
+          PY
+      - name: Submit actual independent findings as COMMENTED review (not approval)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo 'Independent Qwen2.5-Coder 7B security/code review of all six changed PR #76 files.'
+            echo
+            echo 'Exact candidate head: bf89c8a0f843a56b8b4f4b70e4b4688601894066.'
+            echo 'Baseline: 1d2ee23b9c61c6682f38e6e58d4d6bdc41d59099.'
+            echo 'Original complete model run: https://github.com/KoalaFacts/HeroSSID/actions/runs/41189640536'
+            echo 'This is an independent model COMMENTED review, not human approval or formal security certification.'
+            echo
+            cat review-1.md
+          } > /tmp/pr76-review.md
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/76/reviews \
+            -f event=COMMENT \
+            -f commit_id=bf89c8a0f843a56b8b4f4b70e4b4688601894066 \
+            -f body="$(cat /tmp/pr76-review.md)" \
+            --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
