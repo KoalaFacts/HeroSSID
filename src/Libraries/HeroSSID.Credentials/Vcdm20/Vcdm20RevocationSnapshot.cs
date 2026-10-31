@@ -213,7 +213,7 @@ public static class Vcdm20RevocationSnapshot
     private static bool IsAuthenticDirectVc2(string? credentialJwt, string issuerDid, byte[] issuerPublicKey)
     {
         if (!StrictJwtReader.TryRead(credentialJwt!, "vc+jwt", MaximumCredentialLength,
-                out var payload, KeyId(issuerDid)) ||
+                out var payload, KeyId(issuerDid), "vc") ||
             !Ed25519JwtSigner.VerifySignedJwt(credentialJwt!, issuerPublicKey) ||
             payload.EnumerateObject().Count() != 6 ||
             payload.TryGetProperty("vc", out _) || payload.TryGetProperty("vp", out _) ||

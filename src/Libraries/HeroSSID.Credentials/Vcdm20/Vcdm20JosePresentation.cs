@@ -87,6 +87,7 @@ public static class Vcdm20JosePresentation
         {
             alg = "EdDSA",
             typ = "vp+jwt",
+            cty = "vp",
             kid = KeyId(holderDid)
         });
         string payload = JsonSerializer.Serialize(new Dictionary<string, object>(StringComparer.Ordinal)
@@ -155,7 +156,7 @@ public static class Vcdm20JosePresentation
             challenge.ExpiresAt > now.Add(InMemoryPresentationChallengeStore.MaximumLifetime) ||
             !StrictJwtReader.TryRead(
                 presentationJwt, "vp+jwt", MaximumPresentationLength,
-                out var payload, KeyId(holderDid)) ||
+                out var payload, KeyId(holderDid), "vp") ||
             payload.EnumerateObject().Count() != 8 ||
             !HasOneString(payload, "@context", BaseContext) ||
             !HasOneString(payload, "type", "VerifiablePresentation") ||

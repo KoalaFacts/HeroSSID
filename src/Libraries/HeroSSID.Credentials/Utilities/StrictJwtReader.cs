@@ -36,7 +36,8 @@ internal static class StrictJwtReader
         }
     }
 
-    public static bool TryRead(string token, string expectedType, int maximumLength, out JsonElement payload, string? expectedKeyId = null)
+    public static bool TryRead(string token, string expectedType, int maximumLength, out JsonElement payload,
+        string? expectedKeyId = null, string? expectedContentType = null)
     {
         payload = default;
         if (!IsCanonicalCompact(token, maximumLength))
@@ -50,8 +51,21 @@ internal static class StrictJwtReader
             var options = new JsonDocumentOptions { MaxDepth = 16 };
             using var headerDocument = JsonDocument.Parse(Base64UrlEncoder.DecodeBytes(parts[0]), options);
             var header = headerDocument.RootElement;
-            if (header.ValueKind != JsonValueKind.Object || header.EnumerateObject().Count() != (expectedKeyId is null ? 2 : 3) ||
-                !HasUniqueProperties(header) || !TryGetString(header, "alg", out var algorithm) || algorithm != "EdDSA" ||
+            if (header.ValueKind != JsonValueKind.Object || !HasUniqueProperties(header))
+            {
+                return false;
+            }
+
+            // W3C VC-JOSE-COSE 2026 recommends cty=vc/vp, but older valid
+            // direct JWTs may omit it. Never silently accept an incorrect or
+            // unexpected content type or an extra JOSE header parameter.
+            bool hasContentType = header.TryGetProperty("cty", out var contentType);
+            if (header.EnumerateObject().Count() !=
+                    (expectedKeyId is null ? 2 : 3) + (hasContentType ? 1 : 0) ||
+                (hasContentType && (expectedContentType is null ||
+                    contentType.ValueKind != JsonValueKind.String ||
+                    !string.Equals(contentType.GetString(), expectedContentType, StringComparison.Ordinal))) ||
+                !TryGetString(header, "alg", out var algorithm) || algorithm != "EdDSA" ||
                 !TryGetString(header, "typ", out var type) || type != expectedType ||
                 (expectedKeyId is not null && (!TryGetString(header, "kid", out var keyId) ||
                     !string.Equals(keyId, expectedKeyId, StringComparison.Ordinal))))

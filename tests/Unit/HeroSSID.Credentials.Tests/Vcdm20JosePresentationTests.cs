@@ -26,6 +26,9 @@ public sealed class Vcdm20JosePresentationTests
         string credential = Issue();
         string presentation = Vcdm20JosePresentation.Create(request, _verifier.Did, Audience,
             credential, Type, Context, _holder.Did, _holder.Seed, _clock);
+        using var joseHeader = JsonDocument.Parse(Ed25519JwtSigner.ExtractHeader(presentation));
+        Assert.Equal("vp+jwt", joseHeader.RootElement.GetProperty("typ").GetString());
+        Assert.Equal("vp", joseHeader.RootElement.GetProperty("cty").GetString());
         using var document = JsonDocument.Parse(Ed25519JwtSigner.ExtractPayload(presentation));
         var payload = document.RootElement;
         Assert.False(payload.TryGetProperty("vp", out _));
@@ -105,6 +108,47 @@ public sealed class Vcdm20JosePresentationTests
         Assert.Throws<ArgumentException>(() =>
             Vcdm20JosePresentation.Create(request, _verifier.Did, Audience,
                 oldToken, Type, Context, _holder.Did, _holder.Seed, _clock));
+    }
+
+
+    [Fact]
+    public void SignedVpContentTypeMismatchCannotConsumeChallengeAndLegacyWithoutCtyStillWorks()
+    {
+        var tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did);
+        string signedRequest = OfflineSignedPresentationRequest.Create(
+            challenge, _verifier.Did, _verifier.Seed, _clock);
+        string current = Vcdm20JosePresentation.Create(
+            signedRequest, _verifier.Did, Audience, Issue(), Type, Context,
+            _holder.Did, _holder.Seed, _clock);
+        string header = Ed25519JwtSigner.ExtractHeader(current);
+        string payload = Ed25519JwtSigner.ExtractPayload(current);
+        string wrongHeader = header.Replace("\"cty\":\"vp\"", "\"cty\":\"vc\"", StringComparison.Ordinal);
+        Assert.NotEqual(header, wrongHeader);
+        string wrong = Ed25519JwtSigner.CreateSignedJwt(wrongHeader, payload, _holder.Seed);
+        Assert.Equal(Vcdm20PresentationCheckResult.Invalid,
+            Vcdm20JosePresentation.Check(wrong, tenant, Audience, challenge.Nonce,
+                Type, Context, store, _clock, out var denied));
+        Assert.Equal(JsonValueKind.Undefined, denied.ValueKind);
+
+        // Previous cty-less direct JWT presentations stay valid, while the
+        // forged but genuinely holder-signed wrong-cty proof cannot spend the nonce.
+        using var parsed = JsonDocument.Parse(header);
+        string olderHeader = JsonSerializer.Serialize(new
+        {
+            alg = "EdDSA",
+            typ = "vp+jwt",
+            kid = parsed.RootElement.GetProperty("kid").GetString()
+        });
+        string older = Ed25519JwtSigner.CreateSignedJwt(olderHeader, payload, _holder.Seed);
+        Assert.Equal(Vcdm20PresentationCheckResult.SignedButStatusUnchecked,
+            Vcdm20JosePresentation.Check(older, tenant, Audience, challenge.Nonce,
+                Type, Context, store, _clock, out var claims));
+        Assert.Equal("active", claims.GetProperty("membership").GetString());
+        Assert.Equal(Vcdm20PresentationCheckResult.Invalid,
+            Vcdm20JosePresentation.Check(older, tenant, Audience, challenge.Nonce,
+                Type, Context, store, _clock, out _));
     }
 
     private string Issue()

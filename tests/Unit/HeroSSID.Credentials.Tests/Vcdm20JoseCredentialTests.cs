@@ -30,6 +30,9 @@ public sealed class Vcdm20JoseCredentialTests
     public void IndependentIssuerCanCreateAndVerifierCanReadRealSignedVcdm20Subject()
     {
         string signed = Issue();
+        using var joseHeader = JsonDocument.Parse(Ed25519JwtSigner.ExtractHeader(signed));
+        Assert.Equal("vc+jwt", joseHeader.RootElement.GetProperty("typ").GetString());
+        Assert.Equal("vc", joseHeader.RootElement.GetProperty("cty").GetString());
         using var document = JsonDocument.Parse(Ed25519JwtSigner.ExtractPayload(signed));
         var root = document.RootElement;
         Assert.Equal("https://www.w3.org/ns/credentials/v2", root.GetProperty("@context")[0].GetString());
@@ -91,6 +94,44 @@ public sealed class Vcdm20JoseCredentialTests
             }), _issuerSeed);
         Assert.False(Vcdm20JoseCredential.TryVerify(legacy,
             _issuerDid, _holderDid, CredentialType, Context, Now, out _));
+    }
+
+
+    [Fact]
+    public void SignedJoseContentTypeMustMatchVcAndOldVcJwtWithoutCtyRemainsReadable()
+    {
+        string original = Issue();
+        string header = Ed25519JwtSigner.ExtractHeader(original);
+        string payload = Ed25519JwtSigner.ExtractPayload(original);
+        string wrongHeader = header.Replace("\"cty\":\"vc\"", "\"cty\":\"vp\"", StringComparison.Ordinal);
+        Assert.NotEqual(header, wrongHeader);
+        string wrong = Ed25519JwtSigner.CreateSignedJwt(wrongHeader, payload, _issuerSeed);
+        Assert.False(Vcdm20JoseCredential.TryVerify(
+            wrong, _issuerDid, _holderDid, CredentialType, Context, Now, out var denied));
+        Assert.Equal(JsonValueKind.Undefined, denied.ValueKind);
+
+        // A genuine signature over duplicate or contradictory JOSE fields is
+        // insufficient: exact unambiguous token typing is required.
+        string duplicateHeader = header.Replace(
+            "\"cty\":\"vc\"", "\"cty\":\"vc\",\"cty\":\"vp\"", StringComparison.Ordinal);
+        string duplicate = Ed25519JwtSigner.CreateSignedJwt(duplicateHeader, payload, _issuerSeed);
+        Assert.False(Vcdm20JoseCredential.TryVerify(
+            duplicate, _issuerDid, _holderDid, CredentialType, Context, Now, out denied));
+        Assert.Equal(JsonValueKind.Undefined, denied.ValueKind);
+
+        // The W3C cty value is recommended, not required. Previously issued
+        // signature-valid direct VC2 JWTs must remain verifiable without cty.
+        using var parsed = JsonDocument.Parse(header);
+        string olderHeader = JsonSerializer.Serialize(new
+        {
+            alg = "EdDSA",
+            typ = "vc+jwt",
+            kid = parsed.RootElement.GetProperty("kid").GetString()
+        });
+        string older = Ed25519JwtSigner.CreateSignedJwt(olderHeader, payload, _issuerSeed);
+        Assert.True(Vcdm20JoseCredential.TryVerify(
+            older, _issuerDid, _holderDid, CredentialType, Context, Now, out var subject));
+        Assert.Equal("active", subject.GetProperty("membership").GetString());
     }
 
     private string Issue()
