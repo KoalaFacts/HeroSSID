@@ -3,7 +3,7 @@ name: Independent exact-head PR67 OpenID4VP wallet disclosure review
 on:
   push:
     branches:
-      - review/pr67-openid4vp-by-value-20261031
+      - review/pr67-wallet-disclosure-20261031
 
 permissions: {}
 
@@ -80,7 +80,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/66 --jq '.head.sha')"
+          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/67 --jq '.head.sha')"
           test "$actual" = "6cece2552f6005950fec959b7655756d0b138a23"
           python3 - <<'PY'
           import json
@@ -108,7 +108,7 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo 'Independent Qwen2.5-Coder 7B security/code review of all six changed PR #67 OpenID4VP verified full-disclosure preview files.'
+            echo 'Independent Qwen2.5-Coder 7B security/code review of all four changed PR #67 OpenID4VP verified full-disclosure preview files.'
             echo
             echo 'Reviewed exact head: 6cece2552f6005950fec959b7655756d0b138a23.'
             echo 'Baseline: e23066824465e46c0f4f95a524622f02671a0009.'
@@ -117,7 +117,7 @@ jobs:
             echo
             cat review-1.md
           } > /tmp/pr67-review.md
-          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/66/reviews \
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/67/reviews \
             -f event=COMMENT -f commit_id=6cece2552f6005950fec959b7655756d0b138a23 \
             -f body="$(cat /tmp/pr67-review.md)" \
             --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
