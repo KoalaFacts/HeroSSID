@@ -23,9 +23,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse 85a29953f7915de11c182154adb3be10aa8f43f9^{commit})" = "85a29953f7915de11c182154adb3be10aa8f43f9"
+          test "$(git rev-parse abc505c7ae18152d9be39699faed22bd4846990f^{commit})" = "abc505c7ae18152d9be39699faed22bd4846990f"
           test "$(git rev-parse d85a4b5cc9c8e6f9923c1b817729150ea3ea5b43^{commit})" = "d85a4b5cc9c8e6f9923c1b817729150ea3ea5b43"
-          test "$(git diff --name-only d85a4b5cc9c8e6f9923c1b817729150ea3ea5b43 85a29953f7915de11c182154adb3be10aa8f43f9 | wc -l)" -eq 6
+          test "$(git diff --name-only d85a4b5cc9c8e6f9923c1b817729150ea3ea5b43 abc505c7ae18152d9be39699faed22bd4846990f | wc -l)" -eq 6
       - name: Install independent local model
         shell: bash
         run: |
@@ -47,7 +47,7 @@ jobs:
           test -s review-1.md
           test -s review-1.json
           test -s review-model-1.json
-          test "$(cat review-head-1.txt)" = "85a29953f7915de11c182154adb3be10aa8f43f9"
+          test "$(cat review-head-1.txt)" = "abc505c7ae18152d9be39699faed22bd4846990f"
       - name: Independent model review part 2
         shell: bash
         run: |
@@ -56,7 +56,7 @@ jobs:
           test -s review-2.md
           test -s review-2.json
           test -s review-model-2.json
-          test "$(cat review-head-2.txt)" = "85a29953f7915de11c182154adb3be10aa8f43f9"
+          test "$(cat review-head-2.txt)" = "abc505c7ae18152d9be39699faed22bd4846990f"
       - name: Preserve full original model results
         if: always()
         uses: actions/upload-artifact@v4
@@ -89,12 +89,12 @@ jobs:
         run: |
           set -euo pipefail
           actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/89 --jq '.head.sha')"
-          test "$actual" = "85a29953f7915de11c182154adb3be10aa8f43f9"
+          test "$actual" = "abc505c7ae18152d9be39699faed22bd4846990f"
           gh api repos/KoalaFacts/HeroSSID/pulls/89/files --paginate --jq '.[].filename' | sort >/tmp/pr89-actual-files.txt
           python3 - <<'PY'
           import json
           from pathlib import Path
-          expected_head = "85a29953f7915de11c182154adb3be10aa8f43f9"
+          expected_head = "abc505c7ae18152d9be39699faed22bd4846990f"
           expected = {
               "docs/vcdm20-http-status-verify-profile.md",
               "docs/vcdm20-revocation-snapshot-profile.md",
@@ -102,7 +102,8 @@ jobs:
               "src/Services/HeroSSID.Api/Features/Credentials/Vcdm20CredentialVerificationEndpoint.cs",
               "tests/Contract/HeroSSID.OpenID4VC.Contract.Tests/Vcdm20CredentialStatusVerificationHttpTests.cs",
               "tests/Unit/HeroSSID.Credentials.Tests/Vcdm20RevocationSnapshotTests.cs",
-          }          assert set(Path("/tmp/pr89-actual-files.txt").read_text().splitlines()) == expected
+          }
+          assert set(Path("/tmp/pr89-actual-files.txt").read_text().splitlines()) == expected
           seen = []
           for part in (1, 2):
               data = json.loads(Path(f"review-{part}.json").read_text())
@@ -124,7 +125,7 @@ jobs:
           {
             echo "Independent Qwen2.5-Coder 7B review of ALL SIX changed PR #89 authenticated direct VC2 status-cutoff files."
             echo
-            echo "Reviewed exact HEAD: 85a29953f7915de11c182154adb3be10aa8f43f9."
+            echo "Reviewed exact HEAD: abc505c7ae18152d9be39699faed22bd4846990f."
             echo "Base: d85a4b5cc9c8e6f9923c1b817729150ea3ea5b43."
             echo "Automated local model review, NOT human approval, wallet conformance or external cryptographic audit."
             echo "All findings require itemized source/test disposition before merge."
@@ -134,6 +135,6 @@ jobs:
             cat review-2.md
           } >/tmp/pr89-review.md
           gh api --method POST repos/KoalaFacts/HeroSSID/pulls/89/reviews \
-            -f event=COMMENT -f commit_id=85a29953f7915de11c182154adb3be10aa8f43f9 \
+            -f event=COMMENT -f commit_id=abc505c7ae18152d9be39699faed22bd4846990f \
             -f body="$(cat /tmp/pr89-review.md)" \
             --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
