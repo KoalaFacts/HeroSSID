@@ -316,7 +316,7 @@ public sealed class JwtVcJsonCredentialVerificationHttpTests(AspireWebApplicatio
             {
                 credential = unregistered,
                 activeIssuerDids = new[] { activeDid },
-                retiredCredentialPins = unregistered == oldJwt ? [] : policy,
+                retiredCredentialPins = unregistered == oldJwt ? policy.Take(0).ToArray() : policy,
                 expectedHolderDid = holderDid,
                 expectedCredentialType = CredentialType,
                 subjectContextUri = Vocabulary
