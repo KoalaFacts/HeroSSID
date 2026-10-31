@@ -112,6 +112,40 @@ internal static class StrictJwtReader
             property.TryGetInt64(out value) && value >= 0 && value < 253402300800;
     }
 
+
+    /// <summary>
+    /// These strict, URI-pinned VC profiles do not expand JSON-LD contexts.
+    /// A local context in any descendant object or array could redefine the
+    /// meaning of a claim without changing the pinned top-level vocabulary.
+    /// Reject such subjects rather than disclose potentially shadowed claims.
+    /// </summary>
+    public static bool HasEmbeddedContext(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (JsonProperty property in element.EnumerateObject())
+            {
+                if (property.NameEquals("@context") ||
+                    HasEmbeddedContext(property.Value))
+                {
+                    return true;
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement item in element.EnumerateArray())
+            {
+                if (HasEmbeddedContext(item))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     private static bool HasUniqueProperties(JsonElement element)
     {
         if (element.ValueKind == JsonValueKind.Object)

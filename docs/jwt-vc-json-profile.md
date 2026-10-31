@@ -15,6 +15,22 @@ This is a **real issuer-signed JWT VC 1.1 credential** intended for the OpenID4V
 
 An independent verifier calls `JwtVcJsonCredential.TryVerify(jwt, trustedIssuerDid, expectedHolderDid, expectedCredentialType, expectedSubjectContextUri, clock, out claims)`. All policy parameters must be independently configured: **never use the credential's claimed issuer as its own trust anchor**. It checks genuine Ed25519 signature and exact `kid`, the bounded, unambiguous nested JSON structure, the expected holder/type/context, `nbf` and `exp` before returning any subject claims. Tampered, foreign, expired, premature, legacy/private and VC2-direct tokens fail closed. It does not network-fetch an arbitrary `@context` and does not perform JSON-LD expansion or semantic validation of the custom vocabulary; the relying party must have reviewed/pinned the specified context and vocabulary.
 
+## Preventing subject-level vocabulary shadowing
+
+The opt-in pinned-vocabulary `jwt_vc_json` profile rejects **all**
+`@context` members inside `vc.credentialSubject`, including in nested
+objects and arrays. Otherwise, JSON-LD local contexts could redefine a
+signed claim without altering the exact, verifier-pinned outer
+`vc.@context`. Issuance rejects these inputs and verification withholds
+claims even when the issuer signature is genuine. Ordinary nested subject
+data without contexts remains accepted.
+
+This is a deliberate restriction of HeroSSID's **plain-JSON** profile,
+not a claim that the W3C VC data model forbids scoped JSON-LD contexts.
+General JSON-LD consumers that require such contexts need their own
+validated semantic profile and trust policy. HeroSSID does not dereference,
+integrity-protect, or expand even the pinned HTTPS vocabulary URI.
+
 ## Example
 
 ```csharp

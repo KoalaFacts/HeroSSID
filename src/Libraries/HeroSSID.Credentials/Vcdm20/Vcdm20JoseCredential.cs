@@ -50,6 +50,7 @@ public static class Vcdm20JoseCredential
             validUntil <= validFrom ||
             credentialSubject.ValueKind != JsonValueKind.Object ||
             !HasSubjectId(credentialSubject, holderDid) ||
+            StrictJwtReader.HasEmbeddedContext(credentialSubject) ||
             Encoding.UTF8.GetByteCount(credentialSubject.GetRawText()) > MaximumSubjectBytes)
         {
             throw new ArgumentException("Invalid VC2 issuer, holder, policy, subject, seed or validity interval.");
@@ -119,6 +120,7 @@ public static class Vcdm20JoseCredential
             !credential.TryGetProperty("credentialSubject", out var subject) ||
             subject.ValueKind != JsonValueKind.Object ||
             !HasSubjectId(subject, expectedHolderDid) ||
+            StrictJwtReader.HasEmbeddedContext(subject) ||
             Encoding.UTF8.GetByteCount(subject.GetRawText()) > MaximumSubjectBytes)
         {
             return false;

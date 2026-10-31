@@ -60,6 +60,23 @@ if (Vcdm20JoseCredential.TryVerify(
 }
 ```
 
+## Embedded context restrictions
+
+This **strict JSON / pinned-vocabulary profile** rejects any additional `@context`
+within `credentialSubject`, including descendants inside nested objects or
+arrays. A JSON-LD local context could otherwise override the meaning of a
+claim while the outer pinned context still matches. Issuance rejects such
+subjects; verification also rejects otherwise genuinely issuer-signed tokens
+and releases no claims. Ordinary nested data **without** local contexts
+remains supported.
+
+This is deliberately narrower than general JSON-LD, which permits local
+contexts ([JSON-LD 1.1](https://www.w3.org/TR/json-ld11/#the-context)).
+A credential that relies on legitimate scoped contexts needs a distinct,
+reviewed JSON-LD processing profile. The URI-pinning check still does **not**
+fetch contexts, verify their actual contents, expand terms or establish
+semantic interoperability.
+
 ## Security and standards boundary
 
 The caller MUST independently determine which issuer DID is trusted to issue

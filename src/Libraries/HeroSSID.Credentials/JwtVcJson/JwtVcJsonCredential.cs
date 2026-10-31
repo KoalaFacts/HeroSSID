@@ -55,6 +55,7 @@ public static class JwtVcJsonCredential
             expires - issued > MaximumValiditySeconds ||
             credentialSubject.ValueKind != JsonValueKind.Object ||
             !HasSubjectId(credentialSubject, holderDid) ||
+            StrictJwtReader.HasEmbeddedContext(credentialSubject) ||
             Encoding.UTF8.GetByteCount(credentialSubject.GetRawText()) > MaximumSubjectBytes)
         {
             throw new ArgumentException("Invalid JWT VC 1.1 key, context, subject, vocabulary or bounded validity.");
@@ -134,6 +135,7 @@ public static class JwtVcJsonCredential
             !vc.TryGetProperty("credentialSubject", out var subject) ||
             subject.ValueKind != JsonValueKind.Object ||
             !HasSubjectId(subject, expectedHolderDid) ||
+            StrictJwtReader.HasEmbeddedContext(subject) ||
             Encoding.UTF8.GetByteCount(subject.GetRawText()) > MaximumSubjectBytes)
         {
             return false;
