@@ -1,4 +1,7 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using HeroSSID.Credentials.JwtVcJson;
 
 namespace HeroSSID.Credentials.VerifiablePresentations;
 
@@ -28,7 +31,10 @@ public static class OpenId4VpJwtVcJsonWalletDisclosure
     /// <summary>
     /// Independently verify a pinned request and the original issuer JWT, and
     /// expose the entire signed subject to a wallet UI before asking permission.
-    /// No holder private key is required for preview.
+    /// No holder private key is required for preview. The wallet must supply its
+    /// own independently chosen verifier DID/callback and issuer trust policy.
+    /// An authentic preview is not proof of current revocation status, holder
+    /// control, actual user consent, identity or business authorization.
     /// </summary>
     public static bool TryPrepare(
         string requestJwt, string expectedVerifierDid, Uri expectedResponseUri,
@@ -36,20 +42,86 @@ public static class OpenId4VpJwtVcJsonWalletDisclosure
         string expectedIssuerDid, string credentialJwt, string holderDid,
         TimeProvider clock, out JwtVcJsonWalletDisclosurePreview? preview)
     {
+        ArgumentNullException.ThrowIfNull(expectedResponseUri);
+        ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
+        ArgumentNullException.ThrowIfNull(clock);
         preview = null;
-        return false;
+
+        if (string.IsNullOrWhiteSpace(requestJwt) ||
+            string.IsNullOrWhiteSpace(credentialJwt) ||
+            string.IsNullOrWhiteSpace(expectedIssuerDid) ||
+            string.IsNullOrWhiteSpace(holderDid) ||
+            !OpenId4VpJwtVcJsonDirectPost.TryReadSignedRequest(
+                requestJwt, expectedVerifierDid, expectedResponseUri,
+                expectedCredentialType, expectedSubjectContextUri, clock, out var request) ||
+            request is null ||
+            !string.Equals(request.Challenge.TrustedIssuerDid,
+                expectedIssuerDid, StringComparison.Ordinal) ||
+            !JwtVcJsonCredential.TryVerify(credentialJwt, expectedIssuerDid,
+                holderDid, expectedCredentialType, expectedSubjectContextUri,
+                clock.GetUtcNow(), out JsonElement signedSubject))
+        {
+            return false;
+        }
+
+        preview = new JwtVcJsonWalletDisclosurePreview(
+            expectedVerifierDid,
+            expectedResponseUri,
+            expectedIssuerDid,
+            holderDid,
+            expectedCredentialType,
+            expectedSubjectContextUri,
+            request.Challenge.ExpiresAt,
+            signedSubject,
+            Sha256(requestJwt),
+            Sha256(credentialJwt));
+        return true;
     }
 
     /// <summary>
     /// After the integrating application has obtained actual informed consent,
-    /// revalidate the exact request and issuer credential shown in the preview
-    /// before signing the holder's full-disclosure VP.
+    /// independently reverify both original signed artifacts and require their
+    /// exact digests and displayed subject to match the preview before signing.
+    /// This prevents accidental post-preview swaps; it does not prove a human
+    /// saw or approved the disclosure. The original signing API is still usable,
+    /// and a wallet must enforce its own real consent interaction.
     /// </summary>
     public static string CreateHolderResponseFormAfterPreview(
         JwtVcJsonWalletDisclosurePreview preview,
         string requestJwt, string credentialJwt, byte[] holderSeed,
         TimeProvider clock)
     {
-        throw new NotSupportedException("Wallet disclosure preflight is not implemented.");
+        ArgumentNullException.ThrowIfNull(preview);
+        ArgumentNullException.ThrowIfNull(holderSeed);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        if (preview.VerifiedSubject.ValueKind != JsonValueKind.Object ||
+            !TryPrepare(requestJwt, preview.VerifierDid, preview.ResponseUri,
+                preview.CredentialType, preview.SubjectContextUri,
+                preview.TrustedIssuerDid, credentialJwt, preview.HolderDid,
+                clock, out var newlyVerified) ||
+            newlyVerified is null ||
+            preview.RequestExpiresAt != newlyVerified.RequestExpiresAt ||
+            !string.Equals(preview.RequestSha256,
+                newlyVerified.RequestSha256, StringComparison.Ordinal) ||
+            !string.Equals(preview.CredentialSha256,
+                newlyVerified.CredentialSha256, StringComparison.Ordinal) ||
+            !string.Equals(preview.VerifiedSubject.GetRawText(),
+                newlyVerified.VerifiedSubject.GetRawText(), StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                "Only the live verifier request and authentic issuer credential shown in the preview may be signed.",
+                nameof(preview));
+        }
+
+        // The original VP creator rechecks the verifier signature, issuer JWT,
+        // holder private key and expiry. Never sign by trusting preview metadata.
+        return OpenId4VpJwtVcJsonDirectPost.CreateHolderResponseForm(
+            requestJwt, preview.VerifierDid, preview.ResponseUri,
+            preview.CredentialType, preview.SubjectContextUri,
+            credentialJwt, preview.HolderDid, holderSeed, clock);
     }
+
+    private static string Sha256(string signedJwt) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(signedJwt)));
 }
