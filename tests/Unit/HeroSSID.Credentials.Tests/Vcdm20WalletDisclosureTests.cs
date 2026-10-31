@@ -223,6 +223,35 @@ public sealed class Vcdm20WalletDisclosureTests
                 _holder.Did, _holder.Seed, _clock));
     }
 
+    [Fact]
+    public void PolicyRequiredWalletRejectsAuthenticLegacyRequestRatherThanDowngrading()
+    {
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var legacyChallenge = store.Issue(Guid.NewGuid(), Audience, _issuer.Did);
+        string legacyRequest = SignRequest(legacyChallenge);
+        string credential = IssueCredential("member");
+
+        Assert.True(Prepare(legacyRequest, credential, _verifier.Did, Audience,
+            CredentialType, Context, _issuer.Did, _holder.Did, out _));
+        Assert.False(Vcdm20WalletDisclosure.TryPrepareRequiringSignedPolicy(
+            legacyRequest, _verifier.Did, Audience, CredentialType, Context,
+            _issuer.Did, credential, _holder.Did, _clock, out var denied));
+        Assert.Null(denied);
+
+        var boundChallenge = store.Issue(Guid.NewGuid(), Audience, _issuer.Did) with
+        {
+            CredentialType = CredentialType,
+            SubjectContextUri = Context
+        };
+        string boundRequest = SignRequest(boundChallenge);
+        Assert.False(OfflineSignedPresentationRequest.TryRead(
+            boundRequest, _verifier.Did, Audience, _clock, out _));
+        Assert.True(Vcdm20WalletDisclosure.TryPrepareRequiringSignedPolicy(
+            boundRequest, _verifier.Did, Audience, CredentialType, Context,
+            _issuer.Did, credential, _holder.Did, _clock, out var preview));
+        Assert.NotNull(preview);
+    }
+
     private string IssueCredentialWithPolicy(string type, Uri vocabulary, string membership)
     {
         using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
