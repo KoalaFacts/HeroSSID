@@ -26,6 +26,9 @@ public sealed class Vcdm20JosePresentationTests
         string credential = Issue();
         string presentation = Vcdm20JosePresentation.Create(request, _verifier.Did, Audience,
             credential, Type, Context, _holder.Did, _holder.Seed, _clock);
+        using var joseHeader = JsonDocument.Parse(Ed25519JwtSigner.ExtractHeader(presentation));
+        Assert.Equal("vp+jwt", joseHeader.RootElement.GetProperty("typ").GetString());
+        Assert.Equal("vp", joseHeader.RootElement.GetProperty("cty").GetString());
         using var document = JsonDocument.Parse(Ed25519JwtSigner.ExtractPayload(presentation));
         var payload = document.RootElement;
         Assert.False(payload.TryGetProperty("vp", out _));
