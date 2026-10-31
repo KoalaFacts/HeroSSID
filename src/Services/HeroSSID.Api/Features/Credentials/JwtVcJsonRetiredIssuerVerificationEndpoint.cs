@@ -257,8 +257,9 @@ internal static class JwtVcJsonRetiredIssuerVerificationEndpoint
 
         if (withDenylist)
         {
-            string[] deniedSnapshot = request.DeniedCredentialSha256!.ToArray();
-            if (deniedSnapshot.Length != request.DeniedCredentialSha256.Count)
+            IReadOnlyCollection<string> suppliedDenylist = request.DeniedCredentialSha256!;
+            string[] deniedSnapshot = suppliedDenylist.ToArray();
+            if (deniedSnapshot.Length != suppliedDenylist.Count)
             {
                 return false;
             }
