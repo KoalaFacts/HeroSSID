@@ -54,8 +54,11 @@ public static class Vcdm20JosePresentation
         ArgumentNullException.ThrowIfNull(holderSeed);
         ArgumentNullException.ThrowIfNull(clock);
 
-        if (!OfflineSignedPresentationRequest.TryRead(
-                signedRequestJwt, trustedVerifierDid, expectedAudience, clock, out var challenge) ||
+        if ((!OfflineSignedPresentationRequest.TryRead(
+                signedRequestJwt, trustedVerifierDid, expectedAudience, clock, out var challenge) &&
+            !OfflineSignedPresentationRequest.TryReadPolicyBound(
+                signedRequestJwt, trustedVerifierDid, expectedAudience,
+                expectedCredentialType, expectedContextUri, clock, out challenge)) ||
             challenge is null)
         {
             throw new ArgumentException("An authentic request from the pinned verifier is required.", nameof(signedRequestJwt));
