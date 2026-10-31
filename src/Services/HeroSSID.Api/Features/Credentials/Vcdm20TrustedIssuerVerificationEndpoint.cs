@@ -101,30 +101,43 @@ internal static class Vcdm20TrustedIssuerVerificationEndpoint
         out string[] issuers)
     {
         issuers = [];
+        string? credential = request.Credential;
+        string? expectedHolder = request.ExpectedHolderDid;
+        string? expectedType = request.ExpectedCredentialType;
         Uri? context = request.SubjectContextUri;
-        var trusted = request.TrustedIssuerDids;
+        IReadOnlyCollection<string>? trusted = request.TrustedIssuerDids;
+        string? status = request.RevocationSnapshot;
 
-        // Fail closed on missing, duplicated or malformed verifier policy.
-        // A status field on the non-status route is rejected to prevent an
-        // integration from mistaking an unchecked snapshot for enforced status.
-        if (string.IsNullOrWhiteSpace(request.Credential) ||
-            request.Credential.Length > MaximumJwtLength ||
-            trusted is null || trusted.Count is < 1 or > MaximumTrustedIssuers ||
-            string.IsNullOrWhiteSpace(request.ExpectedHolderDid) ||
-            request.ExpectedHolderDid.Length > 255 ||
-            !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(request.ExpectedHolderDid, out _) ||
-            string.IsNullOrWhiteSpace(request.ExpectedCredentialType) ||
-            request.ExpectedCredentialType.Length > 128 ||
-            request.ExpectedCredentialType.Any(char.IsWhiteSpace) ||
+        if (string.IsNullOrWhiteSpace(credential) ||
+            credential.Length > MaximumJwtLength ||
+            string.IsNullOrWhiteSpace(expectedHolder) ||
+            expectedHolder.Length > 255 ||
+            !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(expectedHolder, out _) ||
+            string.IsNullOrWhiteSpace(expectedType) ||
+            expectedType.Length > 128 || expectedType.Any(char.IsWhiteSpace) ||
             context is null || !context.IsAbsoluteUri ||
             context.Scheme != Uri.UriSchemeHttps ||
             !string.IsNullOrEmpty(context.UserInfo) ||
             !string.IsNullOrEmpty(context.Fragment) ||
-            context.AbsoluteUri.Length > 2048 ||
-            (withStatus
-                ? string.IsNullOrWhiteSpace(request.RevocationSnapshot) ||
-                  request.RevocationSnapshot.Length > MaximumJwtLength
-                : request.RevocationSnapshot is not null))
+            context.AbsoluteUri.Length > 2048)
+        {
+            return false;
+        }
+
+        if (withStatus)
+        {
+            if (string.IsNullOrWhiteSpace(status) || status.Length > MaximumJwtLength)
+            {
+                return false;
+            }
+        }
+        else if (status is not null)
+        {
+            // Never silently ignore a status when the caller chose unchecked verification.
+            return false;
+        }
+
+        if (trusted is null || trusted.Count is < 1 or > MaximumTrustedIssuers)
         {
             return false;
         }

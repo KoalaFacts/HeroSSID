@@ -58,7 +58,11 @@ public static class OfflineCredentialVerifier
         };
     }
 
-    internal static bool TryDecodeDidKeyPublicKey(string? issuerDid, out byte[] publicKey)
+    /// <summary>
+    /// Decode a canonical Ed25519 did:key to its raw public key. A self-certifying
+    /// key is NOT evidence of an enrolled, trustworthy or authorized issuer.
+    /// </summary>
+    public static bool TryDecodeDidKeyPublicKey(string? issuerDid, out byte[] publicKey)
     {
         publicKey = [];
         if (string.IsNullOrWhiteSpace(issuerDid) ||
