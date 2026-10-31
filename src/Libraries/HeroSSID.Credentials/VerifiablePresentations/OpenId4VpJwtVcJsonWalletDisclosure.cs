@@ -22,6 +22,16 @@ public sealed record JwtVcJsonWalletDisclosurePreview(
     string RequestSha256,
     string CredentialSha256);
 
+
+/// <summary>
+/// Full-disclosure preview additionally bound to the exact issuer-signed,
+/// short-lived VC1.1 status snapshot. Absence from an issuer-reported set
+/// does not prove live non-revocation or completeness.
+/// </summary>
+public sealed record JwtVcJsonWalletStatusDisclosurePreview(
+    JwtVcJsonWalletDisclosurePreview Disclosure,
+    string SnapshotSha256);
+
 /// <summary>
 /// Wallet preflight for the bounded OpenID4VP jwt_vc_json direct_post profile.
 /// This API never signs or consumes a challenge, nor does it obtain consent.
@@ -120,6 +130,36 @@ public static class OpenId4VpJwtVcJsonWalletDisclosure
             requestJwt, preview.VerifierDid, preview.ResponseUri,
             preview.CredentialType, preview.SubjectContextUri,
             credentialJwt, preview.HolderDid, holderSeed, clock);
+    }
+
+
+    /// <summary>
+    /// Prepare a status-gated full-disclosure preview. A missing, forged,
+    /// revoked or stale issuer-signed status must not release subject claims.
+    /// The issuer alone is responsible for its export's completeness.
+    /// </summary>
+    public static bool TryPrepareWithStatus(
+        string requestJwt, string expectedVerifierDid, Uri expectedResponseUri,
+        string expectedCredentialType, Uri expectedSubjectContextUri,
+        string expectedIssuerDid, string credentialJwt, string holderDid,
+        string issuerSignedSnapshotJwt, TimeProvider clock,
+        out JwtVcJsonWalletStatusDisclosurePreview? preview)
+    {
+        preview = null;
+        throw new NotSupportedException("Status-aware VC1.1 Wallet preflight not implemented.");
+    }
+
+    /// <summary>
+    /// Require unchanged live signed status and the exact approved preview
+    /// before the caller-owned holder key can sign a direct_post response.
+    /// Does not attest to actual user consent or live non-revocation.
+    /// </summary>
+    public static string CreateHolderResponseFormAfterStatusPreview(
+        JwtVcJsonWalletStatusDisclosurePreview preview, string requestJwt,
+        string credentialJwt, string issuerSignedSnapshotJwt,
+        byte[] holderSeed, TimeProvider clock)
+    {
+        throw new NotSupportedException("Status-aware VC1.1 Wallet signing not implemented.");
     }
 
     private static string Sha256(string signedJwt) =>
