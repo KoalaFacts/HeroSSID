@@ -23,9 +23,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse 9b9c0175571a6db935c6db41ed98dea38f50089a^{commit})" = "9b9c0175571a6db935c6db41ed98dea38f50089a"
+          test "$(git rev-parse d4f2a7b305274b0178f0e1a9891e23bca8f3fc57^{commit})" = "d4f2a7b305274b0178f0e1a9891e23bca8f3fc57"
           test "$(git rev-parse 3e7a46dbabb6b6082df7a057f6f69b2d26f9afbb^{commit})" = "3e7a46dbabb6b6082df7a057f6f69b2d26f9afbb"
-          test "$(git diff --name-only 3e7a46dbabb6b6082df7a057f6f69b2d26f9afbb 9b9c0175571a6db935c6db41ed98dea38f50089a | wc -l)" -eq 6
+          test "$(git diff --name-only 3e7a46dbabb6b6082df7a057f6f69b2d26f9afbb d4f2a7b305274b0178f0e1a9891e23bca8f3fc57 | wc -l)" -eq 6
       - name: Install local independent review model
         shell: bash
         run: |
@@ -47,7 +47,7 @@ jobs:
           test -s review-1.md
           test -s review-1.json
           test -s review-model-1.json
-          test "$(cat review-head-1.txt)" = "9b9c0175571a6db935c6db41ed98dea38f50089a"
+          test "$(cat review-head-1.txt)" = "d4f2a7b305274b0178f0e1a9891e23bca8f3fc57"
       - name: Retain independent raw review and exact-head evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -80,11 +80,11 @@ jobs:
         run: |
           set -euo pipefail
           actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/75 --jq '.head.sha')"
-          test "$actual" = "9b9c0175571a6db935c6db41ed98dea38f50089a"
+          test "$actual" = "d4f2a7b305274b0178f0e1a9891e23bca8f3fc57"
           python3 - <<'PY'
           import json
           from pathlib import Path
-          head = "9b9c0175571a6db935c6db41ed98dea38f50089a"
+          head = "d4f2a7b305274b0178f0e1a9891e23bca8f3fc57"
           expected = {
             "README.md",
             "docs/vcdm20-http-verify-profile.md",
@@ -111,7 +111,7 @@ jobs:
           {
             echo 'Independent Qwen2.5-Coder 7B security/code review of ALL six changed PR #75 VC2 issuer trust files.'
             echo
-            echo 'Reviewed exact head: 9b9c0175571a6db935c6db41ed98dea38f50089a.'
+            echo 'Reviewed exact head: d4f2a7b305274b0178f0e1a9891e23bca8f3fc57.'
             echo 'Baseline: 3e7a46dbabb6b6082df7a057f6f69b2d26f9afbb.'
             echo 'A submitted independent MODEL review, not human approval or cryptographic certification.'
             echo 'Every finding must be reconciled with actual source/tests before merge.'
@@ -119,6 +119,6 @@ jobs:
             cat review-1.md
           } > /tmp/pr75-review.md
           gh api --method POST repos/KoalaFacts/HeroSSID/pulls/75/reviews \
-            -f event=COMMENT -f commit_id=9b9c0175571a6db935c6db41ed98dea38f50089a \
+            -f event=COMMENT -f commit_id=d4f2a7b305274b0178f0e1a9891e23bca8f3fc57 \
             -f body="$(cat /tmp/pr75-review.md)" \
             --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
