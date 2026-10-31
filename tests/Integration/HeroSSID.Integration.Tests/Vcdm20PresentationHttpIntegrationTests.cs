@@ -198,7 +198,7 @@ public sealed class Vcdm20PresentationHttpIntegrationTests(DatabaseFixture fixtu
     }
 
     [Fact]
-    public async Task CancellationRequiresVerifierAuthorizationAndRejectsMalformedOrUnknownNonce()
+    public async Task CancellationRequiresVerifierAuthorizationAndHidesUnknownNonce()
     {
         var ct = TestContext.Current.CancellationToken;
         await using (var setup = _fixture.CreateDbContext<HeroDbContext>())
@@ -219,6 +219,16 @@ public sealed class Vcdm20PresentationHttpIntegrationTests(DatabaseFixture fixtu
             route, new { audience = Audience, nonce = "not-a-valid-nonce" }, ct)
             .ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
+
+        using var nonCanonical = await client.AuthorizedPostAsJsonAsync(
+            route, new { audience = Audience, nonce = new string('!', 43) }, ct)
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, nonCanonical.StatusCode);
+
+        using var insecureAudience = await client.AuthorizedPostAsJsonAsync(
+            route, new { audience = "http://verifier.example/holder-proof", nonce = new string('A', 43) }, ct)
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, insecureAudience.StatusCode);
 
         using var unknown = await client.AuthorizedPostAsJsonAsync(
             route, new { audience = Audience, nonce = new string('A', 43) }, ct)

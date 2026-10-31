@@ -45,13 +45,34 @@ The **201** response contains `signedRequestJwt`, `verifierDid`, `audience`, `no
 
 This optional server-managed **verifier** signing is not holder key custody, holder consent, identity proofing or a hosted OpenID4VP Request Object. The holder must independently pin that verifier DID **and** audience through a trusted channel before accepting the signed JWT; a DID embedded in the request is not a trusted pin.
 
-## 2. Holder independently authenticates the request and chooses disclosure
+## 2. Explicitly cancel a declined or abandoned verifier challenge
+
+A verifier backend holding a validated tenant bearer token with `credential:verify` may invalidate an outstanding request **without asking the holder to sign anything**. This works for both the plain verifier challenge and the optional service-signed request above.
+
+```http
+POST /api/v1/credentials/vcdm20/cancel-presentation-challenge
+Authorization: Bearer <verifier-access-token-with-credential:verify>
+Content-Type: application/json
+```
+
+```json
+{
+  "audience": "https://verifier.example/present",
+  "nonce": "<exact-issued-43-character-nonce>"
+}
+```
+
+The audience must match the exact canonical HTTPS audience originally retained in the verifier's challenge. The nonce must be the canonical base64url encoding of 32 bytes. A **204 No Content** reply deliberately does **not** disclose whether the challenge existed, was already consumed or expired, or was successfully cancelled. Invalid shape is **400**, anonymous **401**, missing `credential:verify` scope **403**, unavailable PostgreSQL challenge state **503**. Cancellation and a concurrently verified holder proof share the same atomic PostgreSQL consume operation across replicas: at most one can win. Once accepted, a presentation cannot be retracted by cancellation.
+
+The security boundary is the **authenticated tenant**, not an individual OAuth client: any caller with `credential:verify` for that tenant and knowledge of the exact audience and nonce can cancel that tenant's challenge. Keep nonces confidential and use isolated tenants when verifiers must not interfere. Consumed challenges remain replay tombstones until expiry, rather than immediately freeing capacity. The endpoint neither proves the holder refused nor records genuine informed consent. No production migration or new database schema is involved.
+
+## 3. Holder independently authenticates the request and chooses disclosure
 
 The holder app uses `OfflineSignedPresentationRequest.TryRead(requestJwt, pinnedVerifierDid, exactAudience, clock, out challenge)` to authenticate the real verifier signature and request expiry. It must display **all claims** and the destination, obtain affirmative full-disclosure consent and allow refusal before signing. After consent, `Vcdm20JosePresentation.Create(requestJwt, pinnedVerifierDid, exactAudience, issuerSignedCredential, expectedCredentialType, expectedHttpsContext, holderDid, holderOwnedSeed, clock)` creates a real holder-signed `vp+jwt` envelope preserving the original issuer-signed VC2 JWT. The issuer and holder keys remain independent.
 
 The issuer separately signs a **complete** status snapshot using `Vcdm20RevocationSnapshot.Create`, based on its authoritative revocation data, with observation time recorded before any potentially slow status read. The present `/vcdm20/issue` HTTP endpoint **does not persist or revoke** short-lived VC2 credentials. HeroSSID does not publish VC2 snapshots automatically. No wallet UI, consent record or issuer status registry is supplied here. The optional server-managed verifier signer is limited to the tenant's own existing DID; holder private keys remain external.
 
-## 3. Verifier submits the proof and issuer snapshot
+## 4. Verifier submits the proof and issuer snapshot
 
 ```http
 POST /api/v1/credentials/vcdm20/verify-presentation
