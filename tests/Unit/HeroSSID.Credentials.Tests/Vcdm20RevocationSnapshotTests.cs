@@ -34,6 +34,45 @@ public sealed class Vcdm20RevocationSnapshotTests
     }
 
     [Fact]
+    public void StatusVerifierAcceptsOptionalVcCtyAndRejectsAuthenticWrongCty()
+    {
+        var now = _clock.GetUtcNow();
+        string credential = Issue("active");
+        string header = Ed25519JwtSigner.ExtractHeader(credential);
+        string payload = Ed25519JwtSigner.ExtractPayload(credential);
+        string snapshot = Vcdm20RevocationSnapshot.Create(
+            _issuer.Did, [credential], _issuer.Seed, now, _clock);
+
+        // A genuine issuer can accidentally emit the wrong profile kind.
+        // Signing that malformed header cannot make it a legitimate direct VC2.
+        string wrongHeader = header.Replace(
+            "\"cty\":\"vc\"", "\"cty\":\"vp\"", StringComparison.Ordinal);
+        Assert.NotEqual(header, wrongHeader);
+        string wrong = Ed25519JwtSigner.CreateSignedJwt(wrongHeader, payload, _issuer.Seed);
+        Assert.Throws<CryptographicException>(() =>
+            Vcdm20RevocationSnapshot.Create(
+                _issuer.Did, [wrong], _issuer.Seed, now, _clock));
+        Assert.Equal(Vcdm20RevocationCheckResult.Invalid,
+            Vcdm20RevocationSnapshot.Check(snapshot, wrong, _issuer.Did, now));
+
+        // cty is optional in the Recommendation: older genuine direct VC2
+        // tokens can still be listed and checked by the private snapshot.
+        using var parsedHeader = JsonDocument.Parse(header);
+        string legacyHeader = JsonSerializer.Serialize(new
+        {
+            alg = "EdDSA",
+            typ = "vc+jwt",
+            kid = parsedHeader.RootElement.GetProperty("kid").GetString()
+        });
+        string legacy = Ed25519JwtSigner.CreateSignedJwt(
+            legacyHeader, payload, _issuer.Seed);
+        string oldSnapshot = Vcdm20RevocationSnapshot.Create(
+            _issuer.Did, [legacy], _issuer.Seed, now, _clock);
+        Assert.Equal(Vcdm20RevocationCheckResult.Revoked,
+            Vcdm20RevocationSnapshot.Check(oldSnapshot, legacy, _issuer.Did, now));
+    }
+
+    [Fact]
     public void WrongIssuerTamperingOrForeignRevocationFailsClosed()
     {
         var now = _clock.GetUtcNow();
