@@ -22,6 +22,14 @@ public sealed record Vcdm20WalletDisclosurePreview(
     string CredentialSha256);
 
 /// <summary>
+/// Full-disclosure preview bound to the exact issuer-signed, short-lived VC2
+/// revocation snapshot. SignedNotListed is not proof of live non-revocation.
+/// </summary>
+public sealed record Vcdm20WalletStatusDisclosurePreview(
+    Vcdm20WalletDisclosurePreview Disclosure,
+    string SnapshotSha256);
+
+/// <summary>
 /// Wallet-side no-key preview and preview-bound VC2 presentation signing.
 /// A wallet must obtain meaningful full-disclosure consent in its own UI.
 /// </summary>
@@ -118,6 +126,85 @@ public static class Vcdm20WalletDisclosure
             signedRequestJwt, preview.VerifierDid, preview.VerifierAudience,
             credentialJwt, preview.CredentialType, preview.SubjectContextUri,
             preview.HolderDid, holderSeed, clock);
+    }
+
+    /// <summary>
+    /// Verify an independently pinned issuer and verifier, full-disclosure VC2
+    /// claims and an authentic, current same-issuer revocation snapshot without
+    /// a holder private key. Only an authentic SignedNotListed set can preview.
+    /// </summary>
+    public static bool TryPrepareWithStatus(
+        string signedRequestJwt, string expectedVerifierDid, string expectedAudience,
+        string expectedCredentialType, Uri expectedContextUri, string expectedIssuerDid,
+        string credentialJwt, string holderDid, string issuerSignedSnapshotJwt,
+        TimeProvider clock, out Vcdm20WalletStatusDisclosurePreview? preview)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        preview = null;
+
+        if (string.IsNullOrWhiteSpace(issuerSignedSnapshotJwt) ||
+            !TryPrepare(signedRequestJwt, expectedVerifierDid, expectedAudience,
+                expectedCredentialType, expectedContextUri, expectedIssuerDid,
+                credentialJwt, holderDid, clock, out var disclosure) ||
+            disclosure is null ||
+            Vcdm20RevocationSnapshot.Check(issuerSignedSnapshotJwt, credentialJwt,
+                disclosure.TrustedIssuerDid, clock.GetUtcNow()) !=
+                Vcdm20RevocationCheckResult.SignedNotListed)
+        {
+            // Never return even an authentic subject to the Wallet UI when
+            // the independently pinned issuer status is missing or negative.
+            return false;
+        }
+
+        preview = new Vcdm20WalletStatusDisclosurePreview(
+            disclosure, Sha256(issuerSignedSnapshotJwt));
+        return true;
+    }
+
+    /// <summary>
+    /// Recheck the exact verified snapshot, request, credential and full disclosed
+    /// subject at signing time before invoking the actual holder private key.
+    /// </summary>
+    public static string CreateHolderPresentationAfterStatusPreview(
+        Vcdm20WalletStatusDisclosurePreview preview, string signedRequestJwt,
+        string credentialJwt, string issuerSignedSnapshotJwt,
+        byte[] holderSeed, TimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(preview);
+        ArgumentNullException.ThrowIfNull(holderSeed);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        if (preview.Disclosure is null ||
+            string.IsNullOrWhiteSpace(issuerSignedSnapshotJwt) ||
+            !string.Equals(preview.SnapshotSha256, Sha256(issuerSignedSnapshotJwt),
+                StringComparison.Ordinal) ||
+            Vcdm20RevocationSnapshot.Check(issuerSignedSnapshotJwt, credentialJwt,
+                preview.Disclosure.TrustedIssuerDid, clock.GetUtcNow()) !=
+                Vcdm20RevocationCheckResult.SignedNotListed)
+        {
+            throw new ArgumentException(
+                "A current, unchanged issuer-signed status for the previewed VC2 credential is required.",
+                nameof(preview));
+        }
+
+        // This existing signer independently reauthenticates the exact
+        // verifier-signed request, issuer-signed VC2, displayed subject and
+        // holder DID before it accesses the caller-owned private seed.
+        string presentation = CreateHolderPresentationAfterPreview(
+            preview.Disclosure, signedRequestJwt, credentialJwt, holderSeed, clock);
+
+        // Signing may have crossed the snapshot expiry boundary. A proof
+        // with expired status must never be returned as status-checked.
+        if (Vcdm20RevocationSnapshot.Check(issuerSignedSnapshotJwt, credentialJwt,
+                preview.Disclosure.TrustedIssuerDid, clock.GetUtcNow()) !=
+                Vcdm20RevocationCheckResult.SignedNotListed)
+        {
+            throw new ArgumentException(
+                "The issuer-signed snapshot expired while creating the presentation.",
+                nameof(issuerSignedSnapshotJwt));
+        }
+
+        return presentation;
     }
 
     private static string Sha256(string jwt) =>
