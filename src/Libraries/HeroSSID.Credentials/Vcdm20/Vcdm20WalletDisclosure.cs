@@ -153,6 +153,21 @@ public static class Vcdm20WalletDisclosure
     }
 
     /// <summary>
+    /// Strict status-aware Wallet preflight requiring an issuer status snapshot AND
+    /// a verifier-signed credential type and exact HTTPS context. The legacy
+    /// status-aware entry point remains available for existing integrations.
+    /// </summary>
+    public static bool TryPrepareWithStatusRequiringSignedPolicy(
+        string signedRequestJwt, string expectedVerifierDid, string expectedAudience,
+        string expectedCredentialType, Uri expectedContextUri, string expectedIssuerDid,
+        string credentialJwt, string holderDid, string issuerSignedSnapshotJwt,
+        TimeProvider clock, out Vcdm20WalletStatusDisclosurePreview? preview)
+    {
+        preview = null;
+        throw new NotSupportedException("Strict status-aware signed-policy preflight is not yet implemented.");
+    }
+
+    /// <summary>
     /// Verify an independently pinned issuer and verifier, full-disclosure VC2
     /// claims and an authentic, current same-issuer revocation snapshot without
     /// a holder private key. Only an authentic SignedNotListed set can preview.
@@ -184,6 +199,16 @@ public static class Vcdm20WalletDisclosure
             disclosure, Sha256(issuerSignedSnapshotJwt));
         return true;
     }
+
+    /// <summary>
+    /// After informed consent, recheck both independent signed policies and the
+    /// exact issuer status before signing with the holder's private seed.
+    /// </summary>
+    public static string CreateHolderPresentationAfterStatusPreviewRequiringSignedPolicy(
+        Vcdm20WalletStatusDisclosurePreview preview, string signedRequestJwt,
+        string credentialJwt, string issuerSignedSnapshotJwt,
+        byte[] holderSeed, TimeProvider clock) =>
+        throw new NotSupportedException("Strict status-aware signed-policy signing is not yet implemented.");
 
     /// <summary>
     /// Recheck the exact verified snapshot, request, credential and full disclosed
