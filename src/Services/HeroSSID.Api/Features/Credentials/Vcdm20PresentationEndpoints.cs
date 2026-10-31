@@ -3,6 +3,7 @@ using System.Text.Json;
 using HeroSSID.Core.TenantManagement;
 using HeroSSID.Data;
 using HeroSSID.DidOperations.DidMethods;
+using HeroSSID.Credentials.Utilities;
 using HeroSSID.Credentials.Vcdm20;
 using HeroSSID.Credentials.VerifiablePresentations;
 using HeroSSID.Infrastructure.KeyEncryption;
@@ -47,6 +48,16 @@ internal static class Vcdm20PresentationEndpoints
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        credentials.MapPost("/vcdm20/cancel-presentation-challenge", Cancel)
+            .RequireAuthorization("credential:verify")
+            .WithName("CancelVcdm20PresentationChallenge")
+            .WithSummary("Atomically invalidate a pending tenant-owned VC2 verifier challenge")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         credentials.MapPost("/vcdm20/verify-presentation", Verify)
@@ -226,6 +237,52 @@ internal static class Vcdm20PresentationEndpoints
     }
 
     /// <summary>
+    /// A verifier that declines or abandons a request spends its outstanding nonce
+    /// without asking a Wallet to sign. Tenant, exact audience and nonce are bound
+    /// by the existing cross-replica PostgreSQL atomic consumption operation.
+    /// Unknown, cancelled and previously consumed nonces are indistinguishable.
+    /// A cancellation cannot retract a disclosure accepted before the operation.
+    /// </summary>
+    internal static IResult Cancel(
+        [FromBody] CancelVcdm20PresentationChallengeRequest request,
+        [FromServices] IPresentationChallengeStore challenges,
+        [FromServices] ITenantContext tenantContext)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(challenges);
+        ArgumentNullException.ThrowIfNull(tenantContext);
+
+        if (!ValidAudience(request.Audience) || !ValidNonce(request.Nonce))
+        {
+            return Results.Problem(title: "Invalid VC2 Challenge Cancellation",
+                detail: "The exact HTTPS verifier audience and canonical 43-character issued nonce are required.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        Guid tenantId = tenantContext.GetCurrentTenantId();
+        if (tenantId == Guid.Empty)
+        {
+            return Results.Unauthorized();
+        }
+
+        try
+        {
+            // Both successful cancellation and successful proof verification
+            // use this exact tenant/audience/nonce atomic store operation.
+            _ = challenges.TryConsume(tenantId, request.Audience!, request.Nonce!);
+            return Results.NoContent();
+        }
+        catch (NpgsqlException)
+        {
+            return Unavailable();
+        }
+        catch (TimeoutException)
+        {
+            return Unavailable();
+        }
+    }
+
+    /// <summary>
     /// The challenge's tenant, audience, nonce and issuer policy come from the verifier
     /// store, never from the holder token. Claims are released only after authentic issuer
     /// AND holder signatures, one-use consumption and an issuer-signed status snapshot.
@@ -290,6 +347,25 @@ internal static class Vcdm20PresentationEndpoints
         }
     }
 
+    private static bool ValidNonce(string? nonce)
+    {
+        if (nonce is null || nonce.Length != 43)
+        {
+            return false;
+        }
+
+        try
+        {
+            var bytes = Base64UrlEncoder.DecodeBytes(nonce);
+            return bytes.Length == 32 &&
+                string.Equals(Base64UrlEncoder.Encode(bytes), nonce, StringComparison.Ordinal);
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
     private static bool ValidAudience(string? audience) =>
         !string.IsNullOrWhiteSpace(audience) && audience.Length <= 2048 &&
         Uri.TryCreate(audience, UriKind.Absolute, out var uri) &&
@@ -338,6 +414,13 @@ public sealed class IssueVcdm20PresentationChallengeRequest
 /// <summary>Verifiers must sign this challenge with an independently held verifier key.</summary>
 public sealed record IssueVcdm20PresentationChallengeResponse(
     string Audience, string Nonce, string TrustedIssuerDid, DateTimeOffset ExpiresAt);
+
+/// <summary>Cancel a verifier challenge, not any previously accepted holder disclosure.</summary>
+public sealed class CancelVcdm20PresentationChallengeRequest
+{
+    public string? Audience { get; init; }
+    public string? Nonce { get; init; }
+}
 
 /// <summary>Caller pins claim vocabulary and type; the server retains issuer policy.</summary>
 public sealed class VerifyVcdm20PresentationRequest
