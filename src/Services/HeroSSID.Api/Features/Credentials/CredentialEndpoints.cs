@@ -60,6 +60,7 @@ public static class CredentialEndpoints
         JwtVcJsonOpenId4VpHttpEndpoints.Map(credentials);
         Vcdm20CredentialIssuanceEndpoint.Map(credentials);
         Vcdm20CredentialVerificationEndpoint.Map(credentials);
+        Vcdm20TrustedIssuerVerificationEndpoint.Map(credentials);
         Vcdm20PresentationEndpoints.Map(credentials);
         IssuerSuccessorEndpoints.Map(credentials);
 
