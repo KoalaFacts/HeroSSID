@@ -48,6 +48,49 @@ string form = OpenId4VpJwtVcJsonWalletDisclosure.CreateHolderResponseFormAfterPr
 
 The preview includes uppercase hexadecimal SHA-256 digests of both **original compact signed JWT strings**. `CreateHolderResponseFormAfterPreview` cryptographically revalidates the request and issuer statement, checks their exact digests and displayed subject against the preview, and only then calls the existing genuine holder Ed25519 signer. An accidentally substituted (even properly issuer-signed) credential or new verifier challenge is rejected. Expired or forged evidence is rejected on both occasions. A failed preview or signing attempt does not consume the verifier's challenge; the verifier's existing final `direct_post` verification consumes it atomically.
 
+
+## Optional issuer-signed VC1.1 status before any Wallet disclosure
+
+For applications that must **not even show issuer-authenticated claims** until an issuer status statement has been checked, use the separate opt-in `TryPrepareWithStatus` API. It authenticates the original verifier request, original issuer credential and an issuer-signed **private 60-second** revocation snapshot before returning a preview. A missing, expired, revoked, forged, changed, or foreign-issuer snapshot fails closed; no holder seed or challenge consumption is involved at this stage.
+
+```csharp
+using HeroSSID.Credentials.VerifiablePresentations;
+
+// All expected values come from Wallet-owned, independently pinned policy.
+// issuerSignedSnapshotJwt is provided through an independently trusted issuer
+// status channel; its authoritative completeness is NOT established here.
+if (!OpenId4VpJwtVcJsonWalletDisclosure.TryPrepareWithStatus(
+        requestJwt, expectedVerifierDid, expectedResponseUri,
+        expectedCredentialType, expectedSubjectContextUri,
+        expectedIssuerDid, originalIssuerSignedCredentialJwt,
+        holderDid, issuerSignedSnapshotJwt, TimeProvider.System,
+        out var statusPreview) || statusPreview is null)
+{
+    return; // No claims may be revealed to the Wallet UI.
+}
+
+// Display the complete statusPreview.Disclosure.VerifiedSubject,
+// verifier DID, callback, issuer DID, type and vocabulary.
+// Obtain real informed FULL-DISCLOSURE consent in the Wallet app.
+if (!await ShowFullDisclosureAndObtainConsentAsync(statusPreview.Disclosure))
+{
+    return;
+}
+
+// Only the exact previously authenticated request, issuer JWT and SAME
+// live signed status may be used; the holder's own seed signs the VP.
+string form = OpenId4VpJwtVcJsonWalletDisclosure
+    .CreateHolderResponseFormAfterStatusPreview(
+        statusPreview, requestJwt, originalIssuerSignedCredentialJwt,
+        issuerSignedSnapshotJwt, holderPrivateSeed, TimeProvider.System);
+
+// Send only to the independently authenticated HTTPS response URI.
+```
+
+The snapshot's uppercase SHA-256 digest is part of `JwtVcJsonWalletStatusDisclosurePreview`. At signing time the library rechecks this exact digest, original request and credential signatures, full displayed subject, holder key and snapshot freshness. It checks status *again* after signing, so a proof created across the 60-second status expiry boundary is not returned as status-gated. The verifier must still call the existing status-aware `JwtVcJsonDirectPostRevocation.CheckResponseForm` and atomically consume its challenge. That verifier, not the Wallet preview, decides whether proof is accepted.
+
+**Do not interpret `NotListed` as proof of complete or current non-revocation.** The external issuer alone is responsible for observing and signing a complete revoked set. This profile is private and issuer-distributed, not the W3C Bitstring Status List standard. `TryPrepare` and `CreateHolderResponseFormAfterPreview` remain deliberately **status-unchecked** compatibility methods; callers requiring status must explicitly choose the new pair. Neither pair is evidence of user consent, physical identity, business authorization, selective disclosure, full OpenID4VP conformance or third-party Wallet interoperability.
+
 ## Security and product boundaries
 
 A digest match **does not prove that a person saw or approved the claims**. These methods cannot require the calling app to display the UI, and the earlier `CreateHolderResponseForm` API remains usable. The wallet must actively block holder signing until its own user has seen the full disclosure and consented, must protect its own private key and must send the result only to its independently authenticated HTTPS callback.

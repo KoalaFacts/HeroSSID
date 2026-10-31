@@ -1,4 +1,5 @@
 using System.Text.Json;
+using HeroSSID.Credentials.CredentialRevocation;
 using HeroSSID.Credentials.JwtVcJson;
 using HeroSSID.Credentials.Utilities;
 using HeroSSID.Credentials.VerifiablePresentations;
@@ -141,6 +142,127 @@ public sealed class OpenId4VpJwtVcJsonWalletDisclosureTests
             OpenId4VpJwtVcJsonWalletDisclosure.CreateHolderResponseFormAfterPreview(
                 preview!, signedRequest, credential, _holder.Seed, _clock));
     }
+
+
+    [Fact]
+    public void FreshSameIssuerNotListedStatusEnablesPreviewAndOneUseHolderPresentation()
+    {
+        Guid tenant = Guid.NewGuid();
+        var challenges = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = challenges.Issue(tenant, Audience, _issuer.Did);
+        string request = SignRequest(challenge);
+        string credential = IssueCredential("member");
+        string snapshot = SignSnapshot([]);
+
+        Assert.True(PrepareWithStatus(request, credential, snapshot, out var preview));
+        Assert.NotNull(preview);
+        Assert.Equal(_issuer.Did, preview!.Disclosure.TrustedIssuerDid);
+        Assert.Equal("member", preview.Disclosure.VerifiedSubject.GetProperty("membership").GetString());
+        Assert.Equal(64, preview.SnapshotSha256.Length);
+
+        // The application obtains real full-disclosure consent before invoking
+        // the holder-key method. Preview alone neither signs nor spends the nonce.
+        string form = OpenId4VpJwtVcJsonWalletDisclosure.CreateHolderResponseFormAfterStatusPreview(
+            preview, request, credential, snapshot, _holder.Seed, _clock);
+        Assert.Equal(RevocationSnapshotCheckResult.NotListed,
+            JwtVcJsonDirectPostRevocation.CheckResponseForm(form, snapshot, tenant,
+                Audience, challenge.Nonce, CredentialType, Context, challenges,
+                _clock, out var verified));
+        Assert.Equal("member", verified.GetProperty("membership").GetString());
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            JwtVcJsonDirectPostRevocation.CheckResponseForm(form, snapshot, tenant,
+                Audience, challenge.Nonce, CredentialType, Context, challenges,
+                _clock, out var replayClaims));
+        Assert.Equal(JsonValueKind.Undefined, replayClaims.ValueKind);
+    }
+
+    [Fact]
+    public void RevokedForgedMissingAndOtherIssuerStatusDenyWalletDisclosure()
+    {
+        var challenges = new InMemoryPresentationChallengeStore(_clock);
+        string request = SignRequest(challenges.Issue(Guid.NewGuid(), Audience, _issuer.Did));
+        string credential = IssueCredential("member");
+        string valid = SignSnapshot([]);
+
+        Assert.False(PrepareWithStatus(request, credential,
+            SignSnapshot([credential]), out var revoked));
+        Assert.Null(revoked);
+        Assert.False(PrepareWithStatus(request, credential, string.Empty, out var missing));
+        Assert.Null(missing);
+
+        string forged = Ed25519JwtSigner.CreateSignedJwt(
+            Ed25519JwtSigner.ExtractHeader(valid),
+            Ed25519JwtSigner.ExtractPayload(valid), _other.Seed);
+        Assert.False(PrepareWithStatus(request, credential, forged, out var forgedPreview));
+        Assert.Null(forgedPreview);
+
+        string foreign = JwtVcJsonRevocationSnapshot.Create(
+            _other.Did, [], _other.Seed, _clock.GetUtcNow(), _clock);
+        Assert.False(PrepareWithStatus(request, credential, foreign, out var foreignPreview));
+        Assert.Null(foreignPreview);
+    }
+
+    [Fact]
+    public void StatusAwareSigningRejectsSwappedSignedArtifactsAndWrongHolderSeed()
+    {
+        var challenges = new InMemoryPresentationChallengeStore(_clock);
+        string request = SignRequest(challenges.Issue(Guid.NewGuid(), Audience, _issuer.Did));
+        string credential = IssueCredential("member");
+        string snapshot = SignSnapshot([]);
+        Assert.True(PrepareWithStatus(request, credential, snapshot, out var preview));
+        Assert.NotNull(preview);
+
+        string otherCredential = IssueCredential("administrator");
+        string otherRequest = SignRequest(challenges.Issue(Guid.NewGuid(), Audience, _issuer.Did));
+        Assert.Throws<ArgumentException>(() =>
+            OpenId4VpJwtVcJsonWalletDisclosure.CreateHolderResponseFormAfterStatusPreview(
+                preview!, request, otherCredential, snapshot, _holder.Seed, _clock));
+        Assert.Throws<ArgumentException>(() =>
+            OpenId4VpJwtVcJsonWalletDisclosure.CreateHolderResponseFormAfterStatusPreview(
+                preview!, otherRequest, credential, snapshot, _holder.Seed, _clock));
+        Assert.Throws<ArgumentException>(() =>
+            OpenId4VpJwtVcJsonWalletDisclosure.CreateHolderResponseFormAfterStatusPreview(
+                preview!, request, credential, snapshot, _other.Seed, _clock));
+    }
+
+    [Fact]
+    public void ChangedAndExpiredIssuerStatusCannotBeReusedAfterWalletPreview()
+    {
+        var challenges = new InMemoryPresentationChallengeStore(_clock);
+        string request = SignRequest(challenges.Issue(Guid.NewGuid(), Audience, _issuer.Did));
+        string credential = IssueCredential("member");
+        string snapshot = SignSnapshot([]);
+        Assert.True(PrepareWithStatus(request, credential, snapshot, out var preview));
+        Assert.NotNull(preview);
+
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        string replacement = SignSnapshot([]);
+        Assert.NotEqual(snapshot, replacement);
+        Assert.Throws<ArgumentException>(() =>
+            OpenId4VpJwtVcJsonWalletDisclosure.CreateHolderResponseFormAfterStatusPreview(
+                preview!, request, credential, replacement, _holder.Seed, _clock));
+        Assert.Throws<ArgumentException>(() =>
+            OpenId4VpJwtVcJsonWalletDisclosure.CreateHolderResponseFormAfterStatusPreview(
+                preview!, request, credential, SignSnapshot([credential]),
+                _holder.Seed, _clock));
+
+        _clock.Advance(TimeSpan.FromSeconds(60));
+        Assert.False(PrepareWithStatus(request, credential, snapshot, out var expired));
+        Assert.Null(expired);
+        Assert.Throws<ArgumentException>(() =>
+            OpenId4VpJwtVcJsonWalletDisclosure.CreateHolderResponseFormAfterStatusPreview(
+                preview!, request, credential, snapshot, _holder.Seed, _clock));
+    }
+
+    private bool PrepareWithStatus(string request, string credential, string snapshot,
+        out JwtVcJsonWalletStatusDisclosurePreview? preview) =>
+        OpenId4VpJwtVcJsonWalletDisclosure.TryPrepareWithStatus(
+            request, _verifier.Did, Callback, CredentialType, Context,
+            _issuer.Did, credential, _holder.Did, snapshot, _clock, out preview);
+
+    private string SignSnapshot(IReadOnlyCollection<string> revoked) =>
+        JwtVcJsonRevocationSnapshot.Create(_issuer.Did, revoked,
+            _issuer.Seed, _clock.GetUtcNow(), _clock);
 
     private bool Prepare(string signedRequest, string credential, string verifierDid,
         Uri callback, string credentialType, Uri context, string issuerDid,

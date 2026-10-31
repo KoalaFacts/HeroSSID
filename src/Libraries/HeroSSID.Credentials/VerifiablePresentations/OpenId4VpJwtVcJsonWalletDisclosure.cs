@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using HeroSSID.Credentials.CredentialRevocation;
 using HeroSSID.Credentials.JwtVcJson;
 
 namespace HeroSSID.Credentials.VerifiablePresentations;
@@ -21,6 +22,16 @@ public sealed record JwtVcJsonWalletDisclosurePreview(
     JsonElement VerifiedSubject,
     string RequestSha256,
     string CredentialSha256);
+
+
+/// <summary>
+/// Full-disclosure preview additionally bound to the exact issuer-signed,
+/// short-lived VC1.1 status snapshot. Absence from an issuer-reported set
+/// does not prove live non-revocation or completeness.
+/// </summary>
+public sealed record JwtVcJsonWalletStatusDisclosurePreview(
+    JwtVcJsonWalletDisclosurePreview Disclosure,
+    string SnapshotSha256);
 
 /// <summary>
 /// Wallet preflight for the bounded OpenID4VP jwt_vc_json direct_post profile.
@@ -120,6 +131,89 @@ public static class OpenId4VpJwtVcJsonWalletDisclosure
             requestJwt, preview.VerifierDid, preview.ResponseUri,
             preview.CredentialType, preview.SubjectContextUri,
             credentialJwt, preview.HolderDid, holderSeed, clock);
+    }
+
+
+    /// <summary>
+    /// Prepare a status-gated full-disclosure preview. A missing, forged,
+    /// revoked or stale issuer-signed status must not release subject claims.
+    /// The issuer alone is responsible for its export's completeness.
+    /// </summary>
+    public static bool TryPrepareWithStatus(
+        string requestJwt, string expectedVerifierDid, Uri expectedResponseUri,
+        string expectedCredentialType, Uri expectedSubjectContextUri,
+        string expectedIssuerDid, string credentialJwt, string holderDid,
+        string issuerSignedSnapshotJwt, TimeProvider clock,
+        out JwtVcJsonWalletStatusDisclosurePreview? preview)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        preview = null;
+
+        if (string.IsNullOrWhiteSpace(issuerSignedSnapshotJwt) ||
+            issuerSignedSnapshotJwt.Length > 65_536 ||
+            !TryPrepare(requestJwt, expectedVerifierDid, expectedResponseUri,
+                expectedCredentialType, expectedSubjectContextUri, expectedIssuerDid,
+                credentialJwt, holderDid, clock, out var disclosure) ||
+            disclosure is null ||
+            JwtVcJsonRevocationSnapshot.Check(issuerSignedSnapshotJwt, credentialJwt,
+                disclosure.TrustedIssuerDid, clock.GetUtcNow()) !=
+                RevocationSnapshotCheckResult.NotListed)
+        {
+            // A valid issuer statement is not sufficient to disclose the subject
+            // when this Wallet operation explicitly requires a signed status set.
+            return false;
+        }
+
+        preview = new JwtVcJsonWalletStatusDisclosurePreview(
+            disclosure, Sha256(issuerSignedSnapshotJwt));
+        return true;
+    }
+
+    /// <summary>
+    /// Require unchanged live signed status and the exact approved preview
+    /// before the caller-owned holder key can sign a direct_post response.
+    /// Does not attest to actual user consent or live non-revocation.
+    /// </summary>
+    public static string CreateHolderResponseFormAfterStatusPreview(
+        JwtVcJsonWalletStatusDisclosurePreview preview, string requestJwt,
+        string credentialJwt, string issuerSignedSnapshotJwt,
+        byte[] holderSeed, TimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(preview);
+        ArgumentNullException.ThrowIfNull(holderSeed);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        if (preview.Disclosure is null ||
+            string.IsNullOrWhiteSpace(issuerSignedSnapshotJwt) ||
+            issuerSignedSnapshotJwt.Length > 65_536 ||
+            !string.Equals(preview.SnapshotSha256,
+                Sha256(issuerSignedSnapshotJwt), StringComparison.Ordinal) ||
+            JwtVcJsonRevocationSnapshot.Check(issuerSignedSnapshotJwt, credentialJwt,
+                preview.Disclosure.TrustedIssuerDid, clock.GetUtcNow()) !=
+                RevocationSnapshotCheckResult.NotListed)
+        {
+            throw new ArgumentException(
+                "A fresh, unchanged issuer-signed status snapshot for the previewed VC1.1 credential is required.",
+                nameof(preview));
+        }
+
+        // Re-check the signed verifier request, issuer JWT, original digests,
+        // full displayed claims and real holder seed before producing any proof.
+        string form = CreateHolderResponseFormAfterPreview(
+            preview.Disclosure, requestJwt, credentialJwt, holderSeed, clock);
+
+        // Signing may cross the private 60-second status expiry boundary. Never
+        // return a proof described as status-gated after the snapshot expires.
+        if (JwtVcJsonRevocationSnapshot.Check(issuerSignedSnapshotJwt, credentialJwt,
+                preview.Disclosure.TrustedIssuerDid, clock.GetUtcNow()) !=
+                RevocationSnapshotCheckResult.NotListed)
+        {
+            throw new ArgumentException(
+                "The issuer-signed VC1.1 snapshot expired while signing.",
+                nameof(issuerSignedSnapshotJwt));
+        }
+
+        return form;
     }
 
     private static string Sha256(string signedJwt) =>
