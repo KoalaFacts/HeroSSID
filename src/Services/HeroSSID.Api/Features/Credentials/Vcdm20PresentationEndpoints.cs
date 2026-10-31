@@ -60,6 +60,16 @@ internal static class Vcdm20PresentationEndpoints
             .Produces(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
+        credentials.MapPost("/vcdm20/verify-signed-policy-presentation", VerifySignedPolicyAsync)
+            .RequireAuthorization("credential:verify")
+            .WithName("VerifyVcdm20SignedPolicyPresentation")
+            .WithSummary("Verify original signed verifier type/context policy, real issuer and holder proof, status and one-use challenge")
+            .Produces<VerifyVcdm20PresentationResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
         credentials.MapPost("/vcdm20/verify-presentation", Verify)
             .RequireAuthorization("credential:verify")
             .WithName("VerifyVcdm20Presentation")
@@ -356,6 +366,107 @@ internal static class Vcdm20PresentationEndpoints
         }
     }
 
+
+    /// <summary>
+    /// The caller must present the original policy-bound verifier JWS, not simply
+    /// substitute unsigned type/context fields when forwarding a holder proof.
+    /// The active signer belongs to this tenant; signed nonce/issuer/expiry must
+    /// equal the durable one-use challenge before any claims can be released.
+    /// This does not persist policy or prove business authorization.
+    /// </summary>
+    internal static async Task<IResult> VerifySignedPolicyAsync(
+        [FromBody] VerifyVcdm20SignedPolicyPresentationRequest request,
+        [FromServices] IPresentationChallengeStore challenges,
+        [FromServices] ITenantContext tenantContext,
+        [FromServices] HeroDbContext dbContext,
+        [FromServices] TimeProvider clock,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(challenges);
+        ArgumentNullException.ThrowIfNull(tenantContext);
+        ArgumentNullException.ThrowIfNull(dbContext);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        Uri? context = request.SubjectContextUri;
+        if (string.IsNullOrWhiteSpace(request.Presentation) ||
+            request.Presentation.Length > MaximumPresentationLength ||
+            string.IsNullOrWhiteSpace(request.RevocationSnapshot) ||
+            request.RevocationSnapshot.Length > MaximumSnapshotLength ||
+            string.IsNullOrWhiteSpace(request.SignedRequestJwt) ||
+            request.SignedRequestJwt.Length > 16_384 ||
+            !ValidAudience(request.Audience) ||
+            string.IsNullOrWhiteSpace(request.VerifierDid) ||
+            request.VerifierDid.Length > 255 ||
+            !new DidKeyMethod().IsValid(request.VerifierDid) ||
+            !ValidSignedPolicy(request.ExpectedCredentialType, context))
+        {
+            return Results.Problem(title: "Invalid Signed Policy Presentation",
+                detail: "An authentic bounded verifier request, pinned active verifier DID, exact HTTPS type/context and signed issuer, holder and status proofs are required.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        Guid tenantId = tenantContext.GetCurrentTenantId();
+        if (tenantId == Guid.Empty)
+        {
+            return Results.Unauthorized();
+        }
+
+        try
+        {
+            // The DID printed inside a JWT never becomes a trust anchor by itself.
+            // A verifier DID must currently be active and owned by the caller's
+            // authenticated tenant. Its stored public key must derive that DID.
+            var verifierPublicKey = await dbContext.Dids.AsNoTracking()
+                .Where(did => did.TenantId == tenantId &&
+                    did.DidIdentifier == request.VerifierDid && did.Status == "active")
+                .Select(did => did.PublicKeyEd25519)
+                .FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
+            if (verifierPublicKey is null || verifierPublicKey.Length != 32 ||
+                !string.Equals(new DidKeyMethod().GenerateDidIdentifier(verifierPublicKey),
+                    request.VerifierDid, StringComparison.Ordinal) ||
+                !OfflineSignedPresentationRequest.TryReadPolicyBound(
+                    request.SignedRequestJwt!, request.VerifierDid!, request.Audience!,
+                    request.ExpectedCredentialType!, context!, clock, out var signedChallenge) ||
+                signedChallenge is null)
+            {
+                return InvalidSignedPolicy();
+            }
+
+            // A genuine but unrelated/expired verifier JWS cannot borrow a
+            // different retained challenge. In particular do not trust the
+            // issuer, nonce or expiry merely because they appeared in the JWS.
+            var retained = challenges.Find(tenantId, request.Audience!, signedChallenge.Nonce);
+            if (retained is null ||
+                retained.ExpiresAt != signedChallenge.ExpiresAt ||
+                !string.Equals(retained.TrustedIssuerDid,
+                    signedChallenge.TrustedIssuerDid, StringComparison.Ordinal))
+            {
+                return InvalidSignedPolicy();
+            }
+
+            var status = Vcdm20RevocationSnapshot.CheckPresentation(
+                request.Presentation!, request.RevocationSnapshot!, tenantId,
+                request.Audience!, signedChallenge.Nonce,
+                request.ExpectedCredentialType!, context!, challenges, clock, out var subject);
+            return Results.Ok(new VerifyVcdm20PresentationResponse(
+                status.ToString(),
+                status == Vcdm20RevocationCheckResult.SignedNotListed ? subject : null));
+        }
+        catch (NpgsqlException)
+        {
+            return Unavailable();
+        }
+        catch (TimeoutException)
+        {
+            return Unavailable();
+        }
+    }
+
+    private static IResult InvalidSignedPolicy() => Results.Ok(
+        new VerifyVcdm20PresentationResponse(
+            Vcdm20RevocationCheckResult.Invalid.ToString(), null));
+
     private static bool ValidNonce(string? nonce)
     {
         if (nonce is null || nonce.Length != 43)
@@ -449,6 +560,18 @@ public sealed class VerifyVcdm20PresentationRequest
     public string? RevocationSnapshot { get; init; }
     public string? Audience { get; init; }
     public string? Nonce { get; init; }
+    public string? ExpectedCredentialType { get; init; }
+    public Uri? SubjectContextUri { get; init; }
+}
+
+/// <summary>Opt-in verification binds the original verifier's signed request to one-use proof and status.</summary>
+public sealed class VerifyVcdm20SignedPolicyPresentationRequest
+{
+    public string? SignedRequestJwt { get; init; }
+    public string? VerifierDid { get; init; }
+    public string? Presentation { get; init; }
+    public string? RevocationSnapshot { get; init; }
+    public string? Audience { get; init; }
     public string? ExpectedCredentialType { get; init; }
     public Uri? SubjectContextUri { get; init; }
 }
