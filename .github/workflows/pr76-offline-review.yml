@@ -1,0 +1,124 @@
+name: Independent exact-head PR76 embedded context security review
+
+on:
+  push:
+    branches:
+      - review/pr76-embedded-context-20261031
+
+permissions: {}
+
+jobs:
+  review:
+    name: Independent model review of all six embedded context security patches
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout pinned candidate and helper
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify immutable candidate and complete six-file diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse bf89c8a0f843a56b8b4f4b70e4b4688601894066^{commit})" = "bf89c8a0f843a56b8b4f4b70e4b4688601894066"
+          test "$(git rev-parse 1d2ee23b9c61c6682f38e6e58d4d6bdc41d59099^{commit})" = "1d2ee23b9c61c6682f38e6e58d4d6bdc41d59099"
+          test "$(git diff --name-only 1d2ee23b9c61c6682f38e6e58d4d6bdc41d59099 bf89c8a0f843a56b8b4f4b70e4b4688601894066 | wc -l)" -eq 6
+      - name: Install local independent review model
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location https://ollama.com/install.sh --output /tmp/ollama-install.sh
+          sh /tmp/ollama-install.sh
+          nohup ollama serve >/tmp/ollama-server.log 2>&1 </dev/null &
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null
+          ollama pull qwen2.5-coder:7b
+      - name: Independently examine complete issuer and verifier context shadowing patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          REVIEW_PART=1 python3 tools/offline_pr76_review.py
+          test -s review-1.md
+          test -s review-1.json
+          test -s review-model-1.json
+          test "$(cat review-head-1.txt)" = "bf89c8a0f843a56b8b4f4b70e4b4688601894066"
+      - name: Retain independent raw review and exact-head evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-pr76-review
+          path: |
+            review-*.md
+            review-*.json
+            review-head-*.txt
+            review-model-*.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  publish:
+    name: Submit independent exact-head COMMENTED review
+    needs: review
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Download independent model artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: independent-pr76-review
+      - name: Confirm source HEAD and all six files received model review
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/75 --jq '.head.sha')"
+          test "$actual" = "bf89c8a0f843a56b8b4f4b70e4b4688601894066"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          head = "bf89c8a0f843a56b8b4f4b70e4b4688601894066"
+          expected = {
+            "docs/jwt-vc-json-profile.md",
+            "docs/vcdm20-jose-profile.md",
+            "src/Libraries/HeroSSID.Credentials/JwtVcJson/JwtVcJsonCredential.cs",
+            "src/Libraries/HeroSSID.Credentials/Utilities/StrictJwtReader.cs",
+            "src/Libraries/HeroSSID.Credentials/Vcdm20/Vcdm20JoseCredential.cs",
+            "tests/Unit/HeroSSID.Credentials.Tests/CredentialSubjectContextBoundaryTests.cs",
+          }
+          result = json.loads(Path("review-1.json").read_text())
+          raw = json.loads(Path("review-model-1.json").read_text())
+          assert result["head"] == head and result["part"] == 1
+          assert result["review"]["verdict"] == raw["verdict"]
+          assert raw["verdict"] in ("no_actionable_findings", "actionable_findings", "inconclusive")
+          assert set(result["files"]) == expected and len(result["files"]) == len(expected)
+          assert len(Path("review-1.md").read_text()) > 200
+          assert Path("review-head-1.txt").read_text().strip() == head
+          PY
+      - name: Publish actual independent findings, not human approval
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo 'Independent Qwen2.5-Coder 7B security/code review of ALL six changed PR #76 VC1.1 and VC2 context-boundary files.'
+            echo
+            echo 'Reviewed exact head: bf89c8a0f843a56b8b4f4b70e4b4688601894066.'
+            echo 'Baseline: 1d2ee23b9c61c6682f38e6e58d4d6bdc41d59099.'
+            echo 'A submitted independent MODEL review, not human approval or cryptographic certification.'
+            echo 'Every finding must be reconciled with actual source/tests before merge.'
+            echo
+            cat review-1.md
+          } > /tmp/pr76-review.md
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/75/reviews \
+            -f event=COMMENT -f commit_id=bf89c8a0f843a56b8b4f4b70e4b4688601894066 \
+            -f body="$(cat /tmp/pr76-review.md)" \
+            --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
