@@ -2,6 +2,8 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using HeroSSID.Credentials.JwtVcJson;
 using HeroSSID.Credentials.Utilities;
 using NSec.Cryptography;
@@ -257,6 +259,123 @@ public sealed class JwtVcJsonCredentialVerificationHttpTests(AspireWebApplicatio
             subjectContextUri = Vocabulary.AbsoluteUri
         }).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.BadRequest, ambiguous.StatusCode);
+    }
+
+    [Fact]
+    public async Task RetiredIssuerExactPinsAreEnforcedOverRealAuthenticatedHttp()
+    {
+        const string route = "/api/v1/credentials/jwt-vc-json/verify-active-and-retired";
+        const string statusRoute =
+            "/api/v1/credentials/jwt-vc-json/verify-active-and-retired-with-status";
+
+        using var retiredKey = NewKey();
+        using var activeKey = NewKey();
+        using var holderKey = NewKey();
+        string retiredDid = Did(retiredKey);
+        string activeDid = Did(activeKey);
+        string holderDid = Did(holderKey);
+        string oldJwt = Issue(retiredKey, retiredDid, holderDid);
+        string activeJwt = Issue(activeKey, activeDid, holderDid);
+        string pin = Convert.ToHexStringLower(
+            SHA256.HashData(Encoding.UTF8.GetBytes(oldJwt)));
+        var policy = new[]
+        {
+            new { issuerDid = retiredDid, credentialSha256 = pin }
+        };
+
+        foreach (var (credential, signer) in new[]
+        {
+            (oldJwt, retiredDid), (activeJwt, activeDid)
+        })
+        {
+            using var accepted = await _client.AuthorizedPostAsJsonAsync(route, new
+            {
+                credential,
+                activeIssuerDids = new[] { activeDid },
+                retiredCredentialPins = policy,
+                expectedHolderDid = holderDid,
+                expectedCredentialType = CredentialType,
+                subjectContextUri = Vocabulary
+            }).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+            var body = await accepted.Content.ReadFromJsonAsync<JsonElement>().ConfigureAwait(true);
+            Assert.Equal("SignedButStatusUnchecked", body.GetProperty("status").GetString());
+            Assert.Equal(signer, body.GetProperty("verifiedIssuerDid").GetString());
+            Assert.Equal("member", body.GetProperty("verifiedSubject").GetProperty("role").GetString());
+        }
+
+        DateTimeOffset now = TimeProvider.System.GetUtcNow();
+        string backdated = JwtVcJsonCredential.Create(retiredDid, holderDid,
+            CredentialType, Vocabulary,
+            JsonSerializer.SerializeToElement(new { id = holderDid, role = "administrator" }),
+            Seed(retiredKey), now.AddMinutes(-1), now.AddMinutes(5));
+
+        foreach (string unregistered in new[] { backdated, oldJwt })
+        {
+            using var rejected = await _client.AuthorizedPostAsJsonAsync(route, new
+            {
+                credential = unregistered,
+                activeIssuerDids = new[] { activeDid },
+                retiredCredentialPins = unregistered == oldJwt ? [] : policy,
+                expectedHolderDid = holderDid,
+                expectedCredentialType = CredentialType,
+                subjectContextUri = Vocabulary
+            }).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.OK, rejected.StatusCode);
+            var body = await rejected.Content.ReadFromJsonAsync<JsonElement>().ConfigureAwait(true);
+            Assert.Equal("Invalid", body.GetProperty("status").GetString());
+            Assert.Equal(JsonValueKind.Null, body.GetProperty("verifiedIssuerDid").ValueKind);
+            Assert.Equal(JsonValueKind.Null, body.GetProperty("verifiedSubject").ValueKind);
+        }
+
+        string fresh = JwtVcJsonRevocationSnapshot.Create(
+            retiredDid, [], Seed(retiredKey), now, TimeProvider.System);
+        string revoked = JwtVcJsonRevocationSnapshot.Create(
+            retiredDid, [oldJwt], Seed(retiredKey), now, TimeProvider.System);
+        foreach (var (snapshot, expected) in new[]
+        {
+            (fresh, "SignedNotListed"), (revoked, "Revoked")
+        })
+        {
+            using var status = await _client.AuthorizedPostAsJsonAsync(statusRoute, new
+            {
+                credential = oldJwt,
+                activeIssuerDids = new[] { activeDid },
+                retiredCredentialPins = policy,
+                expectedHolderDid = holderDid,
+                expectedCredentialType = CredentialType,
+                subjectContextUri = Vocabulary,
+                revocationSnapshot = snapshot
+            }).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.OK, status.StatusCode);
+            var body = await status.Content.ReadFromJsonAsync<JsonElement>().ConfigureAwait(true);
+            Assert.Equal(expected, body.GetProperty("status").GetString());
+            if (expected == "Revoked")
+            {
+                Assert.Equal(JsonValueKind.Null, body.GetProperty("verifiedSubject").ValueKind);
+                Assert.Equal(JsonValueKind.Null, body.GetProperty("verifiedIssuerDid").ValueKind);
+            }
+            else
+            {
+                Assert.Equal(retiredDid, body.GetProperty("verifiedIssuerDid").GetString());
+                Assert.Equal("member", body.GetProperty("verifiedSubject").GetProperty("role").GetString());
+            }
+        }
+
+        var request = new
+        {
+            credential = oldJwt,
+            activeIssuerDids = new[] { activeDid },
+            retiredCredentialPins = policy,
+            expectedHolderDid = holderDid,
+            expectedCredentialType = CredentialType,
+            subjectContextUri = Vocabulary
+        };
+        using var anonymous = await _client.PostAsJsonAsync(route, request).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        string issueOnly = await ScopeTokenAsync("credential:issue").ConfigureAwait(true);
+        using var forbidden = await PostWithBearerAsync(route, request, issueOnly).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
     }
 
     private static object Request(string credential, string issuerDid, string holderDid,
