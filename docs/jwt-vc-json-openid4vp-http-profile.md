@@ -23,9 +23,23 @@ Content-Type: application/json
 }
 ```
 
-The **201 Created** JSON returns `signedRequestJwt`, `clientId` (`decentralized_identifier:<verifierDid>`), `verifierDid`, `responseUri`, `nonce`, `trustedIssuerDid` and `expiresAt`. HeroSSID verifies the active verifier signer belongs to the authenticated tenant, decrypts its existing Ed25519 seed only to sign, verifies the signature and zeroes the temporary key bytes. The stored challenge is bound to the tenant, client ID, trusted issuer and nonce. A wallet or independent holder must **independently pin** the verifier DID, exact HTTPS callback, requested type and context, cryptographically check the signed Request Object, display the complete disclosure and obtain real consent *before* signing its own presentation. A DID supplied inside the untrusted request is not itself a trustworthy pin.
+The **201 Created** JSON returns `signedRequestJwt`, `clientId` (`decentralized_identifier:<verifierDid>`), `verifierDid`, `responseUri`, `nonce`, `trustedIssuerDid`, `expiresAt` and `walletInvocationUri`. HeroSSID verifies the active verifier signer belongs to the authenticated tenant, decrypts its existing Ed25519 seed only to sign, verifies the signature and zeroes the temporary key bytes. The stored challenge is bound to the tenant, client ID, trusted issuer and nonce. A wallet or independent holder must **independently pin** the verifier DID, exact HTTPS callback, requested type and context, cryptographically check the signed Request Object, display the complete disclosure and obtain real consent *before* signing its own presentation. A DID supplied inside the untrusted request is not itself a trustworthy pin.
 
 Missing authentication is **401**, insufficient scope **403**, foreign/inactive verifier DID **404**, malformed HTTPS/issuer/type/context/lifetime **400**, retained challenge capacity **429**, signing/store failure **503**.
+
+## Signed by-value wallet invocation (same-device launch)
+
+The HTTP response now includes a **wallet-invocation URI** containing the **unchanged, genuine verifier Ed25519-signed** Request Object:
+
+```text
+openid4vp://?client_id=decentralized_identifier%3Adid%3Akey%3A<verifier>&request=<original-compact-signed-request-JWT>
+```
+
+This follows the OpenID4VP 1.0 [wallet-invocation custom-scheme mechanism](https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html#name-wallet-invocation) and its *by-value* `request` parameter. This URL is intended primarily for same-device app deep linking. Full signed Request Objects can be too large for reliable cross-device QR codes. There is **no public `request_uri` endpoint** or built-in app/QR handler.
+
+An integrating holder wallet can use the SDK's `OpenId4VpJwtVcJsonDirectPost.TryReadWalletInvocation` to recover the original signed JWT **only after** an *independently pinned* verifier DID, HTTPS callback URI, credential type, context, signature and expiry all match. The URL's own `client_id`, unsigned query parameters or embedded DID are never independent sources of trust. Exact canonical parameter order, escaping and the single signed `request` are required by this bounded parser. Altered/duplicated fields, forged signatures, stale requests and mismatched pinning fail without releasing claims. Once verified, the wallet application must display the **entire full-disclosure credential** and obtain meaningful user consent **before** calling `CreateHolderResponseForm`.
+
+This is a real standards-shaped by-value invocation surface, **not evidence that any third-party Wallet supports our private issuer/context policy extensions, credential constraints or VP response format**. It does not demonstrate OpenID4VP conformance, human consent, identity vetting, live revocation or business authorization. The verifier's actual HTTPS `response_uri` remains externally hosted by its application, with the separate authenticated backend verification endpoint below.
 
 ## Verify the forwarded direct_post form
 

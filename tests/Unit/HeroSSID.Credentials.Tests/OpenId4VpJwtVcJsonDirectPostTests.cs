@@ -21,6 +21,71 @@ public sealed class OpenId4VpJwtVcJsonDirectPostTests
     private string Audience => "decentralized_identifier:" + _verifier.Did;
 
     [Fact]
+    public void ByValueWalletInvocationRequiresPinnedSignedRequestAndCanonicalParameters()
+    {
+        Guid tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did);
+        string signed = Request(challenge);
+        string launch = OpenId4VpJwtVcJsonDirectPost.CreateWalletInvocation(
+            signed, _verifier.Did, ResponseUri, CredentialType, SubjectContext, _clock);
+
+        Assert.StartsWith("openid4vp://?client_id=" + Uri.EscapeDataString(Audience) +
+            "&request=", launch, StringComparison.Ordinal);
+        Assert.True(OpenId4VpJwtVcJsonDirectPost.TryReadWalletInvocation(
+            launch, _verifier.Did, ResponseUri, CredentialType, SubjectContext,
+            _clock, out string recovered));
+        Assert.Equal(signed, recovered);
+
+        string form = OpenId4VpJwtVcJsonDirectPost.CreateHolderResponseForm(
+            recovered, _verifier.Did, ResponseUri, CredentialType, SubjectContext,
+            Credential(), _holder.Did, _holder.Seed, _clock);
+        Assert.Equal(JwtVcJsonPresentationCheckResult.SignedButStatusUnchecked,
+            OpenId4VpJwtVcJsonDirectPost.CheckResponseForm(form, tenant, Audience,
+                challenge.Nonce, CredentialType, SubjectContext, store, _clock, out var claims));
+        Assert.Equal("active", claims.GetProperty("membership").GetString());
+
+        Assert.False(OpenId4VpJwtVcJsonDirectPost.TryReadWalletInvocation(
+            launch, _other.Did, ResponseUri, CredentialType, SubjectContext,
+            _clock, out _));
+        Assert.False(OpenId4VpJwtVcJsonDirectPost.TryReadWalletInvocation(
+            launch, _verifier.Did, new Uri("https://evil.example/receive"),
+            CredentialType, SubjectContext, _clock, out _));
+        Assert.False(OpenId4VpJwtVcJsonDirectPost.TryReadWalletInvocation(
+            launch, _verifier.Did, ResponseUri, "https://evil.example/AdminCredential",
+            SubjectContext, _clock, out _));
+        Assert.False(OpenId4VpJwtVcJsonDirectPost.TryReadWalletInvocation(
+            launch, _verifier.Did, ResponseUri, CredentialType,
+            new Uri("https://evil.example/context"), _clock, out _));
+        Assert.False(OpenId4VpJwtVcJsonDirectPost.TryReadWalletInvocation(
+            launch + "&request=duplicate", _verifier.Did, ResponseUri,
+            CredentialType, SubjectContext, _clock, out _));
+        Assert.False(OpenId4VpJwtVcJsonDirectPost.TryReadWalletInvocation(
+            launch.Replace("openid4vp://", "https://evil.example/", StringComparison.Ordinal),
+            _verifier.Did, ResponseUri, CredentialType, SubjectContext, _clock, out _));
+        Assert.False(OpenId4VpJwtVcJsonDirectPost.TryReadWalletInvocation(
+            launch.Replace("&request=", "&request_uri=", StringComparison.Ordinal),
+            _verifier.Did, ResponseUri, CredentialType, SubjectContext, _clock, out _));
+        Assert.False(OpenId4VpJwtVcJsonDirectPost.TryReadWalletInvocation(
+            launch.Replace(".", "%2E", StringComparison.Ordinal),
+            _verifier.Did, ResponseUri, CredentialType, SubjectContext, _clock, out _));
+
+        string forged = Ed25519JwtSigner.CreateSignedJwt(
+            Ed25519JwtSigner.ExtractHeader(signed),
+            Ed25519JwtSigner.ExtractPayload(signed), _other.Seed);
+        Assert.False(OpenId4VpJwtVcJsonDirectPost.TryReadWalletInvocation(
+            launch.Replace(signed, forged, StringComparison.Ordinal),
+            _verifier.Did, ResponseUri, CredentialType, SubjectContext, _clock, out _));
+        Assert.Throws<ArgumentException>(() => OpenId4VpJwtVcJsonDirectPost.CreateWalletInvocation(
+            signed, _other.Did, ResponseUri, CredentialType, SubjectContext, _clock));
+
+        _clock.Advance(TimeSpan.FromMinutes(6));
+        Assert.False(OpenId4VpJwtVcJsonDirectPost.TryReadWalletInvocation(
+            launch, _verifier.Did, ResponseUri, CredentialType, SubjectContext,
+            _clock, out _));
+    }
+
+    [Fact]
     public void IndependentKeysCompleteJwtVcJsonDirectPostAndRejectReplay()
     {
         var tenant = Guid.NewGuid();

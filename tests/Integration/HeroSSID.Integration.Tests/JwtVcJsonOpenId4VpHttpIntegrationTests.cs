@@ -31,6 +31,49 @@ public sealed class JwtVcJsonOpenId4VpHttpIntegrationTests(DatabaseFixture fixtu
     private readonly DatabaseFixture _fixture = fixture;
 
     [Fact]
+    public async Task SignedVerifierRequestOffersUsableByValueWalletLaunchWithoutChangingSignedPolicy()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        await using var host = NewHost();
+        using var client = host.CreateClient();
+        string token = await GetTokenAsync(client, "credential:verify did:manage").ConfigureAwait(true);
+        string verifierDid = await CreateDidAsync(client, token).ConfigureAwait(true);
+        using var issuerKey = NewKey();
+        string issuerDid = DidFromKey(issuerKey);
+
+        using var issued = await PostAsync(client, IssueRoute, new
+        {
+            verifierDid, responseUri = ResponseUri, trustedIssuerDid = issuerDid,
+            credentialType = TypeIri, subjectContextUri = Context.AbsoluteUri,
+            lifetimeSeconds = 120
+        }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Created, issued.StatusCode);
+        var body = await issued.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        string signed = body.GetProperty("signedRequestJwt").GetString()!;
+        string launch = body.GetProperty("walletInvocationUri").GetString()!;
+
+        const string prefix = "openid4vp://?client_id=";
+        Assert.StartsWith(prefix, launch, StringComparison.Ordinal);
+        string[] parameters = launch[prefix.Length..].Split("&request=", StringSplitOptions.None);
+        Assert.Equal(2, parameters.Length);
+        Assert.Equal(Uri.EscapeDataString("decentralized_identifier:" + verifierDid), parameters[0]);
+        Assert.Equal(signed, Uri.UnescapeDataString(parameters[1]));
+        Assert.True(OpenId4VpJwtVcJsonDirectPost.TryReadWalletInvocation(
+            launch, verifierDid, new Uri(ResponseUri), TypeIri, Context,
+            TimeProvider.System, out string recovered));
+        Assert.Equal(signed, recovered);
+        Assert.False(OpenId4VpJwtVcJsonDirectPost.TryReadWalletInvocation(
+            launch + "&request=duplicate", verifierDid, new Uri(ResponseUri),
+            TypeIri, Context, TimeProvider.System, out _));
+        Assert.True(OpenId4VpJwtVcJsonDirectPost.TryReadSignedRequest(
+            signed, verifierDid, new Uri(ResponseUri), TypeIri, Context, TimeProvider.System,
+            out var parsed));
+        Assert.NotNull(parsed);
+        Assert.Equal(issuerDid, parsed.Challenge.TrustedIssuerDid);
+    }
+
+    [Fact]
     public async Task SignedRequestAndIndependentHolderResponseVerifyOnceWithIssuerStatus()
     {
         await EnsureMigratedAsync().ConfigureAwait(true);
