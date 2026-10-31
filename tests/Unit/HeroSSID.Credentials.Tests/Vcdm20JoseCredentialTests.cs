@@ -30,6 +30,9 @@ public sealed class Vcdm20JoseCredentialTests
     public void IndependentIssuerCanCreateAndVerifierCanReadRealSignedVcdm20Subject()
     {
         string signed = Issue();
+        using var joseHeader = JsonDocument.Parse(Ed25519JwtSigner.ExtractHeader(signed));
+        Assert.Equal("vc+jwt", joseHeader.RootElement.GetProperty("typ").GetString());
+        Assert.Equal("vc", joseHeader.RootElement.GetProperty("cty").GetString());
         using var document = JsonDocument.Parse(Ed25519JwtSigner.ExtractPayload(signed));
         var root = document.RootElement;
         Assert.Equal("https://www.w3.org/ns/credentials/v2", root.GetProperty("@context")[0].GetString());
