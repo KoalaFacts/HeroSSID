@@ -92,6 +92,15 @@ public static class JwtVcJsonTrustedIssuerVerifier
             string.IsNullOrWhiteSpace(expectedHolderDid) ||
             expectedHolderDid.Length > MaximumDidLength ||
             !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(expectedHolderDid, out _) ||
+            // An expanded HTTPS credential type is independently pinned by
+            // this bounded offline profile, matching the authenticated HTTP
+            // multi-issuer contract. Do not infer JSON-LD term definitions.
+            string.IsNullOrWhiteSpace(expectedCredentialType) ||
+            expectedCredentialType.Length > 128 ||
+            expectedCredentialType.Any(char.IsWhiteSpace) ||
+            !Uri.TryCreate(expectedCredentialType, UriKind.Absolute, out var typeUri) ||
+            typeUri.Scheme != Uri.UriSchemeHttps ||
+            typeUri.Host.Length == 0 || typeUri.UserInfo.Length != 0 ||
             trustedIssuerDids.Count is < 1 or > MaximumTrustedIssuers ||
             (withStatus && (string.IsNullOrWhiteSpace(revocationSnapshotJwt) ||
                 revocationSnapshotJwt.Length > MaximumJwtLength)))

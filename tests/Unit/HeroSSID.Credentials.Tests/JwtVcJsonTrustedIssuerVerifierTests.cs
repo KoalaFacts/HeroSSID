@@ -67,6 +67,27 @@ public sealed class JwtVcJsonTrustedIssuerVerifierTests
     }
 
     [Fact]
+    public void CompactCredentialTypeMustNotBypassTheExpandedHttpsVerifierPolicy()
+    {
+        // The lower-level VC1.1 primitive permits a custom compact term when
+        // the caller pins its context. This offline verifier intentionally
+        // requires an expanded HTTPS IRI, as does the non-.NET HTTP adapter.
+        using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
+            new { id = _holder.Did, membership = "active" }));
+        string compact = JwtVcJsonCredential.Create(_oldIssuer.Did, _holder.Did,
+            "Member", Vocabulary, subject.RootElement, _oldIssuer.Seed,
+            Now.AddMinutes(-1), Now.AddMinutes(10));
+        Assert.True(JwtVcJsonCredential.TryVerify(compact, _oldIssuer.Did,
+            _holder.Did, "Member", Vocabulary, Now, out _));
+        Assert.Equal(JwtVcJsonTrustedIssuerCheckResult.Invalid,
+            JwtVcJsonTrustedIssuerVerifier.Check(compact, [_oldIssuer.Did],
+                _holder.Did, "Member", Vocabulary, Now,
+                out string signer, out var claims));
+        Assert.Equal(string.Empty, signer);
+        Assert.Equal(JsonValueKind.Undefined, claims.ValueKind);
+    }
+
+    [Fact]
     public void CleanSameSignerSnapshotAuthenticatesOnlyTheActualIssuer()
     {
         string original = Issue(_oldIssuer);
