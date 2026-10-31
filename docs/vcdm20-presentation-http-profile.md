@@ -122,6 +122,54 @@ The **200** response returns one of:
 
 A presentation that reaches challenge consumption spends that nonce even if the status check is later rejected. The caller must never infer a successful identity enrollment or business permission from `SignedNotListed`. Invalid request shape is **400**, missing authorization **401**, wrong scope **403**, challenge-store unavailability **503**. HTTP payloads and lifetimes are bounded. The caller supplies type and context under its own authenticated verifier policy; do **not** derive these from the untrusted JWT.
 
+## 5. Verify the original verifier-signed policy (strict opt-in)
+
+The original `/verify-presentation` endpoint checks caller-supplied type and context.
+For a relying party that requires the original **verifier-signed** type/context
+policy, submit that same compact JWT alongside the holder proof to the separate
+opt-in endpoint. Do not silently fall back to the legacy route on failure.
+
+```http
+POST /api/v1/credentials/vcdm20/verify-signed-policy-presentation
+Authorization: Bearer <verifier-access-token-with-credential:verify>
+Content-Type: application/json
+```
+
+```json
+{
+  "signedRequestJwt": "<original-eight-claim-verifier-JWS>",
+  "verifierDid": "did:key:<active-tenant-owned-verifier>",
+  "audience": "https://verifier.example/present",
+  "expectedCredentialType": "MembershipCredential",
+  "subjectContextUri": "https://issuer.example/contexts/member/v1",
+  "presentation": "<holder-signed-vp+jwt>",
+  "revocationSnapshot": "<issuer-signed-VC2-status-JWS>"
+}
+```
+
+The service requires the verifier DID to be **active and owned by the authenticated
+tenant**, re-derives it from the stored public key and verifies the original
+Ed25519 JWS against that DID and the exact HTTPS audience. It refuses unbound
+legacy six-field requests, forged requests and type/context mismatches **before**
+spending the nonce. The signed issuer DID, nonce and expiry must match the
+same tenant's durable one-use challenge. The nonce is taken from the authenticated
+request, not accepted from a separate caller field. The existing issuer + holder
+Ed25519, VC2 policy, issuer-signed status and atomic consumption checks then run.
+Only `SignedNotListed` returns signed subject claims; other statuses expose null
+subjects. Invalid proof returns `200` / `Invalid`, bad input shape `400`,
+missing authentication `401`, wrong scope `403` and unavailable state `503`.
+
+**Trust limit:** the challenge database still retains the issuer, tenant,
+audience, nonce and expiry, **not** the original signed credential type/context
+or its JWT digest. This endpoint proves that the supplied request was genuinely
+signed by an active tenant-owned verifier DID and matches the retained challenge;
+it cannot distinguish a *different also-authentic* policy JWT that the same
+trusted signer might later create for the same nonce. Relying parties needing
+immutable transaction-specific policy must also retain and pin the original
+request JWT/digest themselves. This is not authorization, reality identity
+proof, status-list completeness, live non-revocation, actual holder consent,
+OpenID4VP conformance or independent Wallet interoperability.
+
 ## Distributed safety and limits
 
 The API registers `PostgresPresentationChallengeStore` for every instance through the same configured PostgreSQL connection. It atomically consumes a challenge once across replicas and retains replay tombstones until expiry. Existing migration is required but is **not applied in production** by this change. The development-only in-memory store is suitable only for isolated SDK tests. If PostgreSQL is unavailable, verification fails closed.
