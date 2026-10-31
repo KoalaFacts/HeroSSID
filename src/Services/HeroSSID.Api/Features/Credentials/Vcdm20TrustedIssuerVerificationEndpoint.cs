@@ -33,7 +33,36 @@ internal static class Vcdm20TrustedIssuerVerificationEndpoint
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
+        credentials.MapPost("/vcdm20/verify-trusted-issuers-with-denylist", VerifyWithDenylist)
+            .RequireAuthorization(OperationScopes.CredentialVerify)
+            .WithName("VerifyVcdm20TrustedIssuersWithDenylist")
+            .WithSummary("Apply independently owned emergency SHA-256 JWT denial to authentic direct VC2 credentials")
+            .Produces<VerifyVcdm20TrustedIssuersResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
+        credentials.MapPost("/vcdm20/verify-trusted-issuers-with-denylist-and-status", VerifyWithDenylistAndStatus)
+            .RequireAuthorization(OperationScopes.CredentialVerify)
+            .WithName("VerifyVcdm20TrustedIssuersWithDenylistAndStatus")
+            .WithSummary("Also require genuine same-issuer status; no clean status overrides local emergency denial")
+            .Produces<VerifyVcdm20TrustedIssuersResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
     }
+
+    internal static IResult VerifyWithDenylist(
+        [FromBody] VerifyVcdm20TrustedIssuersRequest request,
+        [FromServices] TimeProvider clock) => throw new NotSupportedException(
+            "Verifier-owned direct VC2 HTTP denial is not yet implemented.");
+
+    internal static IResult VerifyWithDenylistAndStatus(
+        [FromBody] VerifyVcdm20TrustedIssuersRequest request,
+        [FromServices] TimeProvider clock) => throw new NotSupportedException(
+            "Verifier-owned direct VC2 HTTP denial with issuer status is not yet implemented.");
 
     /// <summary>
     /// Verify original VC2 signer from the caller's separately enrolled trust policy.
@@ -184,6 +213,7 @@ public sealed record class VerifyVcdm20TrustedIssuersRequest
     public string? ExpectedCredentialType { get; init; }
     public Uri? SubjectContextUri { get; init; }
     public string? RevocationSnapshot { get; init; }
+    public IReadOnlyCollection<string>? DeniedCredentialSha256 { get; init; }
 }
 
 /// <summary>A signer/subject is returned only after all requested checks pass.</summary>
