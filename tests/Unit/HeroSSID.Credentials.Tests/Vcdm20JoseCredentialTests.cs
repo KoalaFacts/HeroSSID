@@ -134,6 +134,98 @@ public sealed class Vcdm20JoseCredentialTests
         Assert.Equal("active", subject.GetProperty("membership").GetString());
     }
 
+    [Fact]
+    public void ExplicitTrustPolicyVerifiesOldAndNewIssuerOnlyWhenBothAreEnrolled()
+    {
+        var (successorSeed, successorPublic) = NewKey();
+        string successorDid = DidFromKey(successorPublic);
+        using var subject = Subject();
+        string successorSigned = Vcdm20JoseCredential.Create(
+            successorDid, _holderDid, CredentialType, Context, subject.RootElement,
+            successorSeed, Now.AddMinutes(-1), Now.AddMinutes(10));
+
+        string original = Issue();
+        string[] enrolled = [_issuerDid, successorDid];
+        Assert.True(Vcdm20TrustedIssuerVerifier.TryVerify(
+            original, enrolled, _holderDid, CredentialType, Context, Now,
+            out string oldSigner, out var oldClaims));
+        Assert.Equal(_issuerDid, oldSigner);
+        Assert.Equal("active", oldClaims.GetProperty("membership").GetString());
+
+        Assert.True(Vcdm20TrustedIssuerVerifier.TryVerify(
+            successorSigned, enrolled, _holderDid, CredentialType, Context, Now,
+            out string newSigner, out var newClaims));
+        Assert.Equal(successorDid, newSigner);
+        Assert.Equal("active", newClaims.GetProperty("membership").GetString());
+
+        Assert.False(Vcdm20TrustedIssuerVerifier.TryVerify(
+            successorSigned, [_issuerDid], _holderDid, CredentialType, Context, Now,
+            out string deniedSigner, out var deniedClaims));
+        Assert.Equal(string.Empty, deniedSigner);
+        Assert.Equal(JsonValueKind.Undefined, deniedClaims.ValueKind);
+
+        // A retired historical DID is no longer trusted merely because an
+        // older credential was genuinely signed by that key.
+        Assert.False(Vcdm20TrustedIssuerVerifier.TryVerify(
+            original, [successorDid], _holderDid, CredentialType, Context, Now,
+            out deniedSigner, out deniedClaims));
+        Assert.Equal(string.Empty, deniedSigner);
+        Assert.Equal(JsonValueKind.Undefined, deniedClaims.ValueKind);
+    }
+
+    [Fact]
+    public void UnenrolledForgedAndWronglyBoundVc2TokensNeverReleaseClaims()
+    {
+        string original = Issue();
+        var (_, foreignPublic) = NewKey();
+        string foreignIssuer = DidFromKey(foreignPublic);
+
+        Assert.False(Vcdm20TrustedIssuerVerifier.TryVerify(
+            original, [foreignIssuer], _holderDid, CredentialType, Context, Now,
+            out string deniedSigner, out var deniedClaims));
+        Assert.Equal(string.Empty, deniedSigner);
+        Assert.Equal(JsonValueKind.Undefined, deniedClaims.ValueKind);
+
+        var parts = original.Split('.');
+        parts[1] = Base64UrlEncoder.Encode(Ed25519JwtSigner.ExtractPayload(original)
+            .Replace("active", "admin", StringComparison.Ordinal));
+        Assert.False(Vcdm20TrustedIssuerVerifier.TryVerify(
+            string.Join('.', parts), [_issuerDid], _holderDid, CredentialType, Context, Now,
+            out deniedSigner, out deniedClaims));
+        Assert.Equal(JsonValueKind.Undefined, deniedClaims.ValueKind);
+
+        Assert.False(Vcdm20TrustedIssuerVerifier.TryVerify(
+            original, [_issuerDid], _issuerDid, CredentialType, Context, Now,
+            out deniedSigner, out deniedClaims));
+        Assert.Equal(JsonValueKind.Undefined, deniedClaims.ValueKind);
+
+        Assert.False(Vcdm20TrustedIssuerVerifier.TryVerify(
+            original, [_issuerDid], _holderDid, "UntrustedCredential", Context, Now,
+            out deniedSigner, out deniedClaims));
+        Assert.Equal(JsonValueKind.Undefined, deniedClaims.ValueKind);
+    }
+
+    [Fact]
+    public void InvalidOversizedAndDuplicateIssuerAllowlistFailsClosed()
+    {
+        string original = Issue();
+        string[][] rejected =
+        [
+            [],
+            [_issuerDid, _issuerDid],
+            [_issuerDid, "did:key:invalid"],
+            Enumerable.Repeat(_issuerDid, 17).ToArray()
+        ];
+        foreach (var allowed in rejected)
+        {
+            Assert.False(Vcdm20TrustedIssuerVerifier.TryVerify(
+                original, allowed, _holderDid, CredentialType, Context, Now,
+                out string deniedSigner, out var deniedClaims));
+            Assert.Equal(string.Empty, deniedSigner);
+            Assert.Equal(JsonValueKind.Undefined, deniedClaims.ValueKind);
+        }
+    }
+
     private string Issue()
     {
         using var subject = Subject();
