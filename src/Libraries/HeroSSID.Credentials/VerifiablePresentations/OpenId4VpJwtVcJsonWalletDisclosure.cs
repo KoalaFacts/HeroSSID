@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using HeroSSID.Credentials.CredentialRevocation;
 using HeroSSID.Credentials.JwtVcJson;
 
 namespace HeroSSID.Credentials.VerifiablePresentations;
@@ -145,8 +146,27 @@ public static class OpenId4VpJwtVcJsonWalletDisclosure
         string issuerSignedSnapshotJwt, TimeProvider clock,
         out JwtVcJsonWalletStatusDisclosurePreview? preview)
     {
+        ArgumentNullException.ThrowIfNull(clock);
         preview = null;
-        throw new NotSupportedException("Status-aware VC1.1 Wallet preflight not implemented.");
+
+        if (string.IsNullOrWhiteSpace(issuerSignedSnapshotJwt) ||
+            issuerSignedSnapshotJwt.Length > 65_536 ||
+            !TryPrepare(requestJwt, expectedVerifierDid, expectedResponseUri,
+                expectedCredentialType, expectedSubjectContextUri, expectedIssuerDid,
+                credentialJwt, holderDid, clock, out var disclosure) ||
+            disclosure is null ||
+            JwtVcJsonRevocationSnapshot.Check(issuerSignedSnapshotJwt, credentialJwt,
+                disclosure.TrustedIssuerDid, clock.GetUtcNow()) !=
+                RevocationSnapshotCheckResult.NotListed)
+        {
+            // A valid issuer statement is not sufficient to disclose the subject
+            // when this Wallet operation explicitly requires a signed status set.
+            return false;
+        }
+
+        preview = new JwtVcJsonWalletStatusDisclosurePreview(
+            disclosure, Sha256(issuerSignedSnapshotJwt));
+        return true;
     }
 
     /// <summary>
@@ -159,7 +179,41 @@ public static class OpenId4VpJwtVcJsonWalletDisclosure
         string credentialJwt, string issuerSignedSnapshotJwt,
         byte[] holderSeed, TimeProvider clock)
     {
-        throw new NotSupportedException("Status-aware VC1.1 Wallet signing not implemented.");
+        ArgumentNullException.ThrowIfNull(preview);
+        ArgumentNullException.ThrowIfNull(holderSeed);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        if (preview.Disclosure is null ||
+            string.IsNullOrWhiteSpace(issuerSignedSnapshotJwt) ||
+            issuerSignedSnapshotJwt.Length > 65_536 ||
+            !string.Equals(preview.SnapshotSha256,
+                Sha256(issuerSignedSnapshotJwt), StringComparison.Ordinal) ||
+            JwtVcJsonRevocationSnapshot.Check(issuerSignedSnapshotJwt, credentialJwt,
+                preview.Disclosure.TrustedIssuerDid, clock.GetUtcNow()) !=
+                RevocationSnapshotCheckResult.NotListed)
+        {
+            throw new ArgumentException(
+                "A fresh, unchanged issuer-signed status snapshot for the previewed VC1.1 credential is required.",
+                nameof(preview));
+        }
+
+        // Re-check the signed verifier request, issuer JWT, original digests,
+        // full displayed claims and real holder seed before producing any proof.
+        string form = CreateHolderResponseFormAfterPreview(
+            preview.Disclosure, requestJwt, credentialJwt, holderSeed, clock);
+
+        // Signing may cross the private 60-second status expiry boundary. Never
+        // return a proof described as status-gated after the snapshot expires.
+        if (JwtVcJsonRevocationSnapshot.Check(issuerSignedSnapshotJwt, credentialJwt,
+                preview.Disclosure.TrustedIssuerDid, clock.GetUtcNow()) !=
+                RevocationSnapshotCheckResult.NotListed)
+        {
+            throw new ArgumentException(
+                "The issuer-signed VC1.1 snapshot expired while signing.",
+                nameof(issuerSignedSnapshotJwt));
+        }
+
+        return form;
     }
 
     private static string Sha256(string signedJwt) =>
