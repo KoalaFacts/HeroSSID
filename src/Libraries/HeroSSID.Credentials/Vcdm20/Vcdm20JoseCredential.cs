@@ -107,6 +107,11 @@ public static class Vcdm20JoseCredential
             !StrictJwtReader.TryRead(jwt, CredentialHeaderType, MaximumJwtLength,
                 out var credential, KeyId(trustedIssuerDid), "vc") ||
             !Ed25519JwtSigner.VerifySignedJwt(jwt, issuerPublicKey) ||
+            // This issuer-statement profile implements exactly six direct VC2
+            // members. In particular it cannot enforce general credentialStatus,
+            // proof or evidence semantics; do not authenticate and silently ignore
+            // unimplemented signed policy fields before returning subject claims.
+            credential.EnumerateObject().Count() != 6 ||
             credential.TryGetProperty("vc", out _) ||
             credential.TryGetProperty("vp", out _) ||
             !StrictJwtReader.TryGetString(credential, "issuer", out var signedIssuer) ||
