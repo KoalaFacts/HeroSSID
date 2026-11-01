@@ -25,7 +25,7 @@ public static class Vcdm20RetiredIssuerPresentation
         TimeProvider clock, out string verifiedIssuerDid, out JsonElement verifiedSubject) =>
         CheckCore(presentationJwt, null, verifierTenantId, expectedAudience,
             expectedNonce, expectedCredentialType, expectedContextUri, challenges,
-            activeIssuerDids, retiredCredentialPins, clock,
+            activeIssuerDids, retiredCredentialPins, null, clock,
             out verifiedIssuerDid, out verifiedSubject);
 
     /// <summary>
@@ -45,7 +45,7 @@ public static class Vcdm20RetiredIssuerPresentation
         return CheckCore(presentationJwt, revocationSnapshotJwt,
             verifierTenantId, expectedAudience, expectedNonce,
             expectedCredentialType, expectedContextUri, challenges,
-            activeIssuerDids, retiredCredentialPins, clock,
+            activeIssuerDids, retiredCredentialPins, null, clock,
             out verifiedIssuerDid, out verifiedSubject);
     }
 
@@ -61,8 +61,15 @@ public static class Vcdm20RetiredIssuerPresentation
         IReadOnlyCollection<string> activeIssuerDids,
         IReadOnlyCollection<Vcdm20RetiredCredentialPin> retiredCredentialPins,
         DateTimeOffset minimumObservedAt, TimeProvider clock,
-        out string verifiedIssuerDid, out JsonElement verifiedSubject) =>
-        throw new NotSupportedException("Status observation cutoff not implemented");
+        out string verifiedIssuerDid, out JsonElement verifiedSubject)
+    {
+        ArgumentNullException.ThrowIfNull(revocationSnapshotJwt);
+        return CheckCore(presentationJwt, revocationSnapshotJwt,
+            verifierTenantId, expectedAudience, expectedNonce,
+            expectedCredentialType, expectedContextUri, challenges,
+            activeIssuerDids, retiredCredentialPins, minimumObservedAt, clock,
+            out verifiedIssuerDid, out verifiedSubject);
+    }
 
     private static Vcdm20VerifierPolicyResult CheckCore(
         string presentationJwt, string? revocationSnapshotJwt,
@@ -71,7 +78,8 @@ public static class Vcdm20RetiredIssuerPresentation
         IPresentationChallengeStore challenges,
         IReadOnlyCollection<string> activeIssuerDids,
         IReadOnlyCollection<Vcdm20RetiredCredentialPin> retiredCredentialPins,
-        TimeProvider clock, out string verifiedIssuerDid, out JsonElement verifiedSubject)
+        DateTimeOffset? minimumObservedAt, TimeProvider clock,
+        out string verifiedIssuerDid, out JsonElement verifiedSubject)
     {
         ArgumentNullException.ThrowIfNull(presentationJwt);
         ArgumentNullException.ThrowIfNull(expectedContextUri);
@@ -82,6 +90,16 @@ public static class Vcdm20RetiredIssuerPresentation
 
         verifiedIssuerDid = string.Empty;
         verifiedSubject = default;
+
+        // Reject invalid verifier policy before touching the one-use challenge.
+        // A mistaken future or pre-epoch cutoff must not burn a legitimate
+        // holder proof; authentic post-consumption status failures still do.
+        if (minimumObservedAt is DateTimeOffset cutoff &&
+            (cutoff < DateTimeOffset.UnixEpoch || cutoff > clock.GetUtcNow() ||
+             revocationSnapshotJwt is null))
+        {
+            return Vcdm20VerifierPolicyResult.Invalid;
+        }
 
         // The existing one-use presentation verifier checks the tenant-owned
         // challenge's pinned issuer DID, actual holder and issuer Ed25519
@@ -104,16 +122,31 @@ public static class Vcdm20RetiredIssuerPresentation
         // using the actual authenticated holder DID. The challenge stays
         // consumed when an independent policy or status rejects the proof.
         DateTimeOffset now = clock.GetUtcNow();
-        Vcdm20VerifierPolicyResult result = revocationSnapshotJwt is null
-            ? Vcdm20RetiredIssuerVerifier.Check(
+        Vcdm20VerifierPolicyResult result;
+        string issuer;
+        JsonElement subject;
+        if (revocationSnapshotJwt is null)
+        {
+            result = Vcdm20RetiredIssuerVerifier.Check(
                 originalCredentialJwt, activeIssuerDids, retiredCredentialPins,
                 authenticatedHolderDid, expectedCredentialType,
-                expectedContextUri, now, out string issuer, out JsonElement subject)
-            : Vcdm20RetiredIssuerVerifier.CheckWithStatus(
+                expectedContextUri, now, out issuer, out subject);
+        }
+        else if (minimumObservedAt is DateTimeOffset statusCutoff)
+        {
+            result = Vcdm20RetiredIssuerVerifier.CheckWithStatusAfterObservationCutoff(
+                originalCredentialJwt, revocationSnapshotJwt, activeIssuerDids,
+                retiredCredentialPins, authenticatedHolderDid, expectedCredentialType,
+                expectedContextUri, now, statusCutoff, out issuer, out subject);
+        }
+        else
+        {
+            result = Vcdm20RetiredIssuerVerifier.CheckWithStatus(
                 originalCredentialJwt, revocationSnapshotJwt, activeIssuerDids,
                 retiredCredentialPins, authenticatedHolderDid,
                 expectedCredentialType, expectedContextUri, now,
                 out issuer, out subject);
+        }
 
         if (result is Vcdm20VerifierPolicyResult.SignedButStatusUnchecked or
             Vcdm20VerifierPolicyResult.SignedNotListed)
