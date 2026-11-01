@@ -24,6 +24,25 @@ public sealed class IssuerGuardianRecoveryEnrollmentTests
     }
 
     [Fact]
+    public void ExactEnrollmentChallengeCannotBeRedeemedWithoutItsSignedArtifact()
+    {
+        var f = new Fixture();
+        var (enrollment, pin) = f.Enrollment();
+        var challenge = f.Issue(enrollment, pin);
+        string evidence = f.Proof(challenge.Nonce);
+
+        Assert.False(IssuerGuardianRecoveryChallenges.TryVerifyAndConsume(
+            f.Store, f.TenantId, evidence, f.Previous.Did,
+            [f.GuardianOne.Did, f.GuardianTwo.Did], 2,
+            Audience, challenge.Nonce, f.Clock, out string unapproved));
+        Assert.Equal(string.Empty, unapproved);
+        Assert.NotNull(f.Store.Find(f.TenantId, Audience.AbsoluteUri, challenge.Nonce));
+        Assert.True(f.Consume(evidence, enrollment, pin,
+            challenge.Nonce, out string approved));
+        Assert.Equal(f.Successor.Did, approved);
+    }
+
+    [Fact]
     public void LegacyUnboundChallengeCannotSatisfyAnExactEnrolledPolicy()
     {
         var f = new Fixture();
