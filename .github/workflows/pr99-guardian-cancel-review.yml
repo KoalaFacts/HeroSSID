@@ -3,7 +3,7 @@ name: Independent PR99 guardian recovery challenge security review
 on:
   push:
     branches:
-      - review/pr99-guardian-http-20261102
+      - review/pr99-guardian-cancel-20261102
 
 permissions: {}
 
