@@ -211,8 +211,15 @@ IssuerGuardianEnrollmentTrust:Registrations:0:ApprovedSha256 = <pre-incident app
 
 At most 256 records are supported, with unique exact
 `(tenant_id, previous issuer DID, HTTPS audience)` keys. An absent record
-fails closed; a bad digest/signature or expired signed enrollment also fails
-before challenge issuance. Records are loaded as an immutable process-local
+fails closed. **Before serving HTTP**, each configured record is checked
+against the exact approved JWT SHA-256, genuine old-issuer Ed25519 signature,
+issuer DID, signed HTTPS audience, distinct guardian quorum and the current
+signed validity window. A forged, mistimed or mismatched record now **prevents
+the host from starting**, instead of allowing a broken recovery configuration
+to remain latent until an incident. Every issuance and verification still
+rechecks the signed policy and expiration. Operators must install a currently
+valid policy and renew it before expiry, or a restart will fail closed.
+Records are loaded as an immutable process-local
 snapshot; every verifier instance must have the **same protected, independently
 approved policy inventory**. Registry changes require a controlled host
 restart/rollout and an operator-owned incident and revocation process. The
