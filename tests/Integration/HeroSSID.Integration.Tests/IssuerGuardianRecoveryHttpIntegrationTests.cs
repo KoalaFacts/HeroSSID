@@ -493,21 +493,22 @@ public sealed class IssuerGuardianRecoveryHttpIntegrationTests(DatabaseFixture f
             ["IssuerGuardianEnrollmentTrust:Registrations:0:SignedEnrollmentJwt"] = original,
             ["IssuerGuardianEnrollmentTrust:Registrations:0:ApprovedSha256"] = new string('0', 64)
         };
+        // A malformed but syntactically valid operator pin must prevent
+        // startup, not leave a running verifier that silently cannot recover.
+        Assert.Throws<InvalidOperationException>(() =>
+        {
+            using var wrongHost = NewHost(badPinConfig);
+            using var wrong = wrongHost.CreateClient();
+        });
+
         await using var missingHost = NewHost();
-        await using var wrongHost = NewHost(badPinConfig);
         using var missing = missingHost.CreateClient();
-        using var wrong = wrongHost.CreateClient();
         string missingToken = await GetTokenAsync(missing, "credential:verify did:manage").ConfigureAwait(true);
-        string wrongToken = await GetTokenAsync(wrong, "credential:verify did:manage").ConfigureAwait(true);
         var request = new { audience = Audience, trustedPreviousIssuerDid = oldDid, lifetimeSeconds = 120 };
 
         using var noRegistry = await PostAsync(missing, HostPinnedChallengeRoute,
             request, missingToken).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.BadRequest, noRegistry.StatusCode);
-
-        using var mismatched = await PostAsync(wrong, HostPinnedChallengeRoute,
-            request, wrongToken).ConfigureAwait(true);
-        Assert.Equal(HttpStatusCode.BadRequest, mismatched.StatusCode);
 
         badPinConfig["IssuerGuardianEnrollmentTrust:Registrations:0:ApprovedSha256"] =
             IssuerGuardianRecoveryEnrollment.Fingerprint(original);
@@ -519,6 +520,69 @@ public sealed class IssuerGuardianRecoveryHttpIntegrationTests(DatabaseFixture f
         using var wrongTenant = await PostAsync(foreign, HostPinnedChallengeRoute,
             request, foreignToken).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.BadRequest, wrongTenant.StatusCode);
+    }
+
+    [Fact]
+    public void HostPinnedStartupRejectsForgedSignatureDespiteMatchingConfiguredDigest()
+    {
+        using var originalIssuer = NewKey();
+        using var guardianOne = NewKey();
+        using var guardianTwo = NewKey();
+        string issuerDid = DidFromKey(originalIssuer);
+        DateTimeOffset now = TimeProvider.System.GetUtcNow();
+        string genuineJwt = IssuerGuardianRecoveryEnrollment.Create(
+            issuerDid, originalIssuer.Export(KeyBlobFormat.RawPrivateKey),
+            [DidFromKey(guardianOne), DidFromKey(guardianTwo)],
+            2, new Uri(Audience), now.AddMinutes(-1), now.AddHours(2));
+        string[] jwtParts = genuineJwt.Split('.');
+        char[] forgedSignature = jwtParts[2].ToCharArray();
+        forgedSignature[0] = forgedSignature[0] == 'A' ? 'B' : 'A';
+        jwtParts[2] = new string(forgedSignature);
+        string forgedJwt = string.Join(".", jwtParts);
+        string matchingButUnapprovedDigest = IssuerGuardianRecoveryEnrollment.Fingerprint(forgedJwt);
+        var config = new Dictionary<string, string?>
+        {
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:TenantId"] = HeroDbContext.DefaultTenantId.ToString(),
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:TrustedPreviousIssuerDid"] = issuerDid,
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:Audience"] = Audience,
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:SignedEnrollmentJwt"] = forgedJwt,
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:ApprovedSha256"] = matchingButUnapprovedDigest
+        };
+
+        Assert.Throws<InvalidOperationException>(() =>
+        {
+            using var host = NewHost(config);
+            using var client = host.CreateClient();
+        });
+    }
+
+    [Fact]
+    public void HostPinnedStartupRejectsNotYetEffectiveSignedPolicy()
+    {
+        using var originalIssuer = NewKey();
+        using var guardianOne = NewKey();
+        using var guardianTwo = NewKey();
+        string issuerDid = DidFromKey(originalIssuer);
+        DateTimeOffset now = TimeProvider.System.GetUtcNow();
+        string futureJwt = IssuerGuardianRecoveryEnrollment.Create(
+            issuerDid, originalIssuer.Export(KeyBlobFormat.RawPrivateKey),
+            [DidFromKey(guardianOne), DidFromKey(guardianTwo)],
+            2, new Uri(Audience), now.AddMinutes(15), now.AddHours(2));
+        var config = new Dictionary<string, string?>
+        {
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:TenantId"] = HeroDbContext.DefaultTenantId.ToString(),
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:TrustedPreviousIssuerDid"] = issuerDid,
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:Audience"] = Audience,
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:SignedEnrollmentJwt"] = futureJwt,
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:ApprovedSha256"] =
+                IssuerGuardianRecoveryEnrollment.Fingerprint(futureJwt)
+        };
+
+        Assert.Throws<InvalidOperationException>(() =>
+        {
+            using var host = NewHost(config);
+            using var client = host.CreateClient();
+        });
     }
 
     [Fact]
