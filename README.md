@@ -44,6 +44,23 @@ Identity credentials express what an issuer attests. Whether that issuer is trus
 
 An issuer can pre-sign an exact guardian roster and quorum with its **original** Ed25519 key while the key is still available. The verifier separately approves and stores the exact original signed enrollment SHA-256 **before any loss incident**; recovery then verifies that signed policy and pin before issuing or atomically consuming a purpose-separated, tenant-bound challenge. A claimant cannot replace the previously pinned guardian set or quorum using a newly signed envelope. This private evidence does **not** approve the guardians, automatically transfer DID control, establish organization identity/authority or prove an external Wallet exchange. An opt-in authenticated HTTP adapter also exposes exact-JWT-bound challenge issuance and proof verification for non-.NET relying-party backends, using the existing shared atomic challenge store. **The caller must independently retrieve its own pre-incident approved pin:** merely submitting a matching JWT and hash over HTTP does not establish prior enrollment. See [the pre-enrollment SDK and HTTP flow and guarantees](docs/issuer-guardian-preenrollment.md).
 
+## Host-owned pre-incident guardian enrollment (opt-in authenticated HTTP)
+
+In addition to the caller-supplied exact signed-policy recovery endpoints,
+an operator may separately provision and protect pre-incident approved
+original issuer-signed guardian JWTs and SHA-256 pins **inside the verifier
+host configuration**. The new authenticated `host-pinned-challenge` and
+`host-pinned-verify` endpoints select those records only by validated bearer
+tenant, original did:key issuer and exact HTTPS audience; clients cannot
+supply or replace the trusted enrollment. Real issuer, successor and guardian
+Ed25519 signatures and one-use shared PostgreSQL nonce are required. Missing
+or altered host trust configuration fails closed. No database schema change.
+**Operators must independently approve and consistently synchronize the
+pre-incident configuration across hosts**, revoke compromised enrollment and
+authorize actual recovery; no DID trust transfer, identity vetting, business
+authority or independent Wallet interoperability follows from signatures.
+See [host-controlled recovery setup and requests](docs/issuer-guardian-preenrollment.md#host-controlled-pre-incident-enrollment-over-authenticated-http-opt-in).
+
 ## VC2 Wallet authenticated disclosure preflight (opt-in)
 
 A Wallet integration can use Vcdm20WalletDisclosure.TryPrepare to independently verify its pinned HeroSSID verifier request and the unchanged original issuer-signed direct VC2 JWT **without a holder private key**, then show the full authenticated subject claims and destination. Following the Wallet application's own genuine informed-consent UI, CreateHolderPresentationAfterPreview revalidates the original signatures, challenge expiry and exact SHA-256-bound request/credential/subject before producing the real holder-signed VC2 VP. Swapped authentic credentials, changed requests, wrong signer and replay are rejected; verifier-side one-use challenge enforcement is unchanged. This is the private HeroSSID request profile, **not** OpenID4VP transport or evidence of consent, credential revocation, real-world identity, business authorization or independent third-party wallet interoperability. See [VC2 Wallet preflight and exact call examples](docs/vcdm20-wallet-disclosure-preflight.md).
