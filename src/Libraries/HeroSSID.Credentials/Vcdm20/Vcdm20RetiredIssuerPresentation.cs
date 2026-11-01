@@ -49,6 +49,21 @@ public static class Vcdm20RetiredIssuerPresentation
             out verifiedIssuerDid, out verifiedSubject);
     }
 
+    /// <summary>
+    /// Require a genuine holder-signed, single-use presentation with an
+    /// independently chosen post-incident issuer status observation cutoff.
+    /// </summary>
+    public static Vcdm20VerifierPolicyResult CheckWithStatusAfterObservationCutoff(
+        string presentationJwt, string revocationSnapshotJwt,
+        Guid verifierTenantId, string expectedAudience,
+        string expectedNonce, string expectedCredentialType, Uri expectedContextUri,
+        IPresentationChallengeStore challenges,
+        IReadOnlyCollection<string> activeIssuerDids,
+        IReadOnlyCollection<Vcdm20RetiredCredentialPin> retiredCredentialPins,
+        DateTimeOffset minimumObservedAt, TimeProvider clock,
+        out string verifiedIssuerDid, out JsonElement verifiedSubject) =>
+        throw new NotSupportedException("Status observation cutoff not implemented");
+
     private static Vcdm20VerifierPolicyResult CheckCore(
         string presentationJwt, string? revocationSnapshotJwt,
         Guid verifierTenantId, string expectedAudience,
