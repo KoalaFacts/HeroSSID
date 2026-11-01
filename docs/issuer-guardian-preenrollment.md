@@ -65,12 +65,29 @@ must come from verifier-owned prior records rather than the claimant. The
 signed policy's own `iat` is **not** an independent timestamp; the verifier's
 prior authenticated record establishes when the digest was approved.
 
-The recovery nonce remains tenant/audience/old-issuer/policy separated and
+The SDK now commits the **exact original enrollment JWT SHA-256** into
+a distinct v3 verifier-owned one-use recovery challenge. The same guardian
+DIDs and quorum are **not** sufficient to substitute a different signed
+enrollment after the nonce was issued, even if that alternate enrollment
+has a valid old-issuer signature and a separate independently approved pin.
+A legacy unbound v1 or guardian-only v2 challenge can still be verified via
+its existing explicit SDK entry point, but it **cannot** be redeemed through
+`IssuerGuardianRecoveryEnrollment.TryVerifyAndConsume`. Nor may a v3
+pre-enrollment challenge be redeemed by the legacy generic entry point
+without validating its exact signed enrollment. This fail-closed boundary
+means any outstanding v2 challenge initiated through an older version of
+this opt-in enrollment SDK must be **reissued** after upgrading; these
+recovery challenges have a maximum five-minute lifetime.
+
+The nonce remains tenant/audience/old-issuer/purpose separated and
 single-use through the existing `IPresentationChallengeStore`; a cluster
 uses the shared atomic PostgreSQL implementation and existing approved
-schema. A recovery proof with wrong signers fails without consuming the
-challenge. An enrollment that expires before consumption fails closed, even
-when a nonce is still pending. Existing cancellation remains available.
+schema. A recovery proof with wrong signers or a mismatched enrollment
+fails **without consuming** the challenge, allowing the original enrolled
+artifact to be used if still valid. An enrollment expiring before
+consumption fails closed even when its nonce is pending. Exact v3
+challenges remain cancelable through the existing issuer/purpose-bound
+`IssuerGuardianRecoveryChallenges.TryCancel` operation.
 
 This feature adds no database table, schema, migration, hosted key custody,
 HTTP route, Wallet consent UI, package publication or deployment. An issuer
