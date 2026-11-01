@@ -179,9 +179,9 @@ public static class JwtVcJsonTrustedIssuerVerifier
 
             // Bind status to the authentic credential signer, never to an
             // alternative allowlisted DID or the status token's own iss.
-            var status = minimumObservedAt is DateTimeOffset cutoff
+            var status = minimumObservedAt is DateTimeOffset statusCutoff
                 ? JwtVcJsonRevocationSnapshot.CheckWithObservationCutoff(
-                    revocationSnapshotJwt!, credentialJwt, issuerDid, now, cutoff)
+                    revocationSnapshotJwt!, credentialJwt, issuerDid, now, statusCutoff)
                 : JwtVcJsonRevocationSnapshot.Check(
                     revocationSnapshotJwt!, credentialJwt, issuerDid, now);
             if (status == RevocationSnapshotCheckResult.Revoked)
