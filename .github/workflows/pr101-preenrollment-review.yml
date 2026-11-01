@@ -3,7 +3,7 @@ name: Independent PR101 pre-enrolled guardian policy security review
 on:
   push:
     branches:
-      - review/pr101-guardian-policy-20261102
+      - review/pr101-preenrollment-20261102
 
 permissions: {}
 
