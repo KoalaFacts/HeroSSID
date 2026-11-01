@@ -22,6 +22,9 @@ public static class IssuerGuardianRecoveryChallenges
     // not an issuer DID and must not be accepted as a trusted issuer identity.
     private const string RecoveryMarkerPrefix = "herossid:issuer-guardian-recovery:v1:";
     private const string BoundRecoveryMarkerPrefix = "herossid:issuer-guardian-recovery:v2:";
+    // An opt-in, old-issuer-signed pre-enrollment challenge commits the
+    // exact independently approved original JWT digest, not just guardians.
+    private const string EnrollmentRecoveryMarkerPrefix = "herossid:issuer-guardian-recovery:v3:";
 
     /// <summary>
     /// Issue a short-lived one-use recovery challenge, bound to the verifier
@@ -58,6 +61,34 @@ public static class IssuerGuardianRecoveryChallenges
         // The shared challenge table already stores one opaque verifier-owned
         // identifier: a domain-separated SHA-256 guardian-policy commitment.
         return store.Issue(verifierTenantId, verifierAudience.AbsoluteUri, marker, lifetime);
+    }
+
+    /// <summary>
+    /// Allocate an exact-enrollment challenge only after the caller has verified
+    /// the original signed enrollment JWT against a pre-incident verifier pin.
+    /// Internal to avoid accepting arbitrary claimant-supplied digests as trust.
+    /// </summary>
+    internal static PresentationChallenge IssueForEnrollment(
+        IPresentationChallengeStore store, Guid verifierTenantId,
+        string trustedPreviousIssuerDid, string verifiedEnrollmentSha256,
+        Uri verifierAudience, TimeSpan? lifetime = null)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(trustedPreviousIssuerDid);
+        ArgumentNullException.ThrowIfNull(verifiedEnrollmentSha256);
+        ArgumentNullException.ThrowIfNull(verifierAudience);
+
+        if (verifierTenantId == Guid.Empty ||
+            !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(trustedPreviousIssuerDid, out _) ||
+            !ValidAudience(verifierAudience) ||
+            !IsCanonicalSha256(verifiedEnrollmentSha256))
+        {
+            throw new ArgumentException("An exact authenticated enrollment digest, old issuer and verifier audience are required.");
+        }
+
+        return store.Issue(verifierTenantId, verifierAudience.AbsoluteUri,
+            EnrollmentRecoveryMarkerPrefix + trustedPreviousIssuerDid + ":" +
+            verifiedEnrollmentSha256, lifetime);
     }
 
     public static PresentationChallenge Issue(IPresentationChallengeStore store,
@@ -127,7 +158,31 @@ public static class IssuerGuardianRecoveryChallenges
         Guid verifierTenantId, string evidenceJson, string trustedPreviousIssuerDid,
         IReadOnlyCollection<string> trustedGuardianDids, int requiredGuardianSignatures,
         Uri verifierAudience, string expectedNonce, TimeProvider clock,
-        out string successorIssuerDid)
+        out string successorIssuerDid) =>
+        TryVerifyAndConsumeCore(store, verifierTenantId, evidenceJson,
+            trustedPreviousIssuerDid, trustedGuardianDids, requiredGuardianSignatures,
+            verifierAudience, expectedNonce, clock, null, out successorIssuerDid);
+
+    /// <summary>
+    /// Only the pre-enrollment SDK may redeem a challenge issued under the
+    /// independently approved exact signed JWT. Legacy unbound and v2
+    /// guardian-only challenges cannot masquerade as pre-enrollment.
+    /// </summary>
+    internal static bool TryVerifyAndConsumeForEnrollment(IPresentationChallengeStore store,
+        Guid verifierTenantId, string evidenceJson, string trustedPreviousIssuerDid,
+        IReadOnlyCollection<string> trustedGuardianDids, int requiredGuardianSignatures,
+        Uri verifierAudience, string expectedNonce, TimeProvider clock,
+        string verifiedEnrollmentSha256, out string successorIssuerDid) =>
+        TryVerifyAndConsumeCore(store, verifierTenantId, evidenceJson,
+            trustedPreviousIssuerDid, trustedGuardianDids, requiredGuardianSignatures,
+            verifierAudience, expectedNonce, clock, verifiedEnrollmentSha256,
+            out successorIssuerDid);
+
+    private static bool TryVerifyAndConsumeCore(IPresentationChallengeStore store,
+        Guid verifierTenantId, string evidenceJson, string trustedPreviousIssuerDid,
+        IReadOnlyCollection<string> trustedGuardianDids, int requiredGuardianSignatures,
+        Uri verifierAudience, string expectedNonce, TimeProvider clock,
+        string? verifiedEnrollmentSha256, out string successorIssuerDid)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(evidenceJson);
@@ -156,7 +211,8 @@ public static class IssuerGuardianRecoveryChallenges
             !string.Equals(challenge.Nonce, expectedNonce, StringComparison.Ordinal) ||
             !string.Equals(challenge.Audience, audience, StringComparison.Ordinal) ||
             !MatchesRecoveryPolicy(challenge.TrustedIssuerDid, trustedPreviousIssuerDid,
-                trustedGuardianDids, requiredGuardianSignatures) ||
+                trustedGuardianDids, requiredGuardianSignatures,
+                verifiedEnrollmentSha256) ||
             challenge.ExpiresAt <= now ||
             !IssuerGuardianRecovery.TryVerify(evidenceJson, trustedPreviousIssuerDid,
                 trustedGuardianDids, requiredGuardianSignatures,
@@ -185,19 +241,43 @@ public static class IssuerGuardianRecoveryChallenges
             return true;
         }
 
-        string prefix = BoundRecoveryMarkerPrefix + previousIssuerDid + ":";
-        return stored.StartsWith(prefix, StringComparison.Ordinal) &&
-            stored.Length == prefix.Length + 64 &&
-            stored.AsSpan(prefix.Length).ToString().All(static c =>
-                c is >= '0' and <= '9' or >= 'A' and <= 'F');
+        return MatchesDigestMarker(stored,
+                   BoundRecoveryMarkerPrefix + previousIssuerDid + ":") ||
+               MatchesDigestMarker(stored,
+                   EnrollmentRecoveryMarkerPrefix + previousIssuerDid + ":");
     }
 
+    private static bool MatchesDigestMarker(string stored, string prefix) =>
+        stored.StartsWith(prefix, StringComparison.Ordinal) &&
+        stored.Length == prefix.Length + 64 &&
+        IsCanonicalSha256(stored[prefix.Length..]);
+
     private static bool MatchesRecoveryPolicy(string stored, string previousIssuerDid,
-        IReadOnlyCollection<string> guardians, int threshold) =>
-        string.Equals(stored, RecoveryMarkerPrefix + previousIssuerDid,
-            StringComparison.Ordinal) ||
-        (TryBoundMarker(previousIssuerDid, guardians, threshold, out string bound) &&
-            string.Equals(stored, bound, StringComparison.Ordinal));
+        IReadOnlyCollection<string> guardians, int threshold,
+        string? verifiedEnrollmentSha256)
+    {
+        // Pre-enrollment requires equality to the exact JWT fingerprint that
+        // was validated separately. A v1/v2 nonce does not carry that
+        // commitment, even if its guardian list happens to be identical.
+        if (verifiedEnrollmentSha256 is not null)
+        {
+            return IsCanonicalSha256(verifiedEnrollmentSha256) &&
+                string.Equals(stored, EnrollmentRecoveryMarkerPrefix +
+                    previousIssuerDid + ":" + verifiedEnrollmentSha256,
+                    StringComparison.Ordinal);
+        }
+
+        // Retain the explicit legacy SDK contracts, but do not let them
+        // redeem v3 pre-enrollment challenges without its signed artifact.
+        return string.Equals(stored, RecoveryMarkerPrefix + previousIssuerDid,
+                   StringComparison.Ordinal) ||
+               (TryBoundMarker(previousIssuerDid, guardians, threshold, out string bound) &&
+                   string.Equals(stored, bound, StringComparison.Ordinal));
+    }
+
+    private static bool IsCanonicalSha256(string digest) =>
+        digest.Length == 64 &&
+        digest.All(static c => c is >= '0' and <= '9' or >= 'A' and <= 'F');
 
     private static bool TryBoundMarker(string previousIssuerDid,
         IReadOnlyCollection<string> guardians, int threshold, out string marker)
