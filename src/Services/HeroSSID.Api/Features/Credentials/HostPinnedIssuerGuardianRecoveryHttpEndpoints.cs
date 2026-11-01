@@ -21,7 +21,7 @@ internal sealed class HostPinnedGuardianEnrollmentRegistry
 {
     private readonly Dictionary<(Guid Tenant, string Issuer, string Audience), HostPinnedGuardianEnrollment> _registrations = [];
 
-    internal HostPinnedGuardianEnrollmentRegistry(IConfiguration configuration)
+    public HostPinnedGuardianEnrollmentRegistry(IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         var entries = configuration.GetSection("IssuerGuardianEnrollmentTrust:Registrations").GetChildren().ToArray();
