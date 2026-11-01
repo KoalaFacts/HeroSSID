@@ -21,6 +21,119 @@ public sealed class Vcdm20RetiredIssuerPresentationTests
     private readonly FixedClock _clock = new(Now);
 
     [Fact]
+    public void RetiredIssuerExactPinRejectsAuthenticPreIncidentStatusWithoutDisclosingClaims()
+    {
+        string original = Issue(_retired);
+        var pins = new[] { Pin(_retired.Did, original) };
+        string stale = Vcdm20RevocationSnapshot.Create(
+            _retired.Did, [], _retired.Seed, Now.AddSeconds(-25), _clock);
+
+        Assert.Equal(Vcdm20VerifierPolicyResult.SignedNotListed,
+            Vcdm20RetiredIssuerVerifier.CheckWithStatus(
+                original, stale, [_active.Did], pins, _holder.Did, Type,
+                Context, Now, out _, out _));
+
+        Assert.Equal(Vcdm20VerifierPolicyResult.Invalid,
+            Vcdm20RetiredIssuerVerifier.CheckWithStatusAfterObservationCutoff(
+                original, stale, [_active.Did], pins, _holder.Did, Type,
+                Context, Now, Now.AddSeconds(-10),
+                out string rejectedSigner, out var rejectedClaims));
+        Assert.Equal(string.Empty, rejectedSigner);
+        Assert.Equal(JsonValueKind.Undefined, rejectedClaims.ValueKind);
+
+        string fresh = Snapshot(_retired, []);
+        Assert.Equal(Vcdm20VerifierPolicyResult.SignedNotListed,
+            Vcdm20RetiredIssuerVerifier.CheckWithStatusAfterObservationCutoff(
+                original, fresh, [_active.Did], pins, _holder.Did, Type,
+                Context, Now, Now.AddSeconds(-10),
+                out string actualSigner, out var acceptedClaims));
+        Assert.Equal(_retired.Did, actualSigner);
+        Assert.Equal("member", acceptedClaims.GetProperty("membership").GetString());
+    }
+
+    [Fact]
+    public void RetiredHolderPresentationRejectsStaleStatusAndConsumesOneUseProof()
+    {
+        string original = Issue(_retired);
+        var pins = new[] { Pin(_retired.Did, original) };
+        string stale = Vcdm20RevocationSnapshot.Create(
+            _retired.Did, [], _retired.Seed, Now.AddSeconds(-25), _clock);
+        string fresh = Snapshot(_retired, []);
+        var store = NewStore();
+        Guid tenant = Guid.NewGuid();
+        var (presentation, nonce) = Present(_retired, original, tenant, store);
+
+        Assert.Equal(Vcdm20VerifierPolicyResult.Invalid,
+            Vcdm20RetiredIssuerPresentation.CheckWithStatusAfterObservationCutoff(
+                presentation, stale, tenant, Audience, nonce, Type, Context,
+                store, [_active.Did], pins, Now.AddSeconds(-10), _clock,
+                out string rejectedSigner, out var rejectedClaims));
+        Assert.Equal(string.Empty, rejectedSigner);
+        Assert.Equal(JsonValueKind.Undefined, rejectedClaims.ValueKind);
+        AssertInvalid(presentation, nonce, tenant, store, [_active.Did], pins);
+
+        (presentation, nonce) = Present(_retired, original, tenant, store);
+        Assert.Equal(Vcdm20VerifierPolicyResult.SignedNotListed,
+            Vcdm20RetiredIssuerPresentation.CheckWithStatusAfterObservationCutoff(
+                presentation, fresh, tenant, Audience, nonce, Type, Context,
+                store, [_active.Did], pins, Now.AddSeconds(-10), _clock,
+                out string signer, out var claims));
+        Assert.Equal(_retired.Did, signer);
+        Assert.Equal(_holder.Did, claims.GetProperty("id").GetString());
+    }
+
+    [Fact]
+    public void InvalidFutureCutoffDoesNotSpendHolderChallengeAndRevocationStillBlocks()
+    {
+        string original = Issue(_retired);
+        var pins = new[] { Pin(_retired.Did, original) };
+        string clean = Snapshot(_retired, []);
+        string revoked = Snapshot(_retired, [original]);
+        var store = NewStore();
+        Guid tenant = Guid.NewGuid();
+        var (presentation, nonce) = Present(_retired, original, tenant, store);
+
+        Assert.Equal(Vcdm20VerifierPolicyResult.Invalid,
+            Vcdm20RetiredIssuerPresentation.CheckWithStatusAfterObservationCutoff(
+                presentation, clean, tenant, Audience, nonce, Type, Context,
+                store, [_active.Did], pins, Now.AddSeconds(1), _clock,
+                out string futureSigner, out var futureClaims));
+        Assert.Equal(string.Empty, futureSigner);
+        Assert.Equal(JsonValueKind.Undefined, futureClaims.ValueKind);
+
+        // Invalid verifier policy must not burn the holder's real consented challenge.
+        Assert.Equal(Vcdm20VerifierPolicyResult.IssuerReportedRevoked,
+            Vcdm20RetiredIssuerPresentation.CheckWithStatusAfterObservationCutoff(
+                presentation, revoked, tenant, Audience, nonce, Type, Context,
+                store, [_active.Did], pins, Now.AddSeconds(-10), _clock,
+                out string revokedSigner, out var revokedClaims));
+        Assert.Equal(string.Empty, revokedSigner);
+        Assert.Equal(JsonValueKind.Undefined, revokedClaims.ValueKind);
+        AssertInvalid(presentation, nonce, tenant, store, [_active.Did], pins);
+    }
+
+    [Fact]
+    public void FractionalSecondCutoffDoesNotAcceptSignedWholeSecondStatus()
+    {
+        string original = Issue(_retired);
+        var pins = new[] { Pin(_retired.Did, original) };
+        DateTimeOffset observed = Now.AddSeconds(-1);
+        string snapshot = Vcdm20RevocationSnapshot.Create(
+            _retired.Did, [], _retired.Seed, observed, _clock);
+
+        Assert.Equal(Vcdm20VerifierPolicyResult.SignedNotListed,
+            Vcdm20RetiredIssuerVerifier.CheckWithStatusAfterObservationCutoff(
+                original, snapshot, [], pins, _holder.Did, Type, Context,
+                Now, observed, out _, out _));
+        Assert.Equal(Vcdm20VerifierPolicyResult.Invalid,
+            Vcdm20RetiredIssuerVerifier.CheckWithStatusAfterObservationCutoff(
+                original, snapshot, [], pins, _holder.Did, Type, Context,
+                Now, observed.AddTicks(1), out string signer, out var claims));
+        Assert.Equal(string.Empty, signer);
+        Assert.Equal(JsonValueKind.Undefined, claims.ValueKind);
+    }
+
+    [Fact]
     public void ExactPinnedRetiredCredentialRequiresRealHolderProofAndOneUseNonce()
     {
         string historical = Issue(_retired);

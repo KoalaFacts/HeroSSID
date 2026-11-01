@@ -39,7 +39,7 @@ public static class Vcdm20RetiredIssuerVerifier
         out string verifiedIssuerDid, out JsonElement verifiedSubject) =>
         CheckCore(credentialJwt, null, activeIssuerDids, retiredCredentialPins,
             expectedHolderDid, expectedCredentialType, expectedSubjectContextUri,
-            now, out verifiedIssuerDid, out verifiedSubject);
+            now, null, out verifiedIssuerDid, out verifiedSubject);
 
     /// <summary>
     /// Also require the actual issuer's authentic 60-second private status JWT.
@@ -58,7 +58,28 @@ public static class Vcdm20RetiredIssuerVerifier
         return CheckCore(credentialJwt, revocationSnapshotJwt,
             activeIssuerDids, retiredCredentialPins, expectedHolderDid,
             expectedCredentialType, expectedSubjectContextUri, now,
-            out verifiedIssuerDid, out verifiedSubject);
+            null, out verifiedIssuerDid, out verifiedSubject);
+    }
+
+    /// <summary>
+    /// Require signed issuer status observed no earlier than an independently
+    /// chosen verifier incident cutoff, in addition to exact retired JWT pins.
+    /// An issuer signature does not prove completeness or live non-revocation.
+    /// </summary>
+    public static Vcdm20VerifierPolicyResult CheckWithStatusAfterObservationCutoff(
+        string credentialJwt, string revocationSnapshotJwt,
+        IReadOnlyCollection<string> activeIssuerDids,
+        IReadOnlyCollection<Vcdm20RetiredCredentialPin> retiredCredentialPins,
+        string expectedHolderDid, string expectedCredentialType,
+        Uri expectedSubjectContextUri, DateTimeOffset now,
+        DateTimeOffset minimumObservedAt,
+        out string verifiedIssuerDid, out JsonElement verifiedSubject)
+    {
+        ArgumentNullException.ThrowIfNull(revocationSnapshotJwt);
+        return CheckCore(credentialJwt, revocationSnapshotJwt,
+            activeIssuerDids, retiredCredentialPins, expectedHolderDid,
+            expectedCredentialType, expectedSubjectContextUri,
+            now, minimumObservedAt, out verifiedIssuerDid, out verifiedSubject);
     }
 
     private static Vcdm20VerifierPolicyResult CheckCore(
@@ -67,6 +88,7 @@ public static class Vcdm20RetiredIssuerVerifier
         IReadOnlyCollection<Vcdm20RetiredCredentialPin> retiredCredentialPins,
         string expectedHolderDid, string expectedCredentialType,
         Uri expectedSubjectContextUri, DateTimeOffset now,
+        DateTimeOffset? minimumObservedAt,
         out string verifiedIssuerDid, out JsonElement verifiedSubject)
     {
         ArgumentNullException.ThrowIfNull(credentialJwt);
@@ -79,7 +101,10 @@ public static class Vcdm20RetiredIssuerVerifier
         verifiedIssuerDid = string.Empty;
         verifiedSubject = default;
 
-        if (string.IsNullOrWhiteSpace(credentialJwt) ||
+        if ((minimumObservedAt is DateTimeOffset earliest &&
+                (earliest < DateTimeOffset.UnixEpoch || earliest > now ||
+                 revocationSnapshotJwt is null)) ||
+            string.IsNullOrWhiteSpace(credentialJwt) ||
             credentialJwt.Length > MaximumCredentialLength ||
             activeIssuerDids.Count > MaximumActiveIssuers ||
             retiredCredentialPins.Count > MaximumRetiredCredentialPins ||
@@ -174,8 +199,11 @@ public static class Vcdm20RetiredIssuerVerifier
         var result = Vcdm20VerifierPolicyResult.SignedButStatusUnchecked;
         if (revocationSnapshotJwt is not null)
         {
-            Vcdm20RevocationCheckResult status = Vcdm20RevocationSnapshot.Check(
-                revocationSnapshotJwt, credentialJwt, authenticIssuer, now);
+            Vcdm20RevocationCheckResult status = minimumObservedAt is DateTimeOffset statusCutoff
+                ? Vcdm20RevocationSnapshot.CheckWithObservationCutoff(
+                    revocationSnapshotJwt, credentialJwt, authenticIssuer, now, statusCutoff)
+                : Vcdm20RevocationSnapshot.Check(
+                    revocationSnapshotJwt, credentialJwt, authenticIssuer, now);
             if (status == Vcdm20RevocationCheckResult.Revoked)
             {
                 return Vcdm20VerifierPolicyResult.IssuerReportedRevoked;
