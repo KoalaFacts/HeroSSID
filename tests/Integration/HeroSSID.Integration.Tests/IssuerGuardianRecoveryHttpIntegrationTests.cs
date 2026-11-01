@@ -282,6 +282,119 @@ public sealed class IssuerGuardianRecoveryHttpIntegrationTests(DatabaseFixture f
         Assert.Equal(HttpStatusCode.NoContent, unknown.StatusCode);
     }
 
+    [Fact]
+    public async Task PolicyBoundChallengeEnforcesIssuancePinsAcrossIndependentHttpHosts()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        await using var firstHost = NewHost();
+        await using var secondHost = NewHost();
+        using var first = firstHost.CreateClient();
+        using var second = secondHost.CreateClient();
+        string issueToken = await GetTokenAsync(first, "credential:verify did:manage").ConfigureAwait(true);
+        string verifyToken = await GetTokenAsync(second, "credential:verify").ConfigureAwait(true);
+        using var previous = NewKey();
+        using var successor = NewKey();
+        using var guardianOne = NewKey();
+        using var guardianTwo = NewKey();
+        using var rogue = NewKey();
+        string oldDid = DidFromKey(previous);
+        string newDid = DidFromKey(successor);
+        string firstPin = DidFromKey(guardianOne);
+        string secondPin = DidFromKey(guardianTwo);
+        string roguePin = DidFromKey(rogue);
+        var boundIssue = new
+        {
+            audience = Audience, previousIssuerDid = oldDid, lifetimeSeconds = 120,
+            trustedGuardianDids = new[] { firstPin, secondPin },
+            requiredGuardianSignatures = 2
+        };
+        using var issued = await PostAsync(first, ChallengeRoute, boundIssue,
+            issueToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Created, issued.StatusCode);
+        JsonElement response = await ReadJsonAsync(issued).ConfigureAwait(true);
+        Assert.True(response.GetProperty("guardianPolicyBound").GetBoolean());
+        string nonce = response.GetProperty("nonce").GetString()!;
+
+        string rogueProof = IssuerGuardianRecovery.Create(oldDid, newDid,
+            successor.Export(KeyBlobFormat.RawPrivateKey),
+            new Dictionary<string, byte[]>
+            {
+                [firstPin] = guardianOne.Export(KeyBlobFormat.RawPrivateKey),
+                [roguePin] = rogue.Export(KeyBlobFormat.RawPrivateKey)
+            }, new Uri(Audience), nonce, TimeProvider.System);
+        using var bad = await PostAsync(second, VerifyRoute,
+            new
+            {
+                evidenceJson = rogueProof, audience = Audience, nonce,
+                trustedPreviousIssuerDid = oldDid,
+                trustedGuardianDids = new[] { firstPin, roguePin },
+                requiredGuardianSignatures = 2
+            }, verifyToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, bad.StatusCode);
+        JsonElement denied = await ReadJsonAsync(bad).ConfigureAwait(true);
+        Assert.Equal("Invalid", denied.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, denied.GetProperty("successorIssuerDid").ValueKind);
+
+        string genuineProof = IssuerGuardianRecovery.Create(oldDid, newDid,
+            successor.Export(KeyBlobFormat.RawPrivateKey),
+            new Dictionary<string, byte[]>
+            {
+                [firstPin] = guardianOne.Export(KeyBlobFormat.RawPrivateKey),
+                [secondPin] = guardianTwo.Export(KeyBlobFormat.RawPrivateKey)
+            }, new Uri(Audience), nonce, TimeProvider.System);
+        using var good = await PostAsync(second, VerifyRoute,
+            new
+            {
+                evidenceJson = genuineProof, audience = Audience, nonce,
+                trustedPreviousIssuerDid = oldDid,
+                trustedGuardianDids = new[] { secondPin, firstPin },
+                requiredGuardianSignatures = 2
+            }, verifyToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, good.StatusCode);
+        JsonElement accepted = await ReadJsonAsync(good).ConfigureAwait(true);
+        Assert.Equal("ValidRecoveryEvidence", accepted.GetProperty("status").GetString());
+        Assert.Equal(newDid, accepted.GetProperty("successorIssuerDid").GetString());
+
+        using var partial = await PostAsync(first, ChallengeRoute,
+            new { audience = Audience, previousIssuerDid = oldDid, trustedGuardianDids = new[] { firstPin, secondPin } },
+            issueToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, partial.StatusCode);
+        using var duplicate = await PostAsync(first, ChallengeRoute,
+            new { audience = Audience, previousIssuerDid = oldDid, trustedGuardianDids = new[] { firstPin, firstPin }, requiredGuardianSignatures = 2 },
+            issueToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, duplicate.StatusCode);
+
+        using var secondIssue = await PostAsync(first, ChallengeRoute, boundIssue,
+            issueToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Created, secondIssue.StatusCode);
+        string cancelledNonce = (await ReadJsonAsync(secondIssue).ConfigureAwait(true))
+            .GetProperty("nonce").GetString()!;
+        string cancelledProof = IssuerGuardianRecovery.Create(oldDid, newDid,
+            successor.Export(KeyBlobFormat.RawPrivateKey),
+            new Dictionary<string, byte[]>
+            {
+                [firstPin] = guardianOne.Export(KeyBlobFormat.RawPrivateKey),
+                [secondPin] = guardianTwo.Export(KeyBlobFormat.RawPrivateKey)
+            }, new Uri(Audience), cancelledNonce, TimeProvider.System);
+        string cancelToken = await GetTokenAsync(second, "credential:verify did:manage").ConfigureAwait(true);
+        using var cancelled = await PostAsync(second, CancelRoute,
+            new { audience = Audience, nonce = cancelledNonce, trustedPreviousIssuerDid = oldDid },
+            cancelToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NoContent, cancelled.StatusCode);
+        using var afterCancel = await PostAsync(first, VerifyRoute,
+            new
+            {
+                evidenceJson = cancelledProof, audience = Audience, nonce = cancelledNonce,
+                trustedPreviousIssuerDid = oldDid,
+                trustedGuardianDids = new[] { firstPin, secondPin },
+                requiredGuardianSignatures = 2
+            }, issueToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, afterCancel.StatusCode);
+        JsonElement invalid = await ReadJsonAsync(afterCancel).ConfigureAwait(true);
+        Assert.Equal("Invalid", invalid.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, invalid.GetProperty("successorIssuerDid").ValueKind);
+    }
+
     private async Task EnsureMigratedAsync()
     {
         await using var db = _fixture.CreateDbContext<HeroDbContext>();
