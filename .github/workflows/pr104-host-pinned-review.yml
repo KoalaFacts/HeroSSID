@@ -37,7 +37,8 @@ jobs:
               "src/Services/HeroSSID.Api/Features/Credentials/HostPinnedIssuerGuardianRecoveryHttpEndpoints.cs",
               "src/Services/HeroSSID.Api/Program.cs",
               "tests/Integration/HeroSSID.Integration.Tests/IssuerGuardianRecoveryHttpIntegrationTests.cs",
-          }          assert paths == expected, (paths, expected)
+          }
+          assert paths == expected, (paths, expected)
           PY
       - name: Install genuine independent Qwen2.5-Coder model
         shell: bash
@@ -109,7 +110,8 @@ jobs:
               "src/Services/HeroSSID.Api/Features/Credentials/HostPinnedIssuerGuardianRecoveryHttpEndpoints.cs",
               "src/Services/HeroSSID.Api/Program.cs",
               "tests/Integration/HeroSSID.Integration.Tests/IssuerGuardianRecoveryHttpIntegrationTests.cs",
-          }          assert set(Path("/tmp/pr104-files.txt").read_text().splitlines()) == expected
+          }
+          assert set(Path("/tmp/pr104-files.txt").read_text().splitlines()) == expected
           all_files = []
           for part in (1, 2):
               data = json.loads(Path(f"review-{part}.json").read_text())
