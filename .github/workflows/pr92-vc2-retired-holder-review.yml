@@ -3,7 +3,7 @@ name: Independent PR92 VC2 retired issuer holder proof review
 on:
   push:
     branches:
-      - review/pr92-vc2-retired-pins-20261101
+      - review/pr92-vc2-retired-holder-20261101
 
 permissions: {}
 
