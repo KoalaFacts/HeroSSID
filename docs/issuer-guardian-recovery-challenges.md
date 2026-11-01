@@ -45,3 +45,41 @@ The verifier checks its own tenant, HTTPS audience, original old-issuer pin, non
 `InMemoryPresentationChallengeStore` is thread-safe for a single process only and loses outstanding challenges on restart. A multi-replica verifier must use the already available **shared atomic implementation**, such as `PostgresPresentationChallengeStore`, with its existing approved schema. This adapter adds **no new table, migration or production database changes** and does not itself deploy any service. The caller must guarantee that challenge issuance is available only to appropriately authenticated recovery operators and that the trusted guardian policy was enrolled separately *before* old-key loss.
 
 Valid signatures prove control of **those signing private keys**, not the real-world identities of their custodians or organizational authority. The signed statement cannot establish that the previous key was actually lost or compromised. A successful returned candidate is **never** a DID transfer, automatic issuer trust promotion, permission to issue credentials, business authorization, holder consent or third-party Wallet interoperability. External verification and formal protocol conformance remain unproven.
+
+
+## Authenticated non-.NET HTTP adapter (opt-in)
+
+An authenticated relying-party backend can use the existing PostgreSQL-backed
+challenge store without handling guardian private keys or changing its schema.
+Both endpoints are under `/api/v1/credentials`:
+
+- `POST /issuer-guardian-recovery/challenge` requires **both**
+  `credential:verify` and `did:manage`. JSON:
+  `{"audience":"https://verifier.example/recovery","previousIssuerDid":"did:key:...","lifetimeSeconds":120}`.
+  Returns 201 with `audience`, `nonce`, `trustedPreviousIssuerDid` and `expiresAt`.
+  The verifier must authenticate the recovery operator **before** making this
+  request and convey the unsigned challenge over a trusted authenticated channel.
+- `POST /issuer-guardian-recovery/verify` requires `credential:verify`.
+  JSON: `{"evidenceJson":"<exact assembled JSON>","audience":"https://verifier.example/recovery","nonce":"<issued nonce>","trustedPreviousIssuerDid":"did:key:...","trustedGuardianDids":["did:key:...","did:key:..."],"requiredGuardianSignatures":2}`.
+  Returns `{"status":"ValidRecoveryEvidence","successorIssuerDid":"did:key:..."}`
+  only after real successor and independent guardian Ed25519 signatures and
+  successful **atomic** purpose-separated challenge consumption. Otherwise
+  returns `{"status":"Invalid","successorIssuerDid":null}`; malformed
+  policies fail with 400, and unavailable shared storage fails closed with 503.
+
+The `trustedGuardianDids` list is **caller-owned trust policy**, not a
+server-side guardian registry. The verifier must retrieve already enrolled
+guardian pins and the old issuer pin from trusted application storage and
+must never accept them blindly from the proposed recovery evidence or an
+untrusted requester. A `credential:verify` bearer can supply its own pins to
+this cryptographic verification service: signature verification alone cannot
+prove that a guardian was pre-enrolled or possesses organization authority.
+Production callers must enforce operator authorization, rate limiting and
+incident controls separately. No automatic DID ownership transfer, issuer
+enrollment, trust-registry mutation, human identity proof, business authority
+or third-party Wallet interoperability is performed.
+
+Real integration tests use two independent HTTP hosts, genuine successor and
+guardian Ed25519 keys, isolated PostgreSQL/Testcontainers storage, a forged
+guardian policy that does not consume the challenge, cross-host replay denial,
+cross-purpose refusal, anonymous/scope denial and invalid-input denial.
