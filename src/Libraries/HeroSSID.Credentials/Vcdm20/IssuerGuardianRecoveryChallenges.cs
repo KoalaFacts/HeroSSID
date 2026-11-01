@@ -43,6 +43,22 @@ public static class IssuerGuardianRecoveryChallenges
     }
 
     /// <summary>
+    /// Cancel a previously issued guardian recovery challenge without producing
+    /// recovery evidence. A different issuer or challenge purpose must remain untouched.
+    /// </summary>
+    public static bool TryCancel(IPresentationChallengeStore store,
+        Guid verifierTenantId, string trustedPreviousIssuerDid,
+        Uri verifierAudience, string nonce)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(trustedPreviousIssuerDid);
+        ArgumentNullException.ThrowIfNull(verifierAudience);
+        ArgumentNullException.ThrowIfNull(nonce);
+
+        throw new NotSupportedException("Recovery challenge cancellation is not implemented.");
+    }
+
+    /// <summary>
     /// Verify the genuine successor signature and independent pinned-guardian
     /// quorum, then consume the corresponding recovery-only nonce atomically
     /// before returning a candidate successor DID. Invalid/replayed requests

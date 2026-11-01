@@ -22,6 +22,7 @@ public sealed class IssuerGuardianRecoveryHttpIntegrationTests(DatabaseFixture f
 {
     private const string ChallengeRoute = "/api/v1/credentials/issuer-guardian-recovery/challenge";
     private const string VerifyRoute = "/api/v1/credentials/issuer-guardian-recovery/verify";
+    private const string CancelRoute = "/api/v1/credentials/issuer-guardian-recovery/cancel";
     private const string Audience = "https://verifier.example/issuer-guardian-recovery";
     private readonly DatabaseFixture _fixture = fixture;
 
@@ -181,6 +182,104 @@ public sealed class IssuerGuardianRecoveryHttpIntegrationTests(DatabaseFixture f
                 trustedGuardianDids = Array.Empty<string>(), requiredGuardianSignatures = 2
             }, verifyOnly).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
+    }
+
+    [Fact]
+    public async Task IncidentCancellationAcrossIndependentHostsBlocksGenuineRecovery()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        await using var firstHost = NewHost();
+        await using var secondHost = NewHost();
+        using var first = firstHost.CreateClient();
+        using var second = secondHost.CreateClient();
+        string issuerToken = await GetTokenAsync(first, "credential:verify did:manage").ConfigureAwait(true);
+        string cancelToken = await GetTokenAsync(second, "credential:verify did:manage").ConfigureAwait(true);
+        string verifyToken = await GetTokenAsync(first, "credential:verify").ConfigureAwait(true);
+
+        using var previous = NewKey();
+        using var successor = NewKey();
+        using var guardianOne = NewKey();
+        using var guardianTwo = NewKey();
+        string previousDid = DidFromKey(previous);
+        string successorDid = DidFromKey(successor);
+        string firstGuardianDid = DidFromKey(guardianOne);
+        string secondGuardianDid = DidFromKey(guardianTwo);
+
+        using var issued = await PostAsync(first, ChallengeRoute,
+            new { audience = Audience, previousIssuerDid = previousDid, lifetimeSeconds = 120 },
+            issuerToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Created, issued.StatusCode);
+        string nonce = (await ReadJsonAsync(issued).ConfigureAwait(true))
+            .GetProperty("nonce").GetString()!;
+        string proof = IssuerGuardianRecovery.Create(previousDid, successorDid,
+            successor.Export(KeyBlobFormat.RawPrivateKey),
+            new Dictionary<string, byte[]>
+            {
+                [firstGuardianDid] = guardianOne.Export(KeyBlobFormat.RawPrivateKey),
+                [secondGuardianDid] = guardianTwo.Export(KeyBlobFormat.RawPrivateKey)
+            }, new Uri(Audience), nonce, TimeProvider.System);
+
+        using var cancelled = await PostAsync(second, CancelRoute,
+            new { audience = Audience, nonce, trustedPreviousIssuerDid = previousDid },
+            cancelToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NoContent, cancelled.StatusCode);
+        using var repeated = await PostAsync(second, CancelRoute,
+            new { audience = Audience, nonce, trustedPreviousIssuerDid = previousDid },
+            cancelToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NoContent, repeated.StatusCode);
+
+        using var rejected = await PostAsync(first, VerifyRoute,
+            new
+            {
+                evidenceJson = proof, audience = Audience, nonce,
+                trustedPreviousIssuerDid = previousDid,
+                trustedGuardianDids = new[] { firstGuardianDid, secondGuardianDid },
+                requiredGuardianSignatures = 2
+            }, verifyToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, rejected.StatusCode);
+        JsonElement denied = await ReadJsonAsync(rejected).ConfigureAwait(true);
+        Assert.Equal("Invalid", denied.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, denied.GetProperty("successorIssuerDid").ValueKind);
+    }
+
+    [Fact]
+    public async Task RecoveryCancellationRequiresBothScopesAndDoesNotExposeUnknownChallenges()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        await using var host = NewHost();
+        using var client = host.CreateClient();
+        using var previous = NewKey();
+        string previousDid = DidFromKey(previous);
+        var cancellation = new
+        {
+            audience = Audience,
+            nonce = new string('A', 43),
+            trustedPreviousIssuerDid = previousDid
+        };
+
+        using var anonymous = await client.PostAsJsonAsync(CancelRoute, cancellation,
+            TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+
+        string verifyOnly = await GetTokenAsync(client, "credential:verify").ConfigureAwait(true);
+        using var cannotCancel = await PostAsync(client, CancelRoute,
+            cancellation, verifyOnly).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, cannotCancel.StatusCode);
+
+        string manageOnly = await GetTokenAsync(client, "did:manage").ConfigureAwait(true);
+        using var cannotCancelWithoutVerify = await PostAsync(client, CancelRoute,
+            cancellation, manageOnly).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, cannotCancelWithoutVerify.StatusCode);
+
+        string authorized = await GetTokenAsync(client, "credential:verify did:manage").ConfigureAwait(true);
+        using var invalidNonce = await PostAsync(client, CancelRoute,
+            new { audience = Audience, nonce = "short", trustedPreviousIssuerDid = previousDid },
+            authorized).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, invalidNonce.StatusCode);
+
+        using var unknown = await PostAsync(client, CancelRoute,
+            cancellation, authorized).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NoContent, unknown.StatusCode);
     }
 
     private async Task EnsureMigratedAsync()
