@@ -61,6 +61,21 @@ public static class Vcdm20RetiredIssuerVerifier
             out verifiedIssuerDid, out verifiedSubject);
     }
 
+    /// <summary>
+    /// Require signed issuer status observed no earlier than an independently
+    /// chosen verifier incident cutoff, in addition to exact retired JWT pins.
+    /// An issuer signature does not prove completeness or live non-revocation.
+    /// </summary>
+    public static Vcdm20VerifierPolicyResult CheckWithStatusAfterObservationCutoff(
+        string credentialJwt, string revocationSnapshotJwt,
+        IReadOnlyCollection<string> activeIssuerDids,
+        IReadOnlyCollection<Vcdm20RetiredCredentialPin> retiredCredentialPins,
+        string expectedHolderDid, string expectedCredentialType,
+        Uri expectedSubjectContextUri, DateTimeOffset now,
+        DateTimeOffset minimumObservedAt,
+        out string verifiedIssuerDid, out JsonElement verifiedSubject) =>
+        throw new NotSupportedException("Status observation cutoff not implemented");
+
     private static Vcdm20VerifierPolicyResult CheckCore(
         string credentialJwt, string? revocationSnapshotJwt,
         IReadOnlyCollection<string> activeIssuerDids,
