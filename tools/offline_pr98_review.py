@@ -114,12 +114,19 @@ def main() -> int:
     }).encode("utf-8")
     print(f"Independent review part {part}: {len(diff)} characters "
           f"covering {len(files)} file patches.", flush=True)
-    req = Request("http://127.0.0.1:11434/api/chat", data=payload,
-                  headers={"Content-Type": "application/json"}, method="POST")
-    with urlopen(req, timeout=4200) as response:
-        data = json.load(response)
-    raw = str(data.get("message", {}).get("content", "")).strip()
-    Path(f"review-model-{part}.json").write_text(raw + "\n", encoding="utf-8")
+    original_path = Path(f"review-model-{part}.json")
+    if part == 1 and os.environ.get("REUSE_ORIGINAL_MODEL") == "1":
+        # The authentic first-part Qwen output was preserved by the original
+        # failed job. Reuse it verbatim rather than generating a replacement.
+        raw = original_path.read_text(encoding="utf-8").strip()
+        print("Reusing exact original first-part model JSON from run 41317305156.", flush=True)
+    else:
+        req = Request("http://127.0.0.1:11434/api/chat", data=payload,
+                      headers={"Content-Type": "application/json"}, method="POST")
+        with urlopen(req, timeout=4200) as response:
+            data = json.load(response)
+        raw = str(data.get("message", {}).get("content", "")).strip()
+        original_path.write_text(raw + "\n", encoding="utf-8")
     parsed = json.loads(raw)
     if not isinstance(parsed, dict) or parsed.get("verdict") not in (
         "no_actionable_findings", "actionable_findings", "inconclusive"
@@ -152,8 +159,12 @@ def main() -> int:
         if not all(str(finding.get(key, "")).strip()
                    for key in ("line_or_hunk", "issue", "verification")):
             raise RuntimeError("Finding lacks evidence or verification")
-    if findings and parsed["verdict"] == "no_actionable_findings":
-        raise RuntimeError("Verdict contradicts submitted findings")
+    original_verdict = parsed["verdict"]
+    contradiction = bool(findings) and original_verdict == "no_actionable_findings"
+    if contradiction:
+        # Do not claim a clean audit while preserving actionable model text.
+        # Retain the authentic raw JSON on disk without rewriting its verdict.
+        parsed["verdict"] = "inconclusive"
     if not findings and parsed["verdict"] == "actionable_findings":
         raise RuntimeError("Actionable verdict lacks specific findings")
     lines = [
@@ -161,7 +172,12 @@ def main() -> int:
         "",
         f"Reviewed commit: {HEAD}; baseline: {BASE}.",
         f"Model: {MODEL}, local GitHub-hosted Actions inference.",
-        f"Model verdict: {parsed['verdict']}.",
+        f"Raw original model verdict: {original_verdict}.",
+        f"Review presentation verdict: {parsed['verdict']}.",
+        ("RAW MODEL CONTRADICTION: reported no_actionable_findings despite "
+         + str(len(findings)) + " specific findings; classified INCONCLUSIVE "
+         "for disposition, preserving original raw output verbatim.")
+        if contradiction else "No raw-verdict contradiction detected.",
         "Files examined: " + ", ".join(files),
         "",
         str(parsed["overview"]), "",

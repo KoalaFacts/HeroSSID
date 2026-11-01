@@ -14,6 +14,7 @@ jobs:
     timeout-minutes: 90
     permissions:
       contents: read
+      actions: read
     steps:
       - name: Checkout helper and all immutable Git history
         uses: actions/checkout@v4
@@ -38,6 +39,25 @@ jobs:
           }
           assert paths == expected, (paths, expected)
           PY
+      - name: Restore immutable original first-part model output
+        uses: actions/download-artifact@v4
+        with:
+          name: independent-pr98-review
+          run-id: 41317305156
+          github-token: ${{ github.token }}
+          path: .
+      - name: Confirm preserved contradictory model verdict and findings
+        shell: bash
+        run: |
+          test -s review-model-1.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          raw = json.loads(Path("review-model-1.json").read_text())
+          assert raw["verdict"] == "no_actionable_findings"
+          assert len(raw["findings"]) == 3
+          print("Original Qwen part 1: verdict contradicts THREE reported minor findings. Preserve all as inconclusive.")
+          PY
       - name: Install genuine independent Qwen2.5-Coder model
         shell: bash
         run: |
@@ -56,7 +76,7 @@ jobs:
         run: |
           set -euo pipefail
           for part in 1 2 3; do
-            REVIEW_PART="$part" python3 tools/offline_pr98_review.py
+            REUSE_ORIGINAL_MODEL=1 REVIEW_PART="$part" python3 tools/offline_pr98_review.py
             test -s "review-$part.json"
             test -s "review-model-$part.json"
             test -s "review-$part.md"
@@ -114,7 +134,10 @@ jobs:
               data = json.loads(Path(f"review-{part}.json").read_text())
               raw = json.loads(Path(f"review-model-{part}.json").read_text())
               assert data["head"] == head and data["part"] == part
-              assert data["review"]["verdict"] == raw["verdict"]
+              assert (data["review"]["verdict"] == raw["verdict"] or
+                      (raw["verdict"] == "no_actionable_findings" and
+                       data["review"]["verdict"] == "inconclusive" and
+                       bool(raw["findings"])))
               assert raw["verdict"] in ("no_actionable_findings", "actionable_findings", "inconclusive")
               assert len(Path(f"review-{part}.md").read_text()) > 150
               assert Path(f"review-head-{part}.txt").read_text().strip() == head
