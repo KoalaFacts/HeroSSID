@@ -28,9 +28,29 @@ Content-Type: application/json
   "expectedHolderDid": "did:key:z<expected holder>",
   "expectedCredentialType": "MembershipCredential",
   "subjectContextUri": "https://issuer.example/contexts/membership/v1",
-  "revocationSnapshot": "<issuer-signed herossid-vc2-revocation-snapshot+jwt>"
+  "revocationSnapshot": "<issuer-signed herossid-vc2-revocation-snapshot+jwt>",
+  "minimumStatusObservedAt": "2026-11-01T00:00:10Z"
 }
 ```
+
+The optional `minimumStatusObservedAt` is a **verifier-owned lower
+bound** for the issuer-signed observation timestamp, such as a trusted incident
+or refresh cutoff. It must be a nonfuture instant at or after the Unix epoch.
+After checking the original issuer Ed25519 signature and exact credential,
+the server checks that the signed snapshot's `iat` is at or after this cutoff
+*and* retains the existing 60-second expiry limit. Older authentic snapshots
+return `Invalid` with null claims, whether their digest set says revoked or
+not listed; future or pre-epoch caller cutoffs return HTTP 400. When omitted,
+the previous 60-second semantics remain unchanged.
+
+Do not supply this verifier security policy from a holder, credential or other
+unverified input. Whole-second signed `iat` values are compared conservatively
+against a fractional-second cutoff. The signature-only `/vcdm20/verify`
+route explicitly returns HTTP 400 when the cutoff is supplied, rather than
+silently ignoring a status requirement. Other HTTP profile routes have
+different contracts and must not be presumed to enforce this option.
+A signed observation time still does **not** prove the issuer actually fetched
+complete upstream revocation records or guarantee live non-revocation.
 
 Successful authenticated HTTP validation returns **200** with exactly
 one of these deliberately narrow states:

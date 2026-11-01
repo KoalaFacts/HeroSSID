@@ -138,6 +138,90 @@ public sealed class Vcdm20CredentialStatusVerificationHttpTests(AspireWebApplica
         }
     }
 
+    [Fact]
+    public async Task VerifierCutoffRejectsAuthenticPreIncidentCleanStatusWithoutClaims()
+    {
+        using var issuer = NewKey();
+        using var holder = NewKey();
+        string issuerDid = Did(issuer);
+        string holderDid = Did(holder);
+        string credential = Issue(issuer, issuerDid, holderDid);
+        DateTimeOffset now = TimeProvider.System.GetUtcNow();
+        string oldSnapshot = Vcdm20RevocationSnapshot.Create(
+            issuerDid, [], Seed(issuer), now.AddSeconds(-25), TimeProvider.System);
+
+        // The snapshot is genuinely signed and would pass the legacy check.
+        using var legacy = await _client.AuthorizedPostAsJsonAsync(Path,
+            Request(credential, issuerDid, holderDid, oldSnapshot)).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, legacy.StatusCode);
+        var oldResult = await legacy.Content.ReadFromJsonAsync<JsonElement>().ConfigureAwait(true);
+        Assert.Equal("SignedNotListed", oldResult.GetProperty("status").GetString());
+
+        using var rejected = await _client.AuthorizedPostAsJsonAsync(Path,
+            CutoffRequest(credential, issuerDid, holderDid, oldSnapshot,
+                now.AddSeconds(-10))).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, rejected.StatusCode);
+        var result = await rejected.Content.ReadFromJsonAsync<JsonElement>().ConfigureAwait(true);
+        Assert.Equal("Invalid", result.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, result.GetProperty("verifiedSubject").ValueKind);
+    }
+
+    [Fact]
+    public async Task VerifierCutoffAcceptsFreshStatusButRejectsFuturePolicy()
+    {
+        using var issuer = NewKey();
+        using var holder = NewKey();
+        string issuerDid = Did(issuer);
+        string holderDid = Did(holder);
+        string credential = Issue(issuer, issuerDid, holderDid);
+        DateTimeOffset now = TimeProvider.System.GetUtcNow();
+        string current = Vcdm20RevocationSnapshot.Create(
+            issuerDid, [], Seed(issuer), now, TimeProvider.System);
+        using var fresh = await _client.AuthorizedPostAsJsonAsync(Path,
+            CutoffRequest(credential, issuerDid, holderDid, current,
+                now.AddSeconds(-10))).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, fresh.StatusCode);
+        var accepted = await fresh.Content.ReadFromJsonAsync<JsonElement>().ConfigureAwait(true);
+        Assert.Equal("SignedNotListed", accepted.GetProperty("status").GetString());
+
+        using var future = await _client.AuthorizedPostAsJsonAsync(Path,
+            CutoffRequest(credential, issuerDid, holderDid, current,
+                now.AddMinutes(2))).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, future.StatusCode);
+    }
+
+    [Fact]
+    public async Task StatusUncheckedRouteDoesNotSilentlyIgnoreVerifierCutoff()
+    {
+        using var issuer = NewKey();
+        using var holder = NewKey();
+        string issuerDid = Did(issuer);
+        string holderDid = Did(holder);
+        string credential = Issue(issuer, issuerDid, holderDid);
+        DateTimeOffset now = TimeProvider.System.GetUtcNow();
+        string status = Vcdm20RevocationSnapshot.Create(
+            issuerDid, [], Seed(issuer), now, TimeProvider.System);
+
+        using var response = await _client.AuthorizedPostAsJsonAsync(
+            "/api/v1/credentials/vcdm20/verify",
+            CutoffRequest(credential, issuerDid, holderDid, status,
+                now.AddSeconds(-10))).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    private static object CutoffRequest(string credential, string issuerDid,
+        string holderDid, string snapshot, DateTimeOffset minimumObservedAt) =>
+        new
+        {
+            Credential = credential,
+            TrustedIssuerDid = issuerDid,
+            ExpectedHolderDid = holderDid,
+            ExpectedCredentialType = CredentialType,
+            SubjectContextUri = Context,
+            RevocationSnapshot = snapshot,
+            MinimumStatusObservedAt = minimumObservedAt
+        };
+
     private static object Request(string credential, string issuerDid, string holderDid, string snapshot) =>
         new
         {

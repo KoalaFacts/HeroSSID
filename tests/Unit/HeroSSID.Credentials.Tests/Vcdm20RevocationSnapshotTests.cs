@@ -149,6 +149,70 @@ public sealed class Vcdm20RevocationSnapshotTests
         Assert.Equal("active", accepted.GetProperty("membership").GetString());
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void IndependentVerifierRefusesPreCutoffAuthenticStatus(bool revoked)
+    {
+        DateTimeOffset now = _clock.GetUtcNow();
+        string credential = Issue("member");
+        string snapshot = Vcdm20RevocationSnapshot.Create(
+            _issuer.Did, revoked ? [credential] : [], _issuer.Seed,
+            now.AddSeconds(-25), _clock);
+
+        // The existing 60-second check accepts both authentic old states.
+        Assert.Equal(revoked ? Vcdm20RevocationCheckResult.Revoked :
+            Vcdm20RevocationCheckResult.SignedNotListed,
+            Vcdm20RevocationSnapshot.Check(snapshot, credential, _issuer.Did, now));
+
+        // The relying party learned of an incident ten seconds ago and must
+        // refuse even a signed clean status observed before that incident.
+        Assert.Equal(Vcdm20RevocationCheckResult.Invalid,
+            CheckAfterVerifierCutoff(snapshot, credential, now, now.AddSeconds(-10)));
+    }
+
+    [Fact]
+    public void NewIssuerObservationPassesVerifierCutoffAndFutureCutoffIsDenied()
+    {
+        DateTimeOffset now = _clock.GetUtcNow();
+        string credential = Issue("member");
+        string snapshot = Vcdm20RevocationSnapshot.Create(
+            _issuer.Did, [], _issuer.Seed, now, _clock);
+        Assert.Equal(Vcdm20RevocationCheckResult.SignedNotListed,
+            CheckAfterVerifierCutoff(snapshot, credential, now, now.AddSeconds(-10)));
+        Assert.Equal(Vcdm20RevocationCheckResult.Invalid,
+            CheckAfterVerifierCutoff(snapshot, credential, now, now.AddSeconds(1)));
+    }
+
+    private Vcdm20RevocationCheckResult CheckAfterVerifierCutoff(
+        string snapshot, string credential, DateTimeOffset now, DateTimeOffset minimumObservedAt) =>
+        Vcdm20RevocationSnapshot.CheckWithObservationCutoff(
+            snapshot, credential, _issuer.Did, now, minimumObservedAt);
+
+    [Fact]
+    public void FractionalSecondCutoffNeverRoundsBackwardToAcceptOlderStatus()
+    {
+        DateTimeOffset signedAt = _clock.GetUtcNow();
+        string credential = Issue("member");
+        string snapshot = Vcdm20RevocationSnapshot.Create(
+            _issuer.Did, [], _issuer.Seed, signedAt, _clock);
+
+        // The verifier time is LATER than the fractional cutoff, so this
+        // regression reaches the signed iat comparison rather than merely
+        // rejecting a cutoff in the future.
+        // The issuer's signed iat stores whole seconds, not DateTimeOffset
+        // ticks. Compare the inclusive lower bound to that signed instant.
+        DateTimeOffset signedSecond = DateTimeOffset.FromUnixTimeSeconds(
+            signedAt.ToUnixTimeSeconds());
+        DateTimeOffset now = signedAt.AddMilliseconds(500);
+        DateTimeOffset cutoff = signedSecond.AddTicks(1);
+        Assert.True(cutoff < now);
+        Assert.Equal(Vcdm20RevocationCheckResult.SignedNotListed,
+            CheckAfterVerifierCutoff(snapshot, credential, now, signedSecond));
+        Assert.Equal(Vcdm20RevocationCheckResult.Invalid,
+            CheckAfterVerifierCutoff(snapshot, credential, now, cutoff));
+    }
+
     private string Issue(string membership)
     {
         var now = _clock.GetUtcNow();
