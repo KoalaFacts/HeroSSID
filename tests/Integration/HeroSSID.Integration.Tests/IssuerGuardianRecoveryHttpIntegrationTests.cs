@@ -766,6 +766,107 @@ public sealed class IssuerGuardianRecoveryHttpIntegrationTests(DatabaseFixture f
             .GetProperty("status").GetString());
     }
 
+    [Fact]
+    public async Task OperatorRevocationOfExactEnrollmentBlocksHostRecoveryWithoutConsumingNonce()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        using var previous = NewKey();
+        using var successor = NewKey();
+        using var firstGuardian = NewKey();
+        using var secondGuardian = NewKey();
+        string oldDid = DidFromKey(previous);
+        string successorDid = DidFromKey(successor);
+        string firstDid = DidFromKey(firstGuardian);
+        string secondDid = DidFromKey(secondGuardian);
+        DateTimeOffset now = TimeProvider.System.GetUtcNow();
+        string signedPolicy = IssuerGuardianRecoveryEnrollment.Create(
+            oldDid, previous.Export(KeyBlobFormat.RawPrivateKey),
+            [firstDid, secondDid], 2, new Uri(Audience),
+            now.AddMinutes(-1), now.AddHours(2));
+        string digest = IssuerGuardianRecoveryEnrollment.Fingerprint(signedPolicy);
+        var trusted = new Dictionary<string, string?>
+        {
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:TenantId"] =
+                HeroDbContext.DefaultTenantId.ToString(),
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:TrustedPreviousIssuerDid"] = oldDid,
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:Audience"] = Audience,
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:SignedEnrollmentJwt"] = signedPolicy,
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:ApprovedSha256"] = digest
+        };
+        await using var host = NewHost(trusted);
+        using var client = host.CreateClient();
+        string authorized = await GetTokenAsync(client, "credential:verify did:manage")
+            .ConfigureAwait(true);
+        var issue = new
+        {
+            audience = Audience,
+            trustedPreviousIssuerDid = oldDid,
+            lifetimeSeconds = 120
+        };
+        using var initial = await PostAsync(client, HostPinnedChallengeRoute, issue,
+            authorized).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Created, initial.StatusCode);
+        string nonce = (await ReadJsonAsync(initial).ConfigureAwait(true))
+            .GetProperty("nonce").GetString()!;
+        string evidence = IssuerGuardianRecovery.Create(
+            oldDid, successorDid, successor.Export(KeyBlobFormat.RawPrivateKey),
+            new Dictionary<string, byte[]>
+            {
+                [firstDid] = firstGuardian.Export(KeyBlobFormat.RawPrivateKey),
+                [secondDid] = secondGuardian.Export(KeyBlobFormat.RawPrivateKey)
+            }, new Uri(Audience), nonce, TimeProvider.System);
+        var verify = new
+        {
+            audience = Audience,
+            trustedPreviousIssuerDid = oldDid,
+            nonce,
+            evidenceJson = evidence
+        };
+
+        // The operator revokes the exact pre-incident approved fingerprint via a
+        // reloadable configuration provider while the process remains alive.
+        host.Services.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>()[
+            "IssuerGuardianEnrollmentTrust:RevokedSha256:0"] = digest;
+
+        using var blockedVerify = await PostAsync(client, HostPinnedVerifyRoute,
+            verify, authorized).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, blockedVerify.StatusCode);
+        JsonElement body = await ReadJsonAsync(blockedVerify).ConfigureAwait(true);
+        Assert.Equal("Invalid", body.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("successorIssuerDid").ValueKind);
+
+        using var blockedIssue = await PostAsync(client, HostPinnedChallengeRoute,
+            issue, authorized).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, blockedIssue.StatusCode);
+
+        // A separate verifier replica configured with the same denied digest
+        // must also reject the genuine signed proof, even without a restart race.
+        var deniedConfig = new Dictionary<string, string?>(trusted)
+        {
+            ["IssuerGuardianEnrollmentTrust:RevokedSha256:0"] = digest
+        };
+        await using var deniedHost = NewHost(deniedConfig);
+        using var deniedClient = deniedHost.CreateClient();
+        string deniedToken = await GetTokenAsync(deniedClient, "credential:verify")
+            .ConfigureAwait(true);
+        using var denied = await PostAsync(deniedClient, HostPinnedVerifyRoute,
+            verify, deniedToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, denied.StatusCode);
+        Assert.Equal("Invalid", (await ReadJsonAsync(denied).ConfigureAwait(true))
+            .GetProperty("status").GetString());
+
+        // Malformed operator revocations must fail closed before the host serves.
+        var invalid = new Dictionary<string, string?>(trusted)
+        {
+            ["IssuerGuardianEnrollmentTrust:RevokedSha256:0"] = "not-a-sha256"
+        };
+        Assert.Throws<InvalidOperationException>(() =>
+        {
+            using var invalidHost = NewHost(invalid);
+            using var invalidClient = invalidHost.CreateClient();
+        });
+    }
+
     private async Task EnsureMigratedAsync()
     {
         // xUnit v3 may run facts in this class concurrently. These facts share
