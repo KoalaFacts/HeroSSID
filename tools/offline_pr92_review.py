@@ -73,7 +73,7 @@ def get_shard(diff: str, part: int) -> tuple[str, list[str]]:
                if x.startswith("diff --git ")]
     mapped = {}
     for patch in patches:
-        match = re.match(r"diff --git a/(.+?) b/(.+?)\\n", patch)
+        match = re.match(r"diff --git a/(.+?) b/(.+?)\n", patch)
         if match is None:
             raise RuntimeError("Malformed git patch header")
         name = match.group(2)
