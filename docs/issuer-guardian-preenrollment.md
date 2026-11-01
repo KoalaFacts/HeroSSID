@@ -187,5 +187,86 @@ not real-world guardian identity, DID control transfer, issuer trust promotion,
 business authority, end-user consent, W3C enrollment conformance or independent
 wallet interoperability.
 
+## Host-controlled pre-incident enrollment over authenticated HTTP (opt-in)
+
+For backends that cannot reliably enforce the preceding *caller-supplied* pin
+provenance, HeroSSID also offers two opt-in **host-pinned** recovery routes.
+Unlike `enrolled-challenge` / `enrolled-verify`, these **never accept the
+signed enrollment JWT or approved SHA-256 from the HTTP request**. The host
+operator must securely install an independently approved original old-issuer
+JWT and its exact uppercase SHA-256 **before issuer-key loss**, in the verifier
+deployment's protected configuration. Startup refuses malformed or duplicate
+registrations rather than treating the caller's payload as a fallback.
+
+Operator-controlled `IConfiguration` (supply via a secret/config provider rather
+than checking actual organization policy into source control):
+
+```text
+IssuerGuardianEnrollmentTrust:Registrations:0:TenantId = <verifier tenant GUID>
+IssuerGuardianEnrollmentTrust:Registrations:0:TrustedPreviousIssuerDid = <old did:key>
+IssuerGuardianEnrollmentTrust:Registrations:0:Audience = https://verifier.example/issuer-guardian-recovery
+IssuerGuardianEnrollmentTrust:Registrations:0:SignedEnrollmentJwt = <original old-key-signed enrollment JWT>
+IssuerGuardianEnrollmentTrust:Registrations:0:ApprovedSha256 = <pre-incident approved uppercase SHA-256>
+```
+
+At most 256 records are supported, with unique exact
+`(tenant_id, previous issuer DID, HTTPS audience)` keys. An absent record
+fails closed; a bad digest/signature or expired signed enrollment also fails
+before challenge issuance. Records are loaded as an immutable process-local
+snapshot; every verifier instance must have the **same protected, independently
+approved policy inventory**. Registry changes require a controlled host
+restart/rollout and an operator-owned incident and revocation process. The
+JWT is not a signing seed, but its trust approval and integrity are sensitive.
+
+1. `POST /api/v1/credentials/issuer-guardian-recovery/host-pinned-challenge`
+   needs **both** `credential:verify` and `did:manage`. Body:
+   ```json
+   {
+     "audience": "https://verifier.example/issuer-guardian-recovery",
+     "trustedPreviousIssuerDid": "did:key:...",
+     "lifetimeSeconds": 120
+   }
+   ```
+   The authenticated tenant and the exact DID/audience select a host-approved
+   enrollment. A genuine old-key-signed enrollment and pinned original digest
+   are verified again. A purpose-bound v3 one-use challenge is returned as 201,
+   including `nonce` and `exactEnrollmentBound: true`; missing/mismatched
+   registrations or invalid input return 400.
+
+2. The independent successor and enrolled guardians sign the bound recovery
+   challenge. `POST /api/v1/credentials/issuer-guardian-recovery/host-pinned-verify`
+   needs `credential:verify`. Body:
+   ```json
+   {
+     "audience": "https://verifier.example/issuer-guardian-recovery",
+     "trustedPreviousIssuerDid": "did:key:...",
+     "nonce": "<issued nonce>",
+     "evidenceJson": "<successor and guardian signed evidence>"
+   }
+   ```
+   The server independently reloads its own original enrollment and digest,
+   validates all old-issuer, successor and guardian Ed25519 signatures and the
+   exact policy, then atomically consumes the shared PostgreSQL challenge.
+   Only successful validation returns `ValidRecoveryEvidence` and a
+   *candidate* new DID; otherwise `Invalid` with a null candidate. Invalid
+   shape is 400 and unavailable shared storage is 503.
+
+The existing tenant/purpose-bound `/issuer-guardian-recovery/cancel` route
+still cancels a pending v3 nonce across hosts. A 204 cannot undo an already
+accepted proof or prove which side won a concurrent race. Legacy v1/v2
+verification cannot redeem host-pinned v3 challenges. Additional unrecognized
+request members are rejected instead of silently accepting caller-provided
+policy fields.
+
+**Trust limit:** protected server configuration is stronger than accepting a
+claimant's self-computed pin, but HeroSSID still cannot independently attest
+that a *human operator* actually approved the enrollment before the incident,
+or that the configured registry has not been compromised. Operation scopes,
+real Ed25519 proof and one-time nonce are **not** proof of DID ownership
+transfer, business recovery authority, legal or human identity, Wallet consent,
+W3C conformance or external wallet interoperability. Relying-party governance,
+incident approvals, audit, rate limiting and any eventual trust-list update
+remain separate requirements.
+
 Tests: `dotnet test tests/Unit/HeroSSID.Credentials.Tests/HeroSSID.Credentials.Tests.csproj`
 and the full repository Build/Test/Security/CodeQL gates.
