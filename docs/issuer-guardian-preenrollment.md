@@ -1,4 +1,4 @@
-# Pre-enrolled guardian recovery policy (opt-in .NET 10)
+# Pre-enrolled guardian recovery policy (opt-in .NET 10 SDK and authenticated HTTP)
 
 An issuer that **still controls its old Ed25519 did:key** can pre-sign its
 verifier-specific guardian roster and threshold before losing its original key.
@@ -90,7 +90,9 @@ challenges remain cancelable through the existing issuer/purpose-bound
 `IssuerGuardianRecoveryChallenges.TryCancel` operation.
 
 This feature adds no database table, schema, migration, hosted key custody,
-HTTP route, Wallet consent UI, package publication or deployment. An issuer
+Wallet consent UI, package publication or deployment. Its optional authenticated
+HTTP adapter exposes the existing pre-enrollment checks without independently
+storing or validating policy approval. An issuer
 signature proves old-key possession; a guardian signature proves possession
 of its signing key, **not** the physical identity or business authority of
 its operator. Neither signed enrollment nor completed quorum proves a key
@@ -98,6 +100,92 @@ was lost, DID ownership transferred, issuer trust should change, a holder
 approved disclosure, or third-party wallet interoperability. The exact JWT
 and fingerprint are a private HeroSSID enrollment evidence profile, **not**
 W3C VC/standard OpenID4VP enrollment credentials.
+
+## Authenticated HTTP verification for non-.NET relying parties (opt-in)
+
+The existing .NET 10 SDK remains the source of the signing and verifier
+semantics. The authenticated API now exposes the same **v3 exact original-JWT
+fingerprint-bound recovery challenge** without any new PostgreSQL table.
+
+**Before an incident:** an issuer with its old Ed25519 private key creates a
+signed enrollment using the SDK (or an independently compatible implementation).
+The relying party separately approves and durably stores the original JWT,
+its exact uppercase SHA-256 fingerprint, the old issuer DID and HTTPS audience.
+An arbitrary fingerprint calculated from an incident request **does not count**
+as independent pre-enrollment. Neither HTTP endpoint stores or proves the
+independent approval record.
+
+**During a recovery incident:** the relying-party backend retrieves its own
+previously approved data and calls these authenticated endpoints, both under
+`/api/v1/credentials`:
+
+1. `POST /issuer-guardian-recovery/enrolled-challenge` requires **both**
+   `credential:verify` and `did:manage` bearer scopes. JSON body:
+
+   ```json
+   {
+     "audience": "https://verifier.example/recovery",
+     "trustedPreviousIssuerDid": "did:key:...",
+     "signedEnrollmentJwt": "<original old-issuer-signed compact JWT>",
+     "independentlyPinnedSha256": "<uppercase SHA-256 approved before incident>",
+     "lifetimeSeconds": 120
+   }
+   ```
+
+   The verifier validates the genuine old DID signature, exact JWT fingerprint,
+   HTTPS audience, live enrollment validity, two-to-five distinct guardian
+   policy and quorum before creating any challenge. Returns **201** with
+   `nonce`, `expiresAt`, `audience`, `trustedPreviousIssuerDid`, and
+   `exactEnrollmentBound: true`. Incorrect/forged/expired enrollments return
+   400 and allocate no nonce; absent scopes return 401/403.
+
+2. An independent successor key and the enrolled guardian keys sign the exact
+   audience/nonce-bound evidence using
+   `IssuerGuardianRecoveryDistributed` or a compatible signer. Then
+   `POST /issuer-guardian-recovery/enrolled-verify` requires
+   `credential:verify` and accepts:
+
+   ```json
+   {
+     "audience": "https://verifier.example/recovery",
+     "nonce": "<issued nonce>",
+     "trustedPreviousIssuerDid": "did:key:...",
+     "signedEnrollmentJwt": "<same original approved JWT>",
+     "independentlyPinnedSha256": "<same original approved SHA-256>",
+     "evidenceJson": "<exact assembled guardian/successor signature JSON>"
+   }
+   ```
+
+   On success this returns HTTP **200**
+   `{"status":"ValidRecoveryEvidence","successorIssuerDid":"did:key:..."}`.
+   Failure returns `{"status":"Invalid","successorIssuerDid":null}`,
+   without releasing a candidate. The verifier rechecks enrollment and all
+   genuine Ed25519 signatures before atomically consuming the nonce in the
+   shared challenge store. A signed alternative with identical guardians and
+   threshold cannot redeem it; an old v1/v2 challenge cannot masquerade as v3.
+   Wrong evidence does not consume a good challenge.
+
+3. The existing `POST /issuer-guardian-recovery/cancel` (both scopes)
+   can atomically cancel the pending v3 nonce using the exact tenant, old issuer,
+   HTTPS audience and recovery purpose. As with other recovery types, a 204 is
+   not proof of winning a race against verification and cannot undo previously
+   accepted evidence.
+
+Invalid inputs return 400, storage unavailability 503 and challenge-capacity
+exhaustion on issuance 429. HTTP integration exercises two independent hosts,
+genuine key signatures, an isolated real PostgreSQL challenge store, signed
+policy substitution, legacy bypass denial, replays, scopes and cancellation.
+The adapter never handles issuer/guardian/successor signing seeds.
+
+**Critical boundary:** the authenticated requester supplies the JWT and digest;
+HeroSSID cannot tell whether the caller truly loaded the pin from the
+independent, pre-incident trust registry rather than computing it from
+attacker-controlled input. The relying-party application MUST enforce that
+provenance, approval, incident recovery authorization, audit, operator access
+and pin revocation. The API proves **signature and nonce consistency only**,
+not real-world guardian identity, DID control transfer, issuer trust promotion,
+business authority, end-user consent, W3C enrollment conformance or independent
+wallet interoperability.
 
 Tests: `dotnet test tests/Unit/HeroSSID.Credentials.Tests/HeroSSID.Credentials.Tests.csproj`
 and the full repository Build/Test/Security/CodeQL gates.

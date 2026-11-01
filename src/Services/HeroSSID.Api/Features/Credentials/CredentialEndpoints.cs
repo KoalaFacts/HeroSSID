@@ -68,6 +68,7 @@ public static class CredentialEndpoints
         Vcdm20PresentationEndpoints.Map(credentials);
         IssuerSuccessorEndpoints.Map(credentials);
         IssuerGuardianRecoveryHttpEndpoints.Map(credentials);
+        IssuerGuardianEnrollmentHttpEndpoints.Map(credentials);
 
         credentials.MapPost("/revoke", RevokeAsync)
             .RequireAuthorization(OperationScopes.CredentialRevoke)
