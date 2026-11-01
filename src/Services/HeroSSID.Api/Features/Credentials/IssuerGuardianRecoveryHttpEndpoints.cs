@@ -63,10 +63,15 @@ internal static class IssuerGuardianRecoveryHttpEndpoints
         ArgumentNullException.ThrowIfNull(challenges);
         ArgumentNullException.ThrowIfNull(tenantContext);
 
+        bool policyBound = request.TrustedGuardianDids is not null ||
+            request.RequiredGuardianSignatures.HasValue;
         if (!ValidAudience(request.Audience) || !ValidDid(request.PreviousIssuerDid) ||
-            request.LifetimeSeconds is < 1 or > 300)
+            request.LifetimeSeconds is < 1 or > 300 ||
+            (policyBound && (!request.RequiredGuardianSignatures.HasValue ||
+                !ValidGuardianPolicy(request.TrustedGuardianDids, request.PreviousIssuerDid!,
+                    request.RequiredGuardianSignatures.Value))))
         {
-            return InvalidRequest("An exact HTTPS audience, previous Ed25519 did:key and 1–300 second lifetime are required.");
+            return InvalidRequest("An exact HTTPS audience, old Ed25519 issuer, 1–300 second lifetime and (when supplied) a complete, distinct guardian quorum policy are required.");
         }
 
         Guid tenantId = tenantContext.GetCurrentTenantId();
@@ -77,12 +82,17 @@ internal static class IssuerGuardianRecoveryHttpEndpoints
 
         try
         {
-            PresentationChallenge issued = IssuerGuardianRecoveryChallenges.Issue(
-                challenges, tenantId, request.PreviousIssuerDid!,
-                new Uri(request.Audience!), TimeSpan.FromSeconds(request.LifetimeSeconds));
+            PresentationChallenge issued = policyBound
+                ? IssuerGuardianRecoveryChallenges.IssueBoundToGuardians(
+                    challenges, tenantId, request.PreviousIssuerDid!,
+                    request.TrustedGuardianDids!, request.RequiredGuardianSignatures!.Value,
+                    new Uri(request.Audience!), TimeSpan.FromSeconds(request.LifetimeSeconds))
+                : IssuerGuardianRecoveryChallenges.Issue(
+                    challenges, tenantId, request.PreviousIssuerDid!,
+                    new Uri(request.Audience!), TimeSpan.FromSeconds(request.LifetimeSeconds));
             return Results.Json(new IssueIssuerGuardianRecoveryChallengeResponse(
                 request.Audience!, issued.Nonce, request.PreviousIssuerDid!,
-                issued.ExpiresAt), statusCode: StatusCodes.Status201Created);
+                issued.ExpiresAt, policyBound), statusCode: StatusCodes.Status201Created);
         }
         catch (ArgumentException)
         {
@@ -252,11 +262,18 @@ public sealed class IssueIssuerGuardianRecoveryChallengeRequest
     public string? Audience { get; init; }
     public string? PreviousIssuerDid { get; init; }
     public int LifetimeSeconds { get; init; } = 120;
+
+    /// <summary>Optional pre-enrolled guardian pins to commit at issuance, never learned from proof.</summary>
+    public IReadOnlyCollection<string>? TrustedGuardianDids { get; init; }
+
+    /// <summary>Required signatures in the pinned guardian set, supplied together with pins.</summary>
+    public int? RequiredGuardianSignatures { get; init; }
 }
 
 /// <summary>Unverified challenge metadata; the signer must authenticate its origin out of band.</summary>
 public sealed record IssueIssuerGuardianRecoveryChallengeResponse(
-    string Audience, string Nonce, string TrustedPreviousIssuerDid, DateTimeOffset ExpiresAt);
+    string Audience, string Nonce, string TrustedPreviousIssuerDid, DateTimeOffset ExpiresAt,
+    bool GuardianPolicyBound);
 
 /// <summary>
 /// Exact verifier-owned incident challenge to withdraw; this request never

@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using HeroSSID.Credentials.CredentialVerification;
 using HeroSSID.Credentials.VerifiablePresentations;
 
@@ -18,12 +21,45 @@ public static class IssuerGuardianRecoveryChallenges
     // This marker is stored only in verifier-owned challenge metadata; it is
     // not an issuer DID and must not be accepted as a trusted issuer identity.
     private const string RecoveryMarkerPrefix = "herossid:issuer-guardian-recovery:v1:";
+    private const string BoundRecoveryMarkerPrefix = "herossid:issuer-guardian-recovery:v2:";
 
     /// <summary>
     /// Issue a short-lived one-use recovery challenge, bound to the verifier
     /// tenant, HTTPS audience, old issuer and recovery purpose.
     /// The caller must independently authorize who may request recovery.
     /// </summary>
+    /// <summary>
+    /// Issue an opt-in challenge cryptographically committed to the verifier's
+    /// exact pre-enrolled guardian DID set and quorum. A different policy
+    /// cannot later redeem the same nonce; this does not enroll guardians.
+    /// </summary>
+    public static PresentationChallenge IssueBoundToGuardians(IPresentationChallengeStore store,
+        Guid verifierTenantId, string trustedPreviousIssuerDid,
+        IReadOnlyCollection<string> trustedGuardianDids, int requiredGuardianSignatures,
+        Uri verifierAudience, TimeSpan? lifetime = null)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(trustedPreviousIssuerDid);
+        ArgumentNullException.ThrowIfNull(trustedGuardianDids);
+        ArgumentNullException.ThrowIfNull(verifierAudience);
+
+        if (!OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(trustedPreviousIssuerDid, out _) ||
+            !ValidAudience(verifierAudience))
+        {
+            throw new ArgumentException("A pinned old did:key issuer and exact HTTPS verifier audience are required.");
+        }
+
+        if (!TryBoundMarker(trustedPreviousIssuerDid, trustedGuardianDids,
+                requiredGuardianSignatures, out string marker))
+        {
+            throw new ArgumentException("Two to five distinct independently trusted guardian DIDs and a valid quorum are required.");
+        }
+
+        // The shared challenge table already stores one opaque verifier-owned
+        // identifier: a domain-separated SHA-256 guardian-policy commitment.
+        return store.Issue(verifierTenantId, verifierAudience.AbsoluteUri, marker, lifetime);
+    }
+
     public static PresentationChallenge Issue(IPresentationChallengeStore store,
         Guid verifierTenantId, string trustedPreviousIssuerDid, Uri verifierAudience,
         TimeSpan? lifetime = null)
@@ -70,8 +106,7 @@ public static class IssuerGuardianRecoveryChallenges
         if (challenge is null ||
             !string.Equals(challenge.Nonce, nonce, StringComparison.Ordinal) ||
             !string.Equals(challenge.Audience, audience, StringComparison.Ordinal) ||
-            !string.Equals(challenge.TrustedIssuerDid,
-                RecoveryMarkerPrefix + trustedPreviousIssuerDid, StringComparison.Ordinal))
+            !MatchesIssuerRecoveryMarker(challenge.TrustedIssuerDid, trustedPreviousIssuerDid))
         {
             return false;
         }
@@ -120,8 +155,8 @@ public static class IssuerGuardianRecoveryChallenges
         if (challenge is null ||
             !string.Equals(challenge.Nonce, expectedNonce, StringComparison.Ordinal) ||
             !string.Equals(challenge.Audience, audience, StringComparison.Ordinal) ||
-            !string.Equals(challenge.TrustedIssuerDid,
-                RecoveryMarkerPrefix + trustedPreviousIssuerDid, StringComparison.Ordinal) ||
+            !MatchesRecoveryPolicy(challenge.TrustedIssuerDid, trustedPreviousIssuerDid,
+                trustedGuardianDids, requiredGuardianSignatures) ||
             challenge.ExpiresAt <= now ||
             !IssuerGuardianRecovery.TryVerify(evidenceJson, trustedPreviousIssuerDid,
                 trustedGuardianDids, requiredGuardianSignatures,
@@ -139,6 +174,58 @@ public static class IssuerGuardianRecoveryChallenges
         }
 
         successorIssuerDid = candidate;
+        return true;
+    }
+
+    private static bool MatchesIssuerRecoveryMarker(string stored, string previousIssuerDid)
+    {
+        if (string.Equals(stored, RecoveryMarkerPrefix + previousIssuerDid,
+                StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        string prefix = BoundRecoveryMarkerPrefix + previousIssuerDid + ":";
+        return stored.StartsWith(prefix, StringComparison.Ordinal) &&
+            stored.Length == prefix.Length + 64 &&
+            stored.AsSpan(prefix.Length).ToString().All(static c =>
+                c is >= '0' and <= '9' or >= 'A' and <= 'F');
+    }
+
+    private static bool MatchesRecoveryPolicy(string stored, string previousIssuerDid,
+        IReadOnlyCollection<string> guardians, int threshold) =>
+        string.Equals(stored, RecoveryMarkerPrefix + previousIssuerDid,
+            StringComparison.Ordinal) ||
+        (TryBoundMarker(previousIssuerDid, guardians, threshold, out string bound) &&
+            string.Equals(stored, bound, StringComparison.Ordinal));
+
+    private static bool TryBoundMarker(string previousIssuerDid,
+        IReadOnlyCollection<string> guardians, int threshold, out string marker)
+    {
+        marker = string.Empty;
+        if (guardians.Count is < 2 or > 5 || threshold < 2 || threshold > guardians.Count)
+        {
+            return false;
+        }
+
+        var pins = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string did in guardians)
+        {
+            if (string.IsNullOrWhiteSpace(did) ||
+                string.Equals(did, previousIssuerDid, StringComparison.Ordinal) ||
+                !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(did, out _) ||
+                !pins.Add(did))
+            {
+                return false;
+            }
+        }
+
+        string[] ordered = [.. pins.OrderBy(static did => did, StringComparer.Ordinal)];
+        // Serialization preserves fixed field order. A sorted, structured
+        // encoding avoids concatenation ambiguities and caller array order.
+        string policy = JsonSerializer.Serialize(new { threshold, guardianDids = ordered });
+        string digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(policy)));
+        marker = BoundRecoveryMarkerPrefix + previousIssuerDid + ":" + digest;
         return true;
     }
 

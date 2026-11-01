@@ -114,3 +114,45 @@ Real integration tests use two independent HTTP hosts, genuine successor and
 guardian Ed25519 keys, isolated PostgreSQL/Testcontainers storage, a forged
 guardian policy that does not consume the challenge, cross-host replay denial,
 cross-purpose refusal, anonymous/scope denial and invalid-input denial.
+
+## Opt-in guardian-policy-bound challenges (SDK and HTTP)
+
+The original `Issue` API and HTTP challenge payload remain supported for
+compatibility, but their recovery-only marker binds the old issuer, tenant and
+audience **without freezing the guardian trust policy**. Callers that already
+have an authoritative, separately enrolled guardian list should use the
+stronger opt-in `IssuerGuardianRecoveryChallenges.IssueBoundToGuardians`:
+
+```csharp
+PresentationChallenge issued = IssuerGuardianRecoveryChallenges.IssueBoundToGuardians(
+    challenges, verifierTenantId, pinnedOldIssuerDid,
+    independentlyEnrolledGuardianDids, requiredGuardianSignatures: 2,
+    audience, TimeSpan.FromMinutes(2));
+```
+
+This keeps the same `TryVerifyAndConsume` and `TryCancel` entry points.
+The existing challenge metadata stores a domain-separated SHA-256 commitment
+to the **sorted distinct guardian did:key pins and exact threshold**. Guardian
+array order does not matter, but replacing a guardian or changing the quorum
+cannot spend the nonce, even if the alternative keys genuinely sign. The
+original policy must be independently supplied again at verification; the
+store does **not** disclose or enroll guardian pins. Cancellation still checks
+the old issuer, tenant, audience and purpose and atomically consumes the nonce.
+No new schema or migration is needed.
+
+The HTTP `/issuer-guardian-recovery/challenge` body may additionally supply
+both `trustedGuardianDids` (two to five pre-enrolled distinct pins) and
+`requiredGuardianSignatures` (two up to the pin count). Supplying only one,
+duplicate/invalid guardian DIDs, the old issuer as guardian, or an invalid
+threshold returns 400. The 201 response includes `guardianPolicyBound: true`
+for the new mode and `false` for legacy mode. Recovery verification fails
+closed with `Invalid` and a null successor if its caller-supplied policy
+differs from the policy committed at issuance.
+
+This commitment proves **policy consistency across issuance and verification**,
+not policy provenance or recovery authorization. An authorized HTTP caller
+could still nominate its own arbitrary pins at issuance; HeroSSID does not
+provide a guardian enrollment registry. Production relying parties must load
+the trusted pins from their own previously approved registry, authorize the
+operator separately, and never treat genuine signatures alone as proof of
+identity, real-world custody, DID transfer or business authority.
