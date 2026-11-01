@@ -135,8 +135,34 @@ public static class Vcdm20JosePresentation
         string presentationJwt, Guid verifierTenantId, string expectedAudience,
         string expectedNonce, string expectedCredentialType, Uri expectedContextUri,
         IPresentationChallengeStore challenges, TimeProvider clock,
-        out JsonElement verifiedSubject)
+        out JsonElement verifiedSubject) =>
+        CheckCore(presentationJwt, verifierTenantId, expectedAudience,
+            expectedNonce, expectedCredentialType, expectedContextUri,
+            challenges, clock, out verifiedSubject, out _, out _);
+
+    /// <summary>
+    /// Internal issuer/holder-authenticated artifact access for additional
+    /// independently configured verifier policies. Only outputs after atomic
+    /// one-use challenge consumption and a final expiry recheck.
+    /// </summary>
+    internal static Vcdm20PresentationCheckResult CheckWithAuthenticatedOriginal(
+        string presentationJwt, Guid verifierTenantId, string expectedAudience,
+        string expectedNonce, string expectedCredentialType, Uri expectedContextUri,
+        IPresentationChallengeStore challenges, TimeProvider clock,
+        out JsonElement verifiedSubject, out string credentialJwt, out string holderDid) =>
+        CheckCore(presentationJwt, verifierTenantId, expectedAudience,
+            expectedNonce, expectedCredentialType, expectedContextUri,
+            challenges, clock, out verifiedSubject, out credentialJwt, out holderDid);
+
+    private static Vcdm20PresentationCheckResult CheckCore(
+        string presentationJwt, Guid verifierTenantId, string expectedAudience,
+        string expectedNonce, string expectedCredentialType, Uri expectedContextUri,
+        IPresentationChallengeStore challenges, TimeProvider clock,
+        out JsonElement verifiedSubject, out string authenticatedCredentialJwt,
+        out string authenticatedHolderDid)
     {
+        authenticatedCredentialJwt = string.Empty;
+        authenticatedHolderDid = string.Empty;
         ArgumentNullException.ThrowIfNull(expectedContextUri);
         ArgumentNullException.ThrowIfNull(challenges);
         ArgumentNullException.ThrowIfNull(clock);
@@ -205,6 +231,8 @@ public static class Vcdm20JosePresentation
         }
 
         verifiedSubject = subject;
+        authenticatedCredentialJwt = credentialJwt;
+        authenticatedHolderDid = holderDid;
         return Vcdm20PresentationCheckResult.SignedButStatusUnchecked;
     }
 
