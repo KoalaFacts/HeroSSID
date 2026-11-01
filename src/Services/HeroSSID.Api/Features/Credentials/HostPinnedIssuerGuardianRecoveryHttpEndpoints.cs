@@ -21,10 +21,12 @@ internal sealed class HostPinnedGuardianEnrollmentRegistry
 {
     private readonly Dictionary<(Guid Tenant, string Issuer, string Audience), HostPinnedGuardianEnrollment> _registrations = [];
 
-    public HostPinnedGuardianEnrollmentRegistry(IConfiguration configuration)
+    public HostPinnedGuardianEnrollmentRegistry(IConfiguration configuration, TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(clock);
         var entries = configuration.GetSection("IssuerGuardianEnrollmentTrust:Registrations").GetChildren().ToArray();
+        DateTimeOffset now = clock.GetUtcNow();
         if (entries.Length > 256)
         {
             throw new InvalidOperationException("The host-pinned guardian enrollment inventory exceeds 256 records.");
@@ -47,6 +49,19 @@ internal sealed class HostPinnedGuardianEnrollmentRegistry
             {
                 // Configuration is security-sensitive: never silently omit a broken record.
                 throw new InvalidOperationException("Invalid host-pinned guardian enrollment configuration.");
+            }
+
+            // Startup must authenticate the operator's entire signed policy,
+            // not just its shape: invalid pins, forged old-issuer signatures,
+            // wrong audiences and inactive policies must never reach a live host.
+            // This does not independently prove that the operator approved
+            // the configuration before an issuer-key-loss incident.
+            if (!IssuerGuardianRecoveryEnrollment.TryVerify(
+                    jwt, issuer, fingerprint, new Uri(audience!, UriKind.Absolute),
+                    now, out _, out _))
+            {
+                throw new InvalidOperationException(
+                    "Invalid signed host-pinned guardian enrollment configuration.");
             }
 
             var key = (tenant, issuer, audience!);

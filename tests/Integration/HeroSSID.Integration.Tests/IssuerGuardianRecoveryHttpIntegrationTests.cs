@@ -29,6 +29,7 @@ public sealed class IssuerGuardianRecoveryHttpIntegrationTests(DatabaseFixture f
     private const string CancelRoute = "/api/v1/credentials/issuer-guardian-recovery/cancel";
     private const string Audience = "https://verifier.example/issuer-guardian-recovery";
     private readonly DatabaseFixture _fixture = fixture;
+    private static readonly SemaphoreSlim MigrationGate = new(1, 1);
 
     [Fact]
     public async Task GenuineGuardianQuorumSucceedsAcrossHostsOnlyOnceAndFailedPolicyDoesNotBurnNonce()
@@ -767,8 +768,20 @@ public sealed class IssuerGuardianRecoveryHttpIntegrationTests(DatabaseFixture f
 
     private async Task EnsureMigratedAsync()
     {
-        await using var db = _fixture.CreateDbContext<HeroDbContext>();
-        await db.Database.MigrateAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
+        // xUnit v3 may run facts in this class concurrently. These facts share
+        // one Testcontainers database: two simultaneous EF migrations can both
+        // try to create credential_offers. Serialize only that schema setup;
+        // do not skip tests, change migrations or hide any failures.
+        await MigrationGate.WaitAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
+        try
+        {
+            await using var db = _fixture.CreateDbContext<HeroDbContext>();
+            await db.Database.MigrateAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
+        }
+        finally
+        {
+            MigrationGate.Release();
+        }
     }
 
     private WebApplicationFactory<HeroSSID.Api.Features.Dids.CreateDidRequest> NewHost(
