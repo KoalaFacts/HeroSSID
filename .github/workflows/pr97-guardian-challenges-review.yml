@@ -93,9 +93,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/96 --jq '.head.sha')"
+          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/97 --jq '.head.sha')"
           test "$actual" = "a8df8be1f55c757b532289c9a5651482c06000c7"
-          gh api repos/KoalaFacts/HeroSSID/pulls/96/files --paginate --jq '.[].filename' | sort >/tmp/pr97-files.txt
+          gh api repos/KoalaFacts/HeroSSID/pulls/97/files --paginate --jq '.[].filename' | sort >/tmp/pr97-files.txt
           python3 - <<'PY'
           import json
           from pathlib import Path
@@ -138,7 +138,7 @@ jobs:
             echo
             cat review-3.md
           } >/tmp/pr97-review.md
-          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/96/reviews \
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/97/reviews \
             -f event=COMMENT -f commit_id=a8df8be1f55c757b532289c9a5651482c06000c7 \
             -f body="$(cat /tmp/pr97-review.md)" \
             --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
