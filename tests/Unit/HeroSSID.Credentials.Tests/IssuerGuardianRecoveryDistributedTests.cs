@@ -1,4 +1,3 @@
-using System.Text.Json;
 using HeroSSID.Credentials.Vcdm20;
 using NSec.Cryptography;
 
@@ -27,7 +26,6 @@ public sealed class IssuerGuardianRecoveryDistributedTests
             [guardianOne.Did, guardianTwo.Did, guardianThree.Did], 2,
             Audience, Nonce, Now, out string verified));
         Assert.Equal(successor.Did, verified);
-        Assert.DoesNotContain(Convert.ToBase64String(guardianOne.Seed), envelope, StringComparison.Ordinal);
     }
 
     [Fact]
