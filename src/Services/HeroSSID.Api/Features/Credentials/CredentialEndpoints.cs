@@ -69,6 +69,7 @@ public static class CredentialEndpoints
         IssuerSuccessorEndpoints.Map(credentials);
         IssuerGuardianRecoveryHttpEndpoints.Map(credentials);
         IssuerGuardianEnrollmentHttpEndpoints.Map(credentials);
+        HostPinnedIssuerGuardianRecoveryHttpEndpoints.Map(credentials);
 
         credentials.MapPost("/revoke", RevokeAsync)
             .RequireAuthorization(OperationScopes.CredentialRevoke)
