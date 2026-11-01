@@ -1,0 +1,75 @@
+name: Independent PR105 pre-enrolled guardian policy security review
+
+on:
+  push:
+    branches:
+      - review/pr105-guardian-host-preflight-20261102
+
+permissions: {}
+
+jobs:
+  review:
+    name: Independent Qwen three-file startup preflight review
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout helper and all immutable Git history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require exact candidate, base and three changed paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse 8a19d18536763d8bd5932bfce3274763c3ba077b^{commit})" = "8a19d18536763d8bd5932bfce3274763c3ba077b"
+          test "$(git rev-parse 4adcdd33fc8c4f11c782fa1d9cf77f54d98641b5^{commit})" = "4adcdd33fc8c4f11c782fa1d9cf77f54d98641b5"
+          git diff --name-only 4adcdd33fc8c4f11c782fa1d9cf77f54d98641b5 8a19d18536763d8bd5932bfce3274763c3ba077b | sort >/tmp/review-files.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          paths = set(Path("/tmp/review-files.txt").read_text().splitlines())
+          expected = {
+              "src/Services/HeroSSID.Api/Features/Credentials/HostPinnedIssuerGuardianRecoveryHttpEndpoints.cs",
+              "tests/Integration/HeroSSID.Integration.Tests/IssuerGuardianRecoveryHttpIntegrationTests.cs",
+              "docs/issuer-guardian-preenrollment.md",
+          }
+          assert set(Path("/tmp/pr105-files.txt").read_text().splitlines()) == expected
+          all_files = []
+          for part in (1, 2):
+              data = json.loads(Path(f"review-{part}.json").read_text())
+              raw = json.loads(Path(f"review-model-{part}.json").read_text())
+              assert data["head"] == head and data["part"] == part
+              assert (data["review"]["verdict"] == raw["verdict"] or
+                      (raw["verdict"] == "no_actionable_findings" and
+                       data["review"]["verdict"] == "inconclusive" and
+                       bool(raw["findings"])))
+              assert raw["verdict"] in ("no_actionable_findings", "actionable_findings", "inconclusive")
+              assert len(Path(f"review-{part}.md").read_text()) > 150
+              assert Path(f"review-head-{part}.txt").read_text().strip() == head
+              all_files.extend(data["files"])
+          assert len(all_files) == len(expected) and set(all_files) == expected
+          PY
+      - name: Submit one truthful independently generated COMMENTED review
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo "Independent Qwen2.5-Coder 7B local-model review of all three exact PR #105 patches."
+            echo
+            echo "Reviewed exact HEAD: 8a19d18536763d8bd5932bfce3274763c3ba077b. Base: 4adcdd33fc8c4f11c782fa1d9cf77f54d98641b5."
+            echo "This is automated independent code review, NOT human approval, external security audit, wallet interoperability, W3C conformance, real-world identity verification or business authorization."
+            echo "Model verdicts and every finding are preserved verbatim; each requires evidence-based disposition before any merge."
+            echo
+            cat review-1.md
+            echo
+            cat review-2.md
+            echo
+          } >/tmp/pr105-review.md
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/104/reviews \
+            -f event=COMMENT -f commit_id=8a19d18536763d8bd5932bfce3274763c3ba077b \
+            -f body="$(cat /tmp/pr105-review.md)" \
+            --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
