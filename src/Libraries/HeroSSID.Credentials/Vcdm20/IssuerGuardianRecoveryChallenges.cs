@@ -55,7 +55,30 @@ public static class IssuerGuardianRecoveryChallenges
         ArgumentNullException.ThrowIfNull(verifierAudience);
         ArgumentNullException.ThrowIfNull(nonce);
 
-        throw new NotSupportedException("Recovery challenge cancellation is not implemented.");
+        if (verifierTenantId == Guid.Empty ||
+            !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(trustedPreviousIssuerDid, out _) ||
+            !ValidAudience(verifierAudience))
+        {
+            return false;
+        }
+
+        string audience = verifierAudience.AbsoluteUri;
+        PresentationChallenge? challenge = store.Find(verifierTenantId, audience, nonce);
+
+        // Reuse the immutable, verifier-owned recovery-purpose marker.
+        // The same nonce on another protocol/issuer must never be cancelled.
+        if (challenge is null ||
+            !string.Equals(challenge.Nonce, nonce, StringComparison.Ordinal) ||
+            !string.Equals(challenge.Audience, audience, StringComparison.Ordinal) ||
+            !string.Equals(challenge.TrustedIssuerDid,
+                RecoveryMarkerPrefix + trustedPreviousIssuerDid, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        // Cancellation races genuine proof consumption via the same atomic
+        // store operation. Only one may win; no candidate DID is disclosed.
+        return store.TryConsume(verifierTenantId, audience, nonce);
     }
 
     /// <summary>

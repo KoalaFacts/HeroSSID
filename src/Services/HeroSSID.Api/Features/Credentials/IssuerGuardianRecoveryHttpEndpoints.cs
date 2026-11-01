@@ -33,6 +33,16 @@ internal static class IssuerGuardianRecoveryHttpEndpoints
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
+        credentials.MapPost("/issuer-guardian-recovery/cancel", Cancel)
+            .RequireAuthorization(OperationScopes.CredentialVerify, OperationScopes.DidManage)
+            .WithName("CancelIssuerGuardianRecoveryChallenge")
+            .WithSummary("Invalidate a pending one-use guardian recovery challenge without disclosing whether it exists")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
         credentials.MapPost("/issuer-guardian-recovery/verify", Verify)
             .RequireAuthorization(OperationScopes.CredentialVerify)
             .WithName("VerifyIssuerGuardianRecoveryEvidence")
@@ -84,6 +94,51 @@ internal static class IssuerGuardianRecoveryHttpEndpoints
             return Results.Problem(title: "Challenge Capacity Exhausted",
                 detail: "The verifier has reached its one-use challenge capacity.",
                 statusCode: StatusCodes.Status429TooManyRequests);
+        }
+        catch (NpgsqlException)
+        {
+            return Unavailable();
+        }
+        catch (TimeoutException)
+        {
+            return Unavailable();
+        }
+    }
+
+    /// <summary>
+    /// Withdraw a pending incident challenge using verifier-owned tenant, old
+    /// issuer and recovery purpose. Return the same empty response for unknown,
+    /// expired or already consumed nonces to avoid a challenge existence oracle.
+    /// A 204 never retroactively reverses previously accepted evidence.
+    /// </summary>
+    internal static IResult Cancel(
+        [FromBody] CancelIssuerGuardianRecoveryChallengeRequest request,
+        [FromServices] IPresentationChallengeStore challenges,
+        [FromServices] ITenantContext tenantContext)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(challenges);
+        ArgumentNullException.ThrowIfNull(tenantContext);
+
+        if (!ValidAudience(request.Audience) || !ValidDid(request.TrustedPreviousIssuerDid) ||
+            request.Nonce is not { Length: 43 } ||
+            !request.Nonce.All(static c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_'))
+        {
+            return InvalidRequest("An exact HTTPS audience, pinned old issuer DID and issued nonce are required.");
+        }
+
+        Guid tenantId = tenantContext.GetCurrentTenantId();
+        if (tenantId == Guid.Empty)
+        {
+            return Results.Unauthorized();
+        }
+
+        try
+        {
+            _ = IssuerGuardianRecoveryChallenges.TryCancel(
+                challenges, tenantId, request.TrustedPreviousIssuerDid!,
+                new Uri(request.Audience!), request.Nonce);
+            return Results.NoContent();
         }
         catch (NpgsqlException)
         {
@@ -202,6 +257,17 @@ public sealed class IssueIssuerGuardianRecoveryChallengeRequest
 /// <summary>Unverified challenge metadata; the signer must authenticate its origin out of band.</summary>
 public sealed record IssueIssuerGuardianRecoveryChallengeResponse(
     string Audience, string Nonce, string TrustedPreviousIssuerDid, DateTimeOffset ExpiresAt);
+
+/// <summary>
+/// Exact verifier-owned incident challenge to withdraw; this request never
+/// enrolls guardians, transfers DID control or authorizes recovery.
+/// </summary>
+public sealed class CancelIssuerGuardianRecoveryChallengeRequest
+{
+    public string? Audience { get; init; }
+    public string? Nonce { get; init; }
+    public string? TrustedPreviousIssuerDid { get; init; }
+}
 
 /// <summary>
 /// Explicit caller-owned pre-enrolled guardian policy. The server does not

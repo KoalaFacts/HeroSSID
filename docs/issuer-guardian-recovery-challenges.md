@@ -40,6 +40,27 @@ The adapter internally stores a **recovery-purpose marker plus the old issuer DI
 
 The verifier checks its own tenant, HTTPS audience, original old-issuer pin, nonce, expiry, real successor Ed25519 signature and at least two distinct **independently pre-enrolled** guardian Ed25519 signatures. It atomically consumes the challenge before returning the candidate successor. Malformed evidence, wrong tenant/purpose/issuer/guardian, wrong audience, expired challenge or losing a concurrent consume race fails closed with an empty candidate. A failed signature check does not burn an otherwise valid nonce; the relying party should additionally apply attempt limits and authenticated incident reporting.
 
+## Incident cancellation before recovery acceptance
+
+An authorized relying party can revoke a **pending** guardian recovery nonce
+without collecting a signature or changing issuer trust. The verifier must pin
+the same tenant, old issuer DID and exact HTTPS audience used at issuance:
+
+```csharp
+bool cancelled = IssuerGuardianRecoveryChallenges.TryCancel(
+    challenges, verifierTenantId, pinnedOldIssuerDid, audience, issued.Nonce);
+```
+
+The method checks the challenge store's **recovery-only** purpose marker before
+atomically consuming the nonce. Wrong tenant, old issuer, audience, expired or
+already consumed nonce returns false without consuming a different challenge.
+Normal presentation and issuer-successor challenges cannot be cancelled through
+this method. Concurrent cancellation and valid proof verification race for the
+same atomic store transition, so at most one succeeds; neither success path
+by itself grants issuer trust or organizational authority. An incident response
+must separately freeze trust promotion and investigate any proof previously
+accepted. Cancellation does **not** reverse accepted evidence.
+
 ## Storage and operational boundaries
 
 `InMemoryPresentationChallengeStore` is thread-safe for a single process only and loses outstanding challenges on restart. A multi-replica verifier must use the already available **shared atomic implementation**, such as `PostgresPresentationChallengeStore`, with its existing approved schema. This adapter adds **no new table, migration or production database changes** and does not itself deploy any service. The caller must guarantee that challenge issuance is available only to appropriately authenticated recovery operators and that the trusted guardian policy was enrolled separately *before* old-key loss.
@@ -59,6 +80,16 @@ Both endpoints are under `/api/v1/credentials`:
   Returns 201 with `audience`, `nonce`, `trustedPreviousIssuerDid` and `expiresAt`.
   The verifier must authenticate the recovery operator **before** making this
   request and convey the unsigned challenge over a trusted authenticated channel.
+- `POST /issuer-guardian-recovery/cancel` requires **both**
+  `credential:verify` and `did:manage`. JSON:
+  `{"audience":"https://verifier.example/recovery","nonce":"<issued nonce>","trustedPreviousIssuerDid":"did:key:..."}`.
+  Returns **204 with no body** for a validly shaped request, even if the
+  challenge does not exist, was expired, or was already consumed. It checks
+  the existing stored recovery-purpose marker before atomic consumption, so
+  it cannot cancel other-purpose challenges. 400 rejects malformed input,
+  401/403 deny unauthorized operators and 503 fails closed if storage is
+  unavailable. **204 is deliberately not confirmation cancellation beat a
+  concurrent valid verification** and cannot retract earlier acceptance.
 - `POST /issuer-guardian-recovery/verify` requires `credential:verify`.
   JSON: `{"evidenceJson":"<exact assembled JSON>","audience":"https://verifier.example/recovery","nonce":"<issued nonce>","trustedPreviousIssuerDid":"did:key:...","trustedGuardianDids":["did:key:...","did:key:..."],"requiredGuardianSignatures":2}`.
   Returns `{"status":"ValidRecoveryEvidence","successorIssuerDid":"did:key:..."}`
