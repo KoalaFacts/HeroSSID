@@ -47,7 +47,8 @@ public static class JwtVcJsonTrustedIssuerVerifier
 
         return CheckCore(credentialJwt, null, trustedIssuerDids, expectedHolderDid,
             expectedCredentialType, expectedSubjectContextUri, now,
-            withStatus: false, out verifiedIssuerDid, out verifiedSubject);
+            withStatus: false, minimumObservedAt: null,
+            out verifiedIssuerDid, out verifiedSubject);
     }
 
     /// <summary>
@@ -72,14 +73,41 @@ public static class JwtVcJsonTrustedIssuerVerifier
 
         return CheckCore(credentialJwt, revocationSnapshotJwt, trustedIssuerDids,
             expectedHolderDid, expectedCredentialType, expectedSubjectContextUri,
-            now, withStatus: true, out verifiedIssuerDid, out verifiedSubject);
+            now, withStatus: true, minimumObservedAt: null,
+            out verifiedIssuerDid, out verifiedSubject);
+    }
+
+    /// <summary>
+    /// After an incident, require a genuine status from the original issuer
+    /// observed no earlier than a verifier-owned cutoff. Retains the existing
+    /// strict credential validation and zero-claim failure contract.
+    /// </summary>
+    public static JwtVcJsonTrustedIssuerCheckResult CheckWithStatusAfterObservationCutoff(
+        string credentialJwt, string revocationSnapshotJwt,
+        IReadOnlyCollection<string> trustedIssuerDids,
+        string expectedHolderDid, string expectedCredentialType,
+        Uri expectedSubjectContextUri, DateTimeOffset now,
+        DateTimeOffset minimumObservedAt,
+        out string verifiedIssuerDid, out JsonElement verifiedSubject)
+    {
+        ArgumentNullException.ThrowIfNull(credentialJwt);
+        ArgumentNullException.ThrowIfNull(revocationSnapshotJwt);
+        ArgumentNullException.ThrowIfNull(trustedIssuerDids);
+        ArgumentNullException.ThrowIfNull(expectedHolderDid);
+        ArgumentNullException.ThrowIfNull(expectedCredentialType);
+        ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
+
+        return CheckCore(credentialJwt, revocationSnapshotJwt, trustedIssuerDids,
+            expectedHolderDid, expectedCredentialType, expectedSubjectContextUri,
+            now, withStatus: true, minimumObservedAt,
+            out verifiedIssuerDid, out verifiedSubject);
     }
 
     private static JwtVcJsonTrustedIssuerCheckResult CheckCore(
         string credentialJwt, string? revocationSnapshotJwt,
         IReadOnlyCollection<string> trustedIssuerDids, string expectedHolderDid,
         string expectedCredentialType, Uri expectedSubjectContextUri,
-        DateTimeOffset now, bool withStatus,
+        DateTimeOffset now, bool withStatus, DateTimeOffset? minimumObservedAt,
         out string verifiedIssuerDid, out JsonElement verifiedSubject)
     {
         // Do not release even a previously authenticated issuer identity on
@@ -102,6 +130,8 @@ public static class JwtVcJsonTrustedIssuerVerifier
             typeUri.Scheme != Uri.UriSchemeHttps ||
             typeUri.Host.Length == 0 || typeUri.UserInfo.Length != 0 ||
             trustedIssuerDids.Count is < 1 or > MaximumTrustedIssuers ||
+            (minimumObservedAt is DateTimeOffset cutoff &&
+                (cutoff < DateTimeOffset.UnixEpoch || cutoff > now)) ||
             (withStatus && (string.IsNullOrWhiteSpace(revocationSnapshotJwt) ||
                 revocationSnapshotJwt.Length > MaximumJwtLength)))
         {
@@ -149,8 +179,11 @@ public static class JwtVcJsonTrustedIssuerVerifier
 
             // Bind status to the authentic credential signer, never to an
             // alternative allowlisted DID or the status token's own iss.
-            var status = JwtVcJsonRevocationSnapshot.Check(
-                revocationSnapshotJwt!, credentialJwt, issuerDid, now);
+            var status = minimumObservedAt is DateTimeOffset cutoff
+                ? JwtVcJsonRevocationSnapshot.CheckWithObservationCutoff(
+                    revocationSnapshotJwt!, credentialJwt, issuerDid, now, cutoff)
+                : JwtVcJsonRevocationSnapshot.Check(
+                    revocationSnapshotJwt!, credentialJwt, issuerDid, now);
             if (status == RevocationSnapshotCheckResult.Revoked)
             {
                 return JwtVcJsonTrustedIssuerCheckResult.Revoked;

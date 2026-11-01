@@ -50,9 +50,10 @@ internal static class JwtVcJsonCredentialVerificationEndpoint
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(clock);
 
-        if (!IsValidPolicy(request.Credential, request.TrustedIssuerDid,
-            request.ExpectedHolderDid, request.ExpectedCredentialType,
-            request.SubjectContextUri))
+        if (request.MinimumStatusObservedAt is not null ||
+            !IsValidPolicy(request.Credential, request.TrustedIssuerDid,
+                request.ExpectedHolderDid, request.ExpectedCredentialType,
+                request.SubjectContextUri))
         {
             return InvalidRequest(false);
         }
@@ -79,16 +80,18 @@ internal static class JwtVcJsonCredentialVerificationEndpoint
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(clock);
 
+        DateTimeOffset now = clock.GetUtcNow();
         if (!IsValidPolicy(request.Credential, request.TrustedIssuerDid,
                 request.ExpectedHolderDid, request.ExpectedCredentialType,
                 request.SubjectContextUri) ||
             string.IsNullOrWhiteSpace(request.RevocationSnapshot) ||
-            request.RevocationSnapshot.Length > MaximumJwtLength)
+            request.RevocationSnapshot.Length > MaximumJwtLength ||
+            (request.MinimumStatusObservedAt is DateTimeOffset cutoff &&
+                (cutoff < DateTimeOffset.UnixEpoch || cutoff > now)))
         {
             return InvalidRequest(true);
         }
 
-        DateTimeOffset now = clock.GetUtcNow();
         if (!JwtVcJsonCredential.TryVerify(request.Credential!,
             request.TrustedIssuerDid!, request.ExpectedHolderDid!,
             request.ExpectedCredentialType!, request.SubjectContextUri!,
@@ -99,8 +102,12 @@ internal static class JwtVcJsonCredentialVerificationEndpoint
 
         // The snapshot cannot select its own trust anchor. Its issuer must be
         // the SAME independently pinned DID as the original signed credential.
-        var status = JwtVcJsonRevocationSnapshot.Check(request.RevocationSnapshot!,
-            request.Credential!, request.TrustedIssuerDid!, now);
+        var status = request.MinimumStatusObservedAt is DateTimeOffset minimum
+            ? JwtVcJsonRevocationSnapshot.CheckWithObservationCutoff(
+                request.RevocationSnapshot!, request.Credential!,
+                request.TrustedIssuerDid!, now, minimum)
+            : JwtVcJsonRevocationSnapshot.Check(request.RevocationSnapshot!,
+                request.Credential!, request.TrustedIssuerDid!, now);
         return status switch
         {
             RevocationSnapshotCheckResult.NotListed =>
@@ -151,6 +158,8 @@ public sealed class VerifyJwtVcJsonCredentialRequest
     public string? ExpectedHolderDid { get; init; }
     public string? ExpectedCredentialType { get; init; }
     public Uri? SubjectContextUri { get; init; }
+    /// <summary>Reserved for status routes; unchecked verification must reject it.</summary>
+    public DateTimeOffset? MinimumStatusObservedAt { get; init; }
 }
 
 /// <summary>Separate issuer-signed snapshot is required; this is not a W3C status list.</summary>
@@ -162,6 +171,8 @@ public sealed class VerifyJwtVcJsonCredentialWithStatusRequest
     public string? ExpectedCredentialType { get; init; }
     public Uri? SubjectContextUri { get; init; }
     public string? RevocationSnapshot { get; init; }
+    /// <summary>Opt-in earliest acceptable issuer status observation time.</summary>
+    public DateTimeOffset? MinimumStatusObservedAt { get; init; }
 }
 
 /// <summary>VerifiedSubject is null whenever validation or status fails.</summary>

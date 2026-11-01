@@ -82,6 +82,66 @@ public sealed class JwtVcJsonCredentialVerificationHttpTests(AspireWebApplicatio
     }
 
     [Fact]
+    public async Task AuthenticatedHttpRejectsAuthenticPreIncidentStatusAndHonorsNewIssuerObservation()
+    {
+        using var issuer = NewKey();
+        using var holder = NewKey();
+        string issuerDid = Did(issuer);
+        string holderDid = Did(holder);
+        string original = Issue(issuer, issuerDid, holderDid);
+        DateTimeOffset observed = TimeProvider.System.GetUtcNow().AddSeconds(-25);
+        DateTimeOffset cutoff = observed.AddSeconds(10);
+        string stale = JwtVcJsonRevocationSnapshot.Create(
+            issuerDid, [], Seed(issuer), observed, TimeProvider.System);
+
+        using var baseline = await _client.AuthorizedPostAsJsonAsync(StatusPath, new
+        {
+            credential = original, trustedIssuerDid = issuerDid,
+            expectedHolderDid = holderDid, expectedCredentialType = CredentialType,
+            subjectContextUri = Vocabulary,
+            revocationSnapshot = stale
+        }).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, baseline.StatusCode);
+        var baselineBody = await baseline.Content.ReadFromJsonAsync<JsonElement>().ConfigureAwait(true);
+        Assert.Equal("SignedNotListed", baselineBody.GetProperty("status").GetString());
+
+        using var denied = await _client.AuthorizedPostAsJsonAsync(StatusPath, new
+        {
+            credential = original, trustedIssuerDid = issuerDid,
+            expectedHolderDid = holderDid, expectedCredentialType = CredentialType,
+            subjectContextUri = Vocabulary,
+            revocationSnapshot = stale, minimumStatusObservedAt = cutoff
+        }).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, denied.StatusCode);
+        var deniedBody = await denied.Content.ReadFromJsonAsync<JsonElement>().ConfigureAwait(true);
+        Assert.Equal("Invalid", deniedBody.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, deniedBody.GetProperty("verifiedSubject").ValueKind);
+
+        DateTimeOffset renewedAt = TimeProvider.System.GetUtcNow();
+        string renewed = JwtVcJsonRevocationSnapshot.Create(
+            issuerDid, [], Seed(issuer), renewedAt, TimeProvider.System);
+        using var accepted = await _client.AuthorizedPostAsJsonAsync(StatusPath, new
+        {
+            credential = original, trustedIssuerDid = issuerDid,
+            expectedHolderDid = holderDid, expectedCredentialType = CredentialType,
+            subjectContextUri = Vocabulary,
+            revocationSnapshot = renewed, minimumStatusObservedAt = cutoff
+        }).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        var acceptedBody = await accepted.Content.ReadFromJsonAsync<JsonElement>().ConfigureAwait(true);
+        Assert.Equal("SignedNotListed", acceptedBody.GetProperty("status").GetString());
+        Assert.Equal("member", acceptedBody.GetProperty("verifiedSubject").GetProperty("role").GetString());
+
+        using var notIgnored = await _client.AuthorizedPostAsJsonAsync(VerifyPath, new
+        {
+            credential = original, trustedIssuerDid = issuerDid,
+            expectedHolderDid = holderDid, expectedCredentialType = CredentialType,
+            subjectContextUri = Vocabulary, minimumStatusObservedAt = cutoff
+        }).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, notIgnored.StatusCode);
+    }
+
+    [Fact]
     public async Task ForgedIssuerJwtAndWrongIssuerHolderTypeOrVocabularyFailClosed()
     {
         using var issuer = NewKey();

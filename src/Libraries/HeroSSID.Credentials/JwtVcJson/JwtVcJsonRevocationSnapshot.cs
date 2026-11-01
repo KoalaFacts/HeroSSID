@@ -99,7 +99,12 @@ public static class JwtVcJsonRevocationSnapshot
     /// Separately check holder control, verifier challenge and business authority.
     /// </summary>
     public static RevocationSnapshotCheckResult Check(string snapshotJwt, string credentialJwt,
-        string trustedIssuerDid, DateTimeOffset now)
+        string trustedIssuerDid, DateTimeOffset now) =>
+        CheckCore(snapshotJwt, credentialJwt, trustedIssuerDid, now, null);
+
+    private static RevocationSnapshotCheckResult CheckCore(string snapshotJwt,
+        string credentialJwt, string trustedIssuerDid, DateTimeOffset now,
+        DateTimeOffset? minimumObservedAt)
     {
         ArgumentNullException.ThrowIfNull(snapshotJwt);
         ArgumentNullException.ThrowIfNull(credentialJwt);
@@ -118,7 +123,10 @@ public static class JwtVcJsonRevocationSnapshot
             value != 1 ||
             !StrictJwtReader.TryGetTimestamp(snapshot, "iat", out long issuedAt) ||
             !StrictJwtReader.TryGetTimestamp(snapshot, "exp", out long expiresAt) ||
-            issuedAt > now.ToUnixTimeSeconds() || expiresAt <= now.ToUnixTimeSeconds() ||
+            issuedAt > now.ToUnixTimeSeconds() ||
+            (minimumObservedAt is DateTimeOffset cutoff &&
+                DateTimeOffset.FromUnixTimeSeconds(issuedAt) < cutoff) ||
+            expiresAt <= now.ToUnixTimeSeconds() ||
             expiresAt - issuedAt != MaximumAgeSeconds ||
             !snapshot.TryGetProperty("revoked", out var revoked) ||
             revoked.ValueKind != JsonValueKind.Array || revoked.GetArrayLength() > MaximumEntries)
@@ -152,13 +160,23 @@ public static class JwtVcJsonRevocationSnapshot
     }
 
     /// <summary>
-    /// Apply an independent verifier's earliest acceptable issuer observation
-    /// to an authentic VC1.1 status. This opt-in method is not yet implemented.
+    /// Check a verifier-owned earliest acceptable issuer status observation.
+    /// An authentic, still-unexpired pre-incident snapshot is insufficient.
+    /// Signed iat has whole-second precision: never round the cutoff backward.
+    /// This does not prove the issuer observed a complete or live status set.
     /// </summary>
     public static RevocationSnapshotCheckResult CheckWithObservationCutoff(
         string snapshotJwt, string credentialJwt, string trustedIssuerDid,
-        DateTimeOffset now, DateTimeOffset minimumObservedAt) =>
-        throw new NotSupportedException("Verifier-owned observation cutoff is not implemented.");
+        DateTimeOffset now, DateTimeOffset minimumObservedAt)
+    {
+        if (minimumObservedAt < DateTimeOffset.UnixEpoch || minimumObservedAt > now)
+        {
+            return RevocationSnapshotCheckResult.Invalid;
+        }
+
+        return CheckCore(snapshotJwt, credentialJwt, trustedIssuerDid,
+            now, minimumObservedAt);
+    }
 
     /// <summary>
     /// Verify a real holder-signed VC1.1 VP, its unchanged issuer-signed JWT,

@@ -115,6 +115,45 @@ non-revocation. This supports the narrow VC Data Model 1.1 jwt_vc_json
 encoding, but is not proof of independent third-party Wallet interoperability,
 complete OpenID4VP or standard W3C credentialStatus / Bitstring Status List.
 
+## Verifier-owned post-incident observation cutoff (opt-in)
+
+A relying party can require a **new issuer observation after an incident**
+without changing the issuer's signature or private snapshot format. Supply
+`minimumStatusObservedAt` (an ISO 8601 timestamp with timezone) **only**
+to `/jwt-vc-json/verify-with-status` or
+`/jwt-vc-json/verify-trusted-issuers-with-status`:
+
+```json
+{
+  "credential": "<original signed jwt_vc_json>",
+  "trustedIssuerDids": ["did:key:<independently-pinned-issuer>"],
+  "expectedHolderDid": "did:key:<holder>",
+  "expectedCredentialType": "https://issuer.example/credentials#MembershipCredential",
+  "subjectContextUri": "https://issuer.example/contexts/membership/v1",
+  "revocationSnapshot": "<signed private issuer status JWT>",
+  "minimumStatusObservedAt": "2026-11-01T01:00:00Z"
+}
+```
+
+This is an illustrative timestamp, **not** evidence that the issuer truly
+observed its source at that time. The verifier must retain its independent
+incident/cutoff policy. A correctly signed 60-second snapshot with `iat`
+**earlier** than the requested instant returns `Invalid`, even when the
+issuer reported no revocations; it releases neither subject nor (on the
+multi-issuer route) signer. A fresh same-signer snapshot can return
+`SignedNotListed`, while a genuinely revoked exact JWT still returns
+`Revoked` without claims. Fractional seconds are compared against the
+signed whole-second `iat` **without rounding the cutoff backward**. A
+future or pre-Unix-epoch cutoff is invalid input (HTTP 400); the no-status
+routes reject this field rather than downgrade to unchecked verification.
+
+The cutoff only applies to the **two named VC1.1 status-verification routes**
+and the opt-in .NET APIs; other HeroSSID status endpoints do not yet
+implement it. It does not establish live revocation, completeness of the
+issuer-reported list, a timestamping authority, holder key control,
+identity vetting, informed consent, OpenID4VP interoperability or business
+authorization. All such judgments remain external.
+
 ## Trust, deployment and security limits
 
 - Authenticated `credential:verify` protects the HTTP interface; it does not automatically grant authority to credentials or their subject. These endpoints are independent issuer statement validators, **not holder private-key proofs**. A relying party requiring possession must verify a separate one-time holder-signed presentation with actual informed consent.

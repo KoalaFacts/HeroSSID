@@ -204,6 +204,40 @@ public sealed class JwtVcJsonTrustedIssuerVerifierTests
                 clean, original, _oldIssuer.Did, verifyAt, Now.AddTicks(1)));
     }
 
+    [Fact]
+    public void ActualIssuerStatusCutoffIsEnforcedAcrossHistoricalTrustPins()
+    {
+        string original = Issue(_oldIssuer);
+        string stale = JwtVcJsonRevocationSnapshot.Create(
+            _oldIssuer.Did, [], _oldIssuer.Seed, Now.AddSeconds(-25),
+            new FixedClock(Now));
+        var expiredObservation = JwtVcJsonTrustedIssuerVerifier.CheckWithStatusAfterObservationCutoff(
+            original, stale, [_oldIssuer.Did, _newIssuer.Did],
+            _holder.Did, CredentialType, Vocabulary, Now, Now.AddSeconds(-10),
+            out string hiddenIssuer, out var hiddenSubject);
+        Assert.Equal(JwtVcJsonTrustedIssuerCheckResult.Invalid, expiredObservation);
+        Assert.Equal(string.Empty, hiddenIssuer);
+        Assert.Equal(JsonValueKind.Undefined, hiddenSubject.ValueKind);
+
+        string clean = Snapshot(_oldIssuer, []);
+        Assert.Equal(JwtVcJsonTrustedIssuerCheckResult.SignedNotListed,
+            JwtVcJsonTrustedIssuerVerifier.CheckWithStatusAfterObservationCutoff(
+                original, clean, [_oldIssuer.Did, _newIssuer.Did],
+                _holder.Did, CredentialType, Vocabulary, Now, Now.AddSeconds(-10),
+                out string actualIssuer, out var actualSubject));
+        Assert.Equal(_oldIssuer.Did, actualIssuer);
+        Assert.Equal("active", actualSubject.GetProperty("membership").GetString());
+
+        string foreign = Snapshot(_newIssuer, []);
+        Assert.Equal(JwtVcJsonTrustedIssuerCheckResult.Invalid,
+            JwtVcJsonTrustedIssuerVerifier.CheckWithStatusAfterObservationCutoff(
+                original, foreign, [_oldIssuer.Did, _newIssuer.Did],
+                _holder.Did, CredentialType, Vocabulary, Now, Now.AddSeconds(-10),
+                out string wrongIssuer, out var wrongSubject));
+        Assert.Equal(string.Empty, wrongIssuer);
+        Assert.Equal(JsonValueKind.Undefined, wrongSubject.ValueKind);
+    }
+
     private JwtVcJsonTrustedIssuerCheckResult Check(
         string jwt, IReadOnlyCollection<string> issuers,
         out string signer, out JsonElement subject) =>
