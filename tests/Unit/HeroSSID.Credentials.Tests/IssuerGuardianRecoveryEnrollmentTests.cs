@@ -24,6 +24,109 @@ public sealed class IssuerGuardianRecoveryEnrollmentTests
     }
 
     [Fact]
+    public void ExactEnrollmentChallengeCannotBeRedeemedWithoutItsSignedArtifact()
+    {
+        var f = new Fixture();
+        var (enrollment, pin) = f.Enrollment();
+        var challenge = f.Issue(enrollment, pin);
+        string evidence = f.Proof(challenge.Nonce);
+
+        Assert.False(IssuerGuardianRecoveryChallenges.TryVerifyAndConsume(
+            f.Store, f.TenantId, evidence, f.Previous.Did,
+            [f.GuardianOne.Did, f.GuardianTwo.Did], 2,
+            Audience, challenge.Nonce, f.Clock, out string unapproved));
+        Assert.Equal(string.Empty, unapproved);
+        Assert.NotNull(f.Store.Find(f.TenantId, Audience.AbsoluteUri, challenge.Nonce));
+        Assert.True(f.Consume(evidence, enrollment, pin,
+            challenge.Nonce, out string approved));
+        Assert.Equal(f.Successor.Did, approved);
+    }
+
+    [Fact]
+    public void LegacyUnboundChallengeCannotSatisfyAnExactEnrolledPolicy()
+    {
+        var f = new Fixture();
+        var (enrollment, pin) = f.Enrollment();
+        var challenge = IssuerGuardianRecoveryChallenges.Issue(
+            f.Store, f.TenantId, f.Previous.Did, Audience);
+        string evidence = f.Proof(challenge.Nonce);
+
+        Assert.False(f.Consume(evidence, enrollment, pin, challenge.Nonce, out string rejected));
+        Assert.Equal(string.Empty, rejected);
+        Assert.NotNull(f.Store.Find(f.TenantId, Audience.AbsoluteUri, challenge.Nonce));
+
+        // The existing legacy SDK contract is still supported for callers
+        // who explicitly choose verifier-provided guardian pins.
+        Assert.True(IssuerGuardianRecoveryChallenges.TryVerifyAndConsume(
+            f.Store, f.TenantId, evidence, f.Previous.Did,
+            [f.GuardianOne.Did, f.GuardianTwo.Did], 2,
+            Audience, challenge.Nonce, f.Clock, out string legacyCandidate));
+        Assert.Equal(f.Successor.Did, legacyCandidate);
+    }
+
+    [Fact]
+    public void GuardianOnlyBoundChallengeCannotMasqueradeAsExactEnrollment()
+    {
+        var f = new Fixture();
+        var (enrollment, pin) = f.Enrollment();
+        var challenge = IssuerGuardianRecoveryChallenges.IssueBoundToGuardians(
+            f.Store, f.TenantId, f.Previous.Did,
+            [f.GuardianOne.Did, f.GuardianTwo.Did], 2, Audience);
+        string evidence = f.Proof(challenge.Nonce);
+
+        Assert.False(f.Consume(evidence, enrollment, pin, challenge.Nonce, out string rejected));
+        Assert.Equal(string.Empty, rejected);
+        Assert.NotNull(f.Store.Find(f.TenantId, Audience.AbsoluteUri, challenge.Nonce));
+
+        Assert.True(IssuerGuardianRecoveryChallenges.TryVerifyAndConsume(
+            f.Store, f.TenantId, evidence, f.Previous.Did,
+            [f.GuardianOne.Did, f.GuardianTwo.Did], 2,
+            Audience, challenge.Nonce, f.Clock, out string boundCandidate));
+        Assert.Equal(f.Successor.Did, boundCandidate);
+    }
+
+    [Fact]
+    public void ChallengeCannotSwitchBetweenValidEnrollmentFingerprintsWithSameGuardians()
+    {
+        var f = new Fixture();
+        var (original, originalPin) = f.Enrollment();
+        var challenge = f.Issue(original, originalPin);
+        string replacement = IssuerGuardianRecoveryEnrollment.Create(
+            f.Previous.Did, f.Previous.Seed,
+            [f.GuardianOne.Did, f.GuardianTwo.Did], 2, Audience,
+            Now.AddMinutes(-1), Now.AddMinutes(15));
+        string replacementPin = IssuerGuardianRecoveryEnrollment.Fingerprint(replacement);
+        string evidence = f.Proof(challenge.Nonce);
+
+        Assert.NotEqual(originalPin, replacementPin);
+        Assert.True(IssuerGuardianRecoveryEnrollment.TryVerify(
+            replacement, f.Previous.Did, replacementPin, Audience,
+            Now, out _, out _));
+        Assert.False(f.Consume(evidence, replacement, replacementPin,
+            challenge.Nonce, out string rejected));
+        Assert.Equal(string.Empty, rejected);
+        Assert.NotNull(f.Store.Find(f.TenantId, Audience.AbsoluteUri, challenge.Nonce));
+        Assert.True(f.Consume(evidence, original, originalPin,
+            challenge.Nonce, out string accepted));
+        Assert.Equal(f.Successor.Did, accepted);
+    }
+
+    [Fact]
+    public void ExactEnrollmentChallengeRetainsPurposeBoundCancellation()
+    {
+        var f = new Fixture();
+        var (enrollment, pin) = f.Enrollment();
+        var challenge = f.Issue(enrollment, pin);
+
+        Assert.True(IssuerGuardianRecoveryChallenges.TryCancel(
+            f.Store, f.TenantId, f.Previous.Did,
+            Audience, challenge.Nonce));
+        Assert.False(f.Consume(f.Proof(challenge.Nonce), enrollment,
+            pin, challenge.Nonce, out string candidate));
+        Assert.Equal(string.Empty, candidate);
+    }
+
+    [Fact]
     public void OldIssuerCannotSubstituteAnUnpinnedNewGuardianRoster()
     {
         var f = new Fixture();

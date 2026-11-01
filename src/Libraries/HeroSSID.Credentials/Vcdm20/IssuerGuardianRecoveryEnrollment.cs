@@ -193,14 +193,16 @@ public static class IssuerGuardianRecoveryEnrollment
         if (verifierTenantId == Guid.Empty ||
             !TryVerify(signedEnrollmentJwt, trustedPreviousIssuerDid,
                 independentlyPinnedSha256, verifierAudience, clock.GetUtcNow(),
-                out string[] guardians, out int threshold))
+                out _, out _))
         {
             throw new ArgumentException("A currently valid, independently pinned guardian enrollment is required.");
         }
 
-        return IssuerGuardianRecoveryChallenges.IssueBoundToGuardians(
-            store, verifierTenantId, trustedPreviousIssuerDid, guardians,
-            threshold, verifierAudience, lifetime);
+        // Never issue a guardian-only v2 nonce here: commit the EXACT signed
+        // enrollment that the verifier independently accepted before loss.
+        return IssuerGuardianRecoveryChallenges.IssueForEnrollment(
+            store, verifierTenantId, trustedPreviousIssuerDid,
+            independentlyPinnedSha256, verifierAudience, lifetime);
     }
 
     /// <summary>
@@ -227,10 +229,10 @@ public static class IssuerGuardianRecoveryEnrollment
             return false;
         }
 
-        return IssuerGuardianRecoveryChallenges.TryVerifyAndConsume(
+        return IssuerGuardianRecoveryChallenges.TryVerifyAndConsumeForEnrollment(
             store, verifierTenantId, evidenceJson, trustedPreviousIssuerDid,
             guardians, threshold, verifierAudience, expectedNonce, clock,
-            out successorIssuerDid);
+            independentlyPinnedSha256, out successorIssuerDid);
     }
 
     private static bool TryValidatePins(string previousIssuerDid,
