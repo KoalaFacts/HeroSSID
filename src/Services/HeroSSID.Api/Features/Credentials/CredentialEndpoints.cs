@@ -64,6 +64,7 @@ public static class CredentialEndpoints
         Vcdm20RevocationSnapshotHttpEndpoint.Map(credentials);
         Vcdm20CredentialVerificationEndpoint.Map(credentials);
         Vcdm20TrustedIssuerVerificationEndpoint.Map(credentials);
+        Vcdm20RetiredIssuerIncidentHttpEndpoint.Map(credentials);
         Vcdm20PresentationEndpoints.Map(credentials);
         IssuerSuccessorEndpoints.Map(credentials);
 
