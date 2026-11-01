@@ -80,6 +80,12 @@ internal static class JwtVcJsonTrustedIssuerVerificationEndpoint
         }
 
         DateTimeOffset now = clock.GetUtcNow();
+        if (request.MinimumStatusObservedAt is DateTimeOffset cutoff &&
+            (cutoff < DateTimeOffset.UnixEpoch || cutoff > now))
+        {
+            return InvalidRequest();
+        }
+
         if (!TryVerifyOriginalSigner(request, issuers, now,
                 out string authenticatedIssuer, out var subject))
         {
@@ -88,8 +94,12 @@ internal static class JwtVcJsonTrustedIssuerVerificationEndpoint
 
         // Pin the private 60-second status to the REAL original signer, never
         // to an alternate allowlisted DID or attacker-selected JWT header.
-        var status = JwtVcJsonRevocationSnapshot.Check(
-            request.RevocationSnapshot!, request.Credential!, authenticatedIssuer, now);
+        var status = request.MinimumStatusObservedAt is DateTimeOffset minimum
+            ? JwtVcJsonRevocationSnapshot.CheckWithObservationCutoff(
+                request.RevocationSnapshot!, request.Credential!, authenticatedIssuer,
+                now, minimum)
+            : JwtVcJsonRevocationSnapshot.Check(
+                request.RevocationSnapshot!, request.Credential!, authenticatedIssuer, now);
         return status switch
         {
             RevocationSnapshotCheckResult.NotListed =>
@@ -163,7 +173,7 @@ internal static class JwtVcJsonTrustedIssuerVerificationEndpoint
                 return false;
             }
         }
-        else if (status is not null)
+        else if (status is not null || request.MinimumStatusObservedAt is not null)
         {
             // A caller cannot silently pass a status and get an unchecked
             // result merely by choosing the non-status endpoint.
@@ -216,6 +226,9 @@ public sealed record class VerifyJwtVcJsonTrustedIssuersRequest
     public string? ExpectedCredentialType { get; init; }
     public Uri? SubjectContextUri { get; init; }
     public string? RevocationSnapshot { get; init; }
+
+    /// <summary>Verifier-owned optional signed-status observation lower bound, UTC instant.</summary>
+    public DateTimeOffset? MinimumStatusObservedAt { get; init; }
 }
 
 /// <summary>Neither signer nor subject can be disclosed on a rejected JWT/status.</summary>

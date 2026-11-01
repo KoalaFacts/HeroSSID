@@ -54,4 +54,16 @@ The status is verified against the **actual cryptographic issuer of the original
 
 `SignedNotListed` is not independently verified completeness or live non-revocation. The SDK neither downloads status nor verifies the issuer's reporting completeness. A signature proves only the issuer's key control; separate, holder-signed one-use presentations and genuine disclosure consent are required for holder control, while identity vetting, organisational role and Agent business authorization are relying-party decisions.
 
+For an incident response, the offline caller can use
+`JwtVcJsonTrustedIssuerVerifier.CheckWithStatusAfterObservationCutoff`
+with an independently chosen `minimumObservedAt` after the `now` argument,
+or `JwtVcJsonRevocationSnapshot.CheckWithObservationCutoff` for raw
+issuer-signed status checks. Both reject an authentic pre-cutoff
+60-second snapshot; the issuer's signed `iat` has **whole-second** precision,
+so a fractional cutoff cannot be rounded back to accept earlier state.
+Invalid/revoked results release no authenticated signer or subject.
+The cutoff is verifier-supplied policy; neither signature nor `iat` proves
+the completeness or actual observation time of upstream status records.
+See [the authenticated HTTP cutoff contract](jwt-vc-json-http-verify-profile.md#verifier-owned-post-incident-observation-cutoff-opt-in).
+
 No schema, database operation, remote resolution, enrollment, production deployment or package publication is performed by these SDK calls. See the [VC1.1 JWT credential format](jwt-vc-json-profile.md), [HTTP equivalent](jwt-vc-json-http-verify-profile.md) and [project vision](VISION.md).

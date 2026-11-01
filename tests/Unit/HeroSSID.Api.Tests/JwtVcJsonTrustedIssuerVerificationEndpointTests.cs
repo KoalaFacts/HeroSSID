@@ -106,6 +106,82 @@ public sealed class JwtVcJsonTrustedIssuerVerificationEndpointTests
     }
 
     [Fact]
+    public async Task VerifierOwnedIncidentCutoffRejectsAuthenticOldStatusWithoutLeakingSigner()
+    {
+        var fixture = Create();
+        string preIncident = JwtVcJsonRevocationSnapshot.Create(
+            fixture.NewDid, [], fixture.NewSeed, Now.AddSeconds(-25),
+            new FixedClock(Now));
+        var input = Request(fixture, fixture.NewToken) with
+        {
+            RevocationSnapshot = preIncident,
+            MinimumStatusObservedAt = Now.AddSeconds(-10)
+        };
+
+        var uncheckedCutoff = await ExecuteAsync(
+            JwtVcJsonTrustedIssuerVerificationEndpoint.VerifyWithStatus(
+                input with { MinimumStatusObservedAt = null },
+                new FixedClock(Now))).ConfigureAwait(true);
+        Assert.Equal("SignedNotListed", uncheckedCutoff.Body.GetProperty("status").GetString());
+
+        await AssertRejectedAsync(
+            JwtVcJsonTrustedIssuerVerificationEndpoint.VerifyWithStatus(
+                input, new FixedClock(Now))).ConfigureAwait(true);
+
+        string fresh = JwtVcJsonRevocationSnapshot.Create(
+            fixture.NewDid, [], fixture.NewSeed, Now, new FixedClock(Now));
+        var accepted = await ExecuteAsync(
+            JwtVcJsonTrustedIssuerVerificationEndpoint.VerifyWithStatus(
+                input with { RevocationSnapshot = fresh }, new FixedClock(Now)))
+            .ConfigureAwait(true);
+        Assert.Equal("SignedNotListed", accepted.Body.GetProperty("status").GetString());
+        Assert.Equal(fixture.NewDid, accepted.Body.GetProperty("verifiedIssuerDid").GetString());
+
+        string revoked = JwtVcJsonRevocationSnapshot.Create(
+            fixture.NewDid, [fixture.NewToken], fixture.NewSeed, Now,
+            new FixedClock(Now));
+        var rejectedRevoked = await ExecuteAsync(
+            JwtVcJsonTrustedIssuerVerificationEndpoint.VerifyWithStatus(
+                input with { RevocationSnapshot = revoked }, new FixedClock(Now)))
+            .ConfigureAwait(true);
+        Assert.Equal("Revoked", rejectedRevoked.Body.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, rejectedRevoked.Body.GetProperty("verifiedIssuerDid").ValueKind);
+        Assert.Equal(JsonValueKind.Null, rejectedRevoked.Body.GetProperty("verifiedSubject").ValueKind);
+    }
+
+    [Fact]
+    public async Task FutureAndUncheckedCutoffsCannotBeIgnoredOrRoundedBackward()
+    {
+        var fixture = Create();
+        string status = JwtVcJsonRevocationSnapshot.Create(
+            fixture.NewDid, [], fixture.NewSeed, Now, new FixedClock(Now));
+        var input = Request(fixture, fixture.NewToken) with
+        {
+            RevocationSnapshot = status, MinimumStatusObservedAt = Now.AddTicks(1)
+        };
+
+        var fractional = await ExecuteAsync(
+            JwtVcJsonTrustedIssuerVerificationEndpoint.VerifyWithStatus(
+                input, new FixedClock(Now.AddMilliseconds(500))))
+            .ConfigureAwait(true);
+        Assert.Equal("Invalid", fractional.Body.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, fractional.Body.GetProperty("verifiedIssuerDid").ValueKind);
+        Assert.Equal(JsonValueKind.Null, fractional.Body.GetProperty("verifiedSubject").ValueKind);
+
+        var invalidPolicy = await ExecuteAsync(
+            JwtVcJsonTrustedIssuerVerificationEndpoint.VerifyWithStatus(
+                input with { MinimumStatusObservedAt = Now.AddMinutes(1) },
+                new FixedClock(Now))).ConfigureAwait(true);
+        Assert.Equal(StatusCodes.Status400BadRequest, invalidPolicy.Status);
+
+        var ignored = await ExecuteAsync(
+            JwtVcJsonTrustedIssuerVerificationEndpoint.Verify(
+                input with { RevocationSnapshot = null }, new FixedClock(Now)))
+            .ConfigureAwait(true);
+        Assert.Equal(StatusCodes.Status400BadRequest, ignored.Status);
+    }
+
+    [Fact]
     public async Task InvalidOrAmbiguousTrustPolicyAndMissingStatusReturnBadRequest()
     {
         var fixture = Create();
