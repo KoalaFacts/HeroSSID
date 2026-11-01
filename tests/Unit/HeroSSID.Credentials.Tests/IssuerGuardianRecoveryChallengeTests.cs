@@ -119,6 +119,80 @@ public sealed class IssuerGuardianRecoveryChallengeTests
         Assert.NotNull(f.Store.Find(f.TenantId, Audience.AbsoluteUri, challenge.Nonce));
     }
 
+    [Fact]
+    public void IncidentCancellationRejectsOtherwiseValidGuardianQuorum()
+    {
+        var fixture = new Fixture();
+        var (challenge, proof) = fixture.IssueValidProof();
+
+        Assert.True(IssuerGuardianRecoveryChallenges.TryCancel(
+            fixture.Store, fixture.TenantId, fixture.Previous.Did, Audience,
+            challenge.Nonce));
+        Assert.False(fixture.Check(proof, challenge.Nonce, out string recovered));
+        Assert.Equal(string.Empty, recovered);
+        Assert.False(IssuerGuardianRecoveryChallenges.TryCancel(
+            fixture.Store, fixture.TenantId, fixture.Previous.Did, Audience,
+            challenge.Nonce));
+    }
+
+    [Fact]
+    public void IncorrectTenantOldIssuerAndAudienceCannotCancelRecovery()
+    {
+        var fixture = new Fixture();
+        var (challenge, proof) = fixture.IssueValidProof();
+
+        Assert.False(IssuerGuardianRecoveryChallenges.TryCancel(
+            fixture.Store, Guid.NewGuid(), fixture.Previous.Did, Audience,
+            challenge.Nonce));
+        Assert.False(IssuerGuardianRecoveryChallenges.TryCancel(
+            fixture.Store, fixture.TenantId, NewKey().Did, Audience,
+            challenge.Nonce));
+        Assert.False(IssuerGuardianRecoveryChallenges.TryCancel(
+            fixture.Store, fixture.TenantId, fixture.Previous.Did,
+            new Uri("https://other.example/recovery"), challenge.Nonce));
+
+        Assert.True(fixture.Check(proof, challenge.Nonce, out string recovered));
+        Assert.Equal(fixture.Successor.Did, recovered);
+    }
+
+    [Fact]
+    public void CancellingRecoveryCannotSpendAnOrdinaryPresentationChallenge()
+    {
+        var fixture = new Fixture();
+        var ordinary = fixture.Store.Issue(fixture.TenantId, Audience.AbsoluteUri,
+            fixture.Previous.Did, TimeSpan.FromMinutes(2));
+
+        Assert.False(IssuerGuardianRecoveryChallenges.TryCancel(
+            fixture.Store, fixture.TenantId, fixture.Previous.Did, Audience,
+            ordinary.Nonce));
+        Assert.NotNull(fixture.Store.Find(
+            fixture.TenantId, Audience.AbsoluteUri, ordinary.Nonce));
+        Assert.True(fixture.Store.TryConsume(
+            fixture.TenantId, Audience.AbsoluteUri, ordinary.Nonce));
+    }
+
+    [Fact]
+    public void ConcurrentCancellationOfOneRecoveryChallengeHasExactlyOneWinner()
+    {
+        var fixture = new Fixture();
+        var (challenge, proof) = fixture.IssueValidProof();
+        int cancelled = 0;
+
+        Parallel.For(0, 24, _ =>
+        {
+            if (IssuerGuardianRecoveryChallenges.TryCancel(
+                fixture.Store, fixture.TenantId, fixture.Previous.Did, Audience,
+                challenge.Nonce))
+            {
+                Interlocked.Increment(ref cancelled);
+            }
+        });
+
+        Assert.Equal(1, cancelled);
+        Assert.False(fixture.Check(proof, challenge.Nonce, out string candidate));
+        Assert.Equal(string.Empty, candidate);
+    }
+
     private sealed class Fixture
     {
         public FixedClock Clock { get; } = new(Now);

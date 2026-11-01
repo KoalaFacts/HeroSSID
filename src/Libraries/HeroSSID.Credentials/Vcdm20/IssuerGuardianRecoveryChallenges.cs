@@ -43,6 +43,45 @@ public static class IssuerGuardianRecoveryChallenges
     }
 
     /// <summary>
+    /// Cancel a previously issued guardian recovery challenge without producing
+    /// recovery evidence. A different issuer or challenge purpose must remain untouched.
+    /// </summary>
+    public static bool TryCancel(IPresentationChallengeStore store,
+        Guid verifierTenantId, string trustedPreviousIssuerDid,
+        Uri verifierAudience, string nonce)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(trustedPreviousIssuerDid);
+        ArgumentNullException.ThrowIfNull(verifierAudience);
+        ArgumentNullException.ThrowIfNull(nonce);
+
+        if (verifierTenantId == Guid.Empty ||
+            !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(trustedPreviousIssuerDid, out _) ||
+            !ValidAudience(verifierAudience))
+        {
+            return false;
+        }
+
+        string audience = verifierAudience.AbsoluteUri;
+        PresentationChallenge? challenge = store.Find(verifierTenantId, audience, nonce);
+
+        // Reuse the immutable, verifier-owned recovery-purpose marker.
+        // The same nonce on another protocol/issuer must never be cancelled.
+        if (challenge is null ||
+            !string.Equals(challenge.Nonce, nonce, StringComparison.Ordinal) ||
+            !string.Equals(challenge.Audience, audience, StringComparison.Ordinal) ||
+            !string.Equals(challenge.TrustedIssuerDid,
+                RecoveryMarkerPrefix + trustedPreviousIssuerDid, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        // Cancellation races genuine proof consumption via the same atomic
+        // store operation. Only one may win; no candidate DID is disclosed.
+        return store.TryConsume(verifierTenantId, audience, nonce);
+    }
+
+    /// <summary>
     /// Verify the genuine successor signature and independent pinned-guardian
     /// quorum, then consume the corresponding recovery-only nonce atomically
     /// before returning a candidate successor DID. Invalid/replayed requests
