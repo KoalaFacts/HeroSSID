@@ -23,6 +23,8 @@ public sealed class IssuerGuardianRecoveryHttpIntegrationTests(DatabaseFixture f
     private const string ChallengeRoute = "/api/v1/credentials/issuer-guardian-recovery/challenge";
     private const string EnrolledChallengeRoute = "/api/v1/credentials/issuer-guardian-recovery/enrolled-challenge";
     private const string EnrolledVerifyRoute = "/api/v1/credentials/issuer-guardian-recovery/enrolled-verify";
+    private const string HostPinnedChallengeRoute = "/api/v1/credentials/issuer-guardian-recovery/host-pinned-challenge";
+    private const string HostPinnedVerifyRoute = "/api/v1/credentials/issuer-guardian-recovery/host-pinned-verify";
     private const string VerifyRoute = "/api/v1/credentials/issuer-guardian-recovery/verify";
     private const string CancelRoute = "/api/v1/credentials/issuer-guardian-recovery/cancel";
     private const string Audience = "https://verifier.example/issuer-guardian-recovery";
@@ -399,6 +401,127 @@ public sealed class IssuerGuardianRecoveryHttpIntegrationTests(DatabaseFixture f
 
 
     [Fact]
+    public async Task HostPinnedEnrollmentUsesTrustedServerConfigAcrossHostsAndRejectsReplay()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        using var issuer = NewKey();
+        using var successor = NewKey();
+        using var guardianOne = NewKey();
+        using var guardianTwo = NewKey();
+        string oldDid = DidFromKey(issuer);
+        string newDid = DidFromKey(successor);
+        string firstGuardian = DidFromKey(guardianOne);
+        string secondGuardian = DidFromKey(guardianTwo);
+        DateTimeOffset now = TimeProvider.System.GetUtcNow();
+        string policy = IssuerGuardianRecoveryEnrollment.Create(oldDid,
+            issuer.Export(KeyBlobFormat.RawPrivateKey),
+            [firstGuardian, secondGuardian], 2, new Uri(Audience),
+            now.AddMinutes(-1), now.AddHours(3));
+        string pin = IssuerGuardianRecoveryEnrollment.Fingerprint(policy);
+        var trustedConfig = new Dictionary<string, string?>
+        {
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:TenantId"] = HeroDbContext.DefaultTenantId.ToString(),
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:TrustedPreviousIssuerDid"] = oldDid,
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:Audience"] = Audience,
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:SignedEnrollmentJwt"] = policy,
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:ApprovedSha256"] = pin
+        };
+
+        await using var firstHost = NewHost(trustedConfig);
+        await using var secondHost = NewHost(trustedConfig);
+        using var first = firstHost.CreateClient();
+        using var second = secondHost.CreateClient();
+        string issueToken = await GetTokenAsync(first, "credential:verify did:manage").ConfigureAwait(true);
+        string verifyToken = await GetTokenAsync(second, "credential:verify").ConfigureAwait(true);
+
+        using var issued = await PostAsync(first, HostPinnedChallengeRoute,
+            new { audience = Audience, trustedPreviousIssuerDid = oldDid, lifetimeSeconds = 120 },
+            issueToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Created, issued.StatusCode);
+        JsonElement challenge = await ReadJsonAsync(issued).ConfigureAwait(true);
+        string nonce = challenge.GetProperty("nonce").GetString()!;
+        Assert.True(challenge.GetProperty("exactEnrollmentBound").GetBoolean());
+
+        string proof = IssuerGuardianRecovery.Create(oldDid, newDid,
+            successor.Export(KeyBlobFormat.RawPrivateKey),
+            new Dictionary<string, byte[]>
+            {
+                [firstGuardian] = guardianOne.Export(KeyBlobFormat.RawPrivateKey),
+                [secondGuardian] = guardianTwo.Export(KeyBlobFormat.RawPrivateKey)
+            }, new Uri(Audience), nonce, TimeProvider.System);
+        var verify = new
+        {
+            audience = Audience, trustedPreviousIssuerDid = oldDid,
+            nonce, evidenceJson = proof
+        };
+        using var accepted = await PostAsync(second, HostPinnedVerifyRoute,
+            verify, verifyToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        JsonElement acceptedBody = await ReadJsonAsync(accepted).ConfigureAwait(true);
+        Assert.Equal("ValidRecoveryEvidence", acceptedBody.GetProperty("status").GetString());
+        Assert.Equal(newDid, acceptedBody.GetProperty("successorIssuerDid").GetString());
+
+        using var replay = await PostAsync(first, HostPinnedVerifyRoute,
+            verify, issueToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        JsonElement denied = await ReadJsonAsync(replay).ConfigureAwait(true);
+        Assert.Equal("Invalid", denied.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, denied.GetProperty("successorIssuerDid").ValueKind);
+    }
+
+    [Fact]
+    public async Task HostPinnedEnrollmentRejectsAbsentMismatchedAndCrossTenantOperatorPins()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        using var issuer = NewKey();
+        using var guardianOne = NewKey();
+        using var guardianTwo = NewKey();
+        string oldDid = DidFromKey(issuer);
+        string guardianOneDid = DidFromKey(guardianOne);
+        string guardianTwoDid = DidFromKey(guardianTwo);
+        DateTimeOffset now = TimeProvider.System.GetUtcNow();
+        string original = IssuerGuardianRecoveryEnrollment.Create(oldDid,
+            issuer.Export(KeyBlobFormat.RawPrivateKey),
+            [guardianOneDid, guardianTwoDid], 2, new Uri(Audience),
+            now.AddMinutes(-1), now.AddHours(3));
+
+        var badPinConfig = new Dictionary<string, string?>
+        {
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:TenantId"] = HeroDbContext.DefaultTenantId.ToString(),
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:TrustedPreviousIssuerDid"] = oldDid,
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:Audience"] = Audience,
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:SignedEnrollmentJwt"] = original,
+            ["IssuerGuardianEnrollmentTrust:Registrations:0:ApprovedSha256"] = new string('0', 64)
+        };
+        await using var missingHost = NewHost();
+        await using var wrongHost = NewHost(badPinConfig);
+        using var missing = missingHost.CreateClient();
+        using var wrong = wrongHost.CreateClient();
+        string missingToken = await GetTokenAsync(missing, "credential:verify did:manage").ConfigureAwait(true);
+        string wrongToken = await GetTokenAsync(wrong, "credential:verify did:manage").ConfigureAwait(true);
+        var request = new { audience = Audience, trustedPreviousIssuerDid = oldDid, lifetimeSeconds = 120 };
+
+        using var noRegistry = await PostAsync(missing, HostPinnedChallengeRoute,
+            request, missingToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, noRegistry.StatusCode);
+
+        using var mismatched = await PostAsync(wrong, HostPinnedChallengeRoute,
+            request, wrongToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, mismatched.StatusCode);
+
+        badPinConfig["IssuerGuardianEnrollmentTrust:Registrations:0:ApprovedSha256"] =
+            IssuerGuardianRecoveryEnrollment.Fingerprint(original);
+        badPinConfig["IssuerGuardianEnrollmentTrust:Registrations:0:TenantId"] =
+            Guid.NewGuid().ToString();
+        await using var foreignHost = NewHost(badPinConfig);
+        using var foreign = foreignHost.CreateClient();
+        string foreignToken = await GetTokenAsync(foreign, "credential:verify did:manage").ConfigureAwait(true);
+        using var wrongTenant = await PostAsync(foreign, HostPinnedChallengeRoute,
+            request, foreignToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, wrongTenant.StatusCode);
+    }
+
+    [Fact]
     public async Task ExactPreEnrollmentHttpRecoveryRejectsSubstitutionLegacyAndReplayAcrossHosts()
     {
         await EnsureMigratedAsync().ConfigureAwait(true);
@@ -584,22 +707,34 @@ public sealed class IssuerGuardianRecoveryHttpIntegrationTests(DatabaseFixture f
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
     }
 
-    private WebApplicationFactory<HeroSSID.Api.Features.Dids.CreateDidRequest> NewHost() =>
-        new ConfiguredHost(_fixture.ConnectionString);
+    private WebApplicationFactory<HeroSSID.Api.Features.Dids.CreateDidRequest> NewHost(
+        Dictionary<string, string?>? trustedConfig = null) =>
+        new ConfiguredHost(_fixture.ConnectionString, trustedConfig);
 
-    private sealed class ConfiguredHost(string connectionString)
+    private sealed class ConfiguredHost(
+        string connectionString, Dictionary<string, string?>? trustedConfig)
         : WebApplicationFactory<HeroSSID.Api.Features.Dids.CreateDidRequest>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Development");
             builder.ConfigureAppConfiguration((_, configuration) =>
-                configuration.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                var values = new Dictionary<string, string?>
                 {
                     ["ConnectionStrings:HeroDb"] = connectionString,
                     ["HEROSSID_DB_PASSWORD"] = "test_password",
                     ["Jwt:Secret"] = "isolated-guardian-recovery-http-test-secret-more-than-32-bytes"
-                }));
+                };
+                if (trustedConfig is not null)
+                {
+                    foreach (var entry in trustedConfig)
+                    {
+                        values.Add(entry.Key, entry.Value);
+                    }
+                }
+                configuration.AddInMemoryCollection(values);
+            });
         }
     }
 

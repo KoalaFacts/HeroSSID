@@ -101,6 +101,10 @@ builder.Services.AddSingleton<IPresentationChallengeStore>(services =>
         services.GetRequiredService<NpgsqlDataSource>(),
         services.GetRequiredService<TimeProvider>()));
 
+// Opt-in operator-owned, pre-incident signed guardian enrollment pins.
+// Never accept enrolled trust policy from the claimant's HTTP body.
+builder.Services.AddSingleton<HostPinnedGuardianEnrollmentRegistry>();
+
 // Add API versioning (T028)
 builder.Services.AddApiVersioning(options =>
 {
@@ -230,6 +234,9 @@ builder.WebHost.ConfigureKestrel(options =>
 });
 
 var app = builder.Build();
+
+// Invalid or duplicate security-policy configuration fails before serving.
+_ = app.Services.GetRequiredService<HostPinnedGuardianEnrollmentRegistry>();
 
 // Fail before serving requests, after all host configuration providers have been applied.
 _ = app.Services.GetRequiredService<JwtSigningSettings>();
