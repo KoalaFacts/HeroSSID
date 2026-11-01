@@ -145,7 +145,7 @@ public sealed class Vcdm20RetiredIssuerIncidentHttpTests
         [
             new Vcdm20RetiredCredentialPin(_retired.Did,
                 Convert.ToHexStringLower(SHA256.HashData(
-                    Encoding.UTF8.GetBytes(IssueCanonical(original)))))
+                    Encoding.UTF8.GetBytes(original))))
         ],
         ExpectedHolderDid = _holder.Did,
         ExpectedCredentialType = "MembershipCredential",
@@ -153,8 +153,6 @@ public sealed class Vcdm20RetiredIssuerIncidentHttpTests
         RevocationSnapshot = snapshot,
         MinimumObservedAt = Now.AddSeconds(-10)
     };
-
-    private static string IssueCanonical(string original) => original;
 
     private string Issue()
     {
