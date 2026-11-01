@@ -193,6 +193,100 @@ public sealed class IssuerGuardianRecoveryChallengeTests
         Assert.Equal(string.Empty, candidate);
     }
 
+    [Fact]
+    public void BoundChallengeRejectsGenuineSignaturesFromAChangedGuardianPolicy()
+    {
+        var f = new Fixture();
+        var challenge = IssuerGuardianRecoveryChallenges.IssueBoundToGuardians(
+            f.Store, f.TenantId, f.Previous.Did,
+            [f.GuardianOne.Did, f.GuardianTwo.Did], 2, Audience);
+        var rogue = NewKey();
+        string forgedPolicyEvidence = IssuerGuardianRecovery.Create(
+            f.Previous.Did, f.Successor.Did, f.Successor.Seed,
+            new Dictionary<string, byte[]>(StringComparer.Ordinal)
+            {
+                [f.GuardianOne.Did] = f.GuardianOne.Seed,
+                [rogue.Did] = rogue.Seed
+            }, Audience, challenge.Nonce, f.Clock);
+
+        Assert.False(IssuerGuardianRecoveryChallenges.TryVerifyAndConsume(
+            f.Store, f.TenantId, forgedPolicyEvidence, f.Previous.Did,
+            [f.GuardianOne.Did, rogue.Did], 2, Audience, challenge.Nonce, f.Clock,
+            out string rejected));
+        Assert.Equal(string.Empty, rejected);
+        Assert.NotNull(f.Store.Find(f.TenantId, Audience.AbsoluteUri, challenge.Nonce));
+
+        // Guardian list ordering is not security-significant; signer identity is.
+        Assert.True(IssuerGuardianRecoveryChallenges.TryVerifyAndConsume(
+            f.Store, f.TenantId, f.Proof(challenge.Nonce), f.Previous.Did,
+            [f.GuardianTwo.Did, f.GuardianOne.Did], 2, Audience, challenge.Nonce,
+            f.Clock, out string accepted));
+        Assert.Equal(f.Successor.Did, accepted);
+    }
+
+    [Fact]
+    public void BoundChallengeRejectsChangedQuorumEvenWithThreeGenuineSignatures()
+    {
+        var f = new Fixture();
+        var guardianThree = NewKey();
+        string[] pins = [f.GuardianOne.Did, f.GuardianTwo.Did, guardianThree.Did];
+        var challenge = IssuerGuardianRecoveryChallenges.IssueBoundToGuardians(
+            f.Store, f.TenantId, f.Previous.Did, pins, 2, Audience);
+        string evidence = IssuerGuardianRecovery.Create(
+            f.Previous.Did, f.Successor.Did, f.Successor.Seed,
+            new Dictionary<string, byte[]>(StringComparer.Ordinal)
+            {
+                [f.GuardianOne.Did] = f.GuardianOne.Seed,
+                [f.GuardianTwo.Did] = f.GuardianTwo.Seed,
+                [guardianThree.Did] = guardianThree.Seed
+            }, Audience, challenge.Nonce, f.Clock);
+
+        Assert.False(IssuerGuardianRecoveryChallenges.TryVerifyAndConsume(
+            f.Store, f.TenantId, evidence, f.Previous.Did, pins, 3, Audience,
+            challenge.Nonce, f.Clock, out string rejected));
+        Assert.Equal(string.Empty, rejected);
+        Assert.NotNull(f.Store.Find(f.TenantId, Audience.AbsoluteUri, challenge.Nonce));
+        Assert.True(IssuerGuardianRecoveryChallenges.TryVerifyAndConsume(
+            f.Store, f.TenantId, evidence, f.Previous.Did, pins, 2, Audience,
+            challenge.Nonce, f.Clock, out string accepted));
+        Assert.Equal(f.Successor.Did, accepted);
+    }
+
+    [Fact]
+    public void BoundChallengeCanBeCancelledBeforeAnyProofIsAccepted()
+    {
+        var f = new Fixture();
+        var challenge = IssuerGuardianRecoveryChallenges.IssueBoundToGuardians(
+            f.Store, f.TenantId, f.Previous.Did,
+            [f.GuardianOne.Did, f.GuardianTwo.Did], 2, Audience);
+        string proof = f.Proof(challenge.Nonce);
+
+        Assert.False(IssuerGuardianRecoveryChallenges.TryCancel(
+            f.Store, f.TenantId, NewKey().Did, Audience, challenge.Nonce));
+        Assert.True(IssuerGuardianRecoveryChallenges.TryCancel(
+            f.Store, f.TenantId, f.Previous.Did, Audience, challenge.Nonce));
+        Assert.False(f.Check(proof, challenge.Nonce, out string rejected));
+        Assert.Equal(string.Empty, rejected);
+    }
+
+    [Fact]
+    public void BoundChallengeRefusesUntrustedDuplicatedOrIssuerGuardians()
+    {
+        var f = new Fixture();
+        Assert.Throws<ArgumentException>(() =>
+            IssuerGuardianRecoveryChallenges.IssueBoundToGuardians(
+                f.Store, f.TenantId, f.Previous.Did,
+                [f.GuardianOne.Did, f.GuardianOne.Did], 2, Audience));
+        Assert.Throws<ArgumentException>(() =>
+            IssuerGuardianRecoveryChallenges.IssueBoundToGuardians(
+                f.Store, f.TenantId, f.Previous.Did,
+                [f.Previous.Did, f.GuardianTwo.Did], 2, Audience));
+        Assert.Throws<ArgumentException>(() =>
+            IssuerGuardianRecoveryChallenges.IssueBoundToGuardians(
+                f.Store, f.TenantId, f.Previous.Did,
+                [f.GuardianOne.Did, f.GuardianTwo.Did], 3, Audience));
+    }
+
     private sealed class Fixture
     {
         public FixedClock Clock { get; } = new(Now);

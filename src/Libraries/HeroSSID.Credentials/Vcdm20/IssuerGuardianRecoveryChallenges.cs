@@ -24,6 +24,15 @@ public static class IssuerGuardianRecoveryChallenges
     /// tenant, HTTPS audience, old issuer and recovery purpose.
     /// The caller must independently authorize who may request recovery.
     /// </summary>
+    /// <summary>Issue a one-use recovery challenge committed to an independently selected guardian quorum.</summary>
+    public static PresentationChallenge IssueBoundToGuardians(IPresentationChallengeStore store,
+        Guid verifierTenantId, string trustedPreviousIssuerDid,
+        IReadOnlyCollection<string> trustedGuardianDids, int requiredGuardianSignatures,
+        Uri verifierAudience, TimeSpan? lifetime = null)
+    {
+        throw new NotSupportedException("Guardian policy binding is not implemented yet.");
+    }
+
     public static PresentationChallenge Issue(IPresentationChallengeStore store,
         Guid verifierTenantId, string trustedPreviousIssuerDid, Uri verifierAudience,
         TimeSpan? lifetime = null)
