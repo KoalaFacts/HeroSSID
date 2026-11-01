@@ -3,7 +3,7 @@ name: Independent PR100 guardian policy-binding security review
 on:
   push:
     branches:
-      - review/pr100-guardian-cancel-20261102
+      - review/pr100-guardian-policy-20261102
 
 permissions: {}
 
