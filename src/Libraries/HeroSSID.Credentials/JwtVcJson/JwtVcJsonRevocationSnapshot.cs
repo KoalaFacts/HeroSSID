@@ -152,6 +152,15 @@ public static class JwtVcJsonRevocationSnapshot
     }
 
     /// <summary>
+    /// Apply an independent verifier's earliest acceptable issuer observation
+    /// to an authentic VC1.1 status. This opt-in method is not yet implemented.
+    /// </summary>
+    public static RevocationSnapshotCheckResult CheckWithObservationCutoff(
+        string snapshotJwt, string credentialJwt, string trustedIssuerDid,
+        DateTimeOffset now, DateTimeOffset minimumObservedAt) =>
+        throw new NotSupportedException("Verifier-owned observation cutoff is not implemented.");
+
+    /// <summary>
     /// Verify a real holder-signed VC1.1 VP, its unchanged issuer-signed JWT,
     /// a verifier-owned one-use challenge AND same-issuer signed status.
     /// Status is checked only against the original credential INSIDE the

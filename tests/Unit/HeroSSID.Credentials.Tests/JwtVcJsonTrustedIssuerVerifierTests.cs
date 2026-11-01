@@ -1,4 +1,5 @@
 using System.Text.Json;
+using HeroSSID.Credentials.CredentialRevocation;
 using HeroSSID.Credentials.JwtVcJson;
 using HeroSSID.Credentials.Utilities;
 using NSec.Cryptography;
@@ -150,6 +151,57 @@ public sealed class JwtVcJsonTrustedIssuerVerifierTests
             Assert.Equal(string.Empty, signer);
             Assert.Equal(JsonValueKind.Undefined, subject.ValueKind);
         }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void IncidentCutoffRejectsGenuinePreIncidentVc11Status(bool revoked)
+    {
+        string original = Issue(_oldIssuer);
+        string[] revokedCredentials = revoked ? [original] : [];
+        string stale = JwtVcJsonRevocationSnapshot.Create(_oldIssuer.Did,
+            revokedCredentials, _oldIssuer.Seed, Now.AddSeconds(-25), new FixedClock(Now));
+
+        Assert.Equal(revoked ? RevocationSnapshotCheckResult.Revoked :
+            RevocationSnapshotCheckResult.NotListed,
+            JwtVcJsonRevocationSnapshot.Check(stale, original, _oldIssuer.Did, Now));
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            JwtVcJsonRevocationSnapshot.CheckWithObservationCutoff(
+                stale, original, _oldIssuer.Did, Now, Now.AddSeconds(-10)));
+    }
+
+    [Fact]
+    public void FreshGenuineVc11StatusPassesCutoffAndRevokedStillRejects()
+    {
+        string original = Issue(_oldIssuer);
+        string clean = Snapshot(_oldIssuer, []);
+        string revoked = Snapshot(_oldIssuer, [original]);
+        DateTimeOffset cutoff = Now.AddSeconds(-10);
+
+        Assert.Equal(RevocationSnapshotCheckResult.NotListed,
+            JwtVcJsonRevocationSnapshot.CheckWithObservationCutoff(
+                clean, original, _oldIssuer.Did, Now, cutoff));
+        Assert.Equal(RevocationSnapshotCheckResult.Revoked,
+            JwtVcJsonRevocationSnapshot.CheckWithObservationCutoff(
+                revoked, original, _oldIssuer.Did, Now, cutoff));
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            JwtVcJsonRevocationSnapshot.CheckWithObservationCutoff(
+                clean, original, _oldIssuer.Did, Now, Now.AddSeconds(1)));
+    }
+
+    [Fact]
+    public void FractionalCutoffDoesNotRoundBackToEarlierSignedVc11Second()
+    {
+        string original = Issue(_oldIssuer);
+        string clean = Snapshot(_oldIssuer, []);
+        DateTimeOffset verifyAt = Now.AddMilliseconds(500);
+        Assert.Equal(RevocationSnapshotCheckResult.NotListed,
+            JwtVcJsonRevocationSnapshot.CheckWithObservationCutoff(
+                clean, original, _oldIssuer.Did, verifyAt, Now));
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            JwtVcJsonRevocationSnapshot.CheckWithObservationCutoff(
+                clean, original, _oldIssuer.Did, verifyAt, Now.AddTicks(1)));
     }
 
     private JwtVcJsonTrustedIssuerCheckResult Check(
