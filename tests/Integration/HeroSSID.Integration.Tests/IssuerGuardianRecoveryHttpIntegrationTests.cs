@@ -21,6 +21,8 @@ public sealed class IssuerGuardianRecoveryHttpIntegrationTests(DatabaseFixture f
     : IClassFixture<DatabaseFixture>
 {
     private const string ChallengeRoute = "/api/v1/credentials/issuer-guardian-recovery/challenge";
+    private const string EnrolledChallengeRoute = "/api/v1/credentials/issuer-guardian-recovery/enrolled-challenge";
+    private const string EnrolledVerifyRoute = "/api/v1/credentials/issuer-guardian-recovery/enrolled-verify";
     private const string VerifyRoute = "/api/v1/credentials/issuer-guardian-recovery/verify";
     private const string CancelRoute = "/api/v1/credentials/issuer-guardian-recovery/cancel";
     private const string Audience = "https://verifier.example/issuer-guardian-recovery";
@@ -393,6 +395,187 @@ public sealed class IssuerGuardianRecoveryHttpIntegrationTests(DatabaseFixture f
         JsonElement invalid = await ReadJsonAsync(afterCancel).ConfigureAwait(true);
         Assert.Equal("Invalid", invalid.GetProperty("status").GetString());
         Assert.Equal(JsonValueKind.Null, invalid.GetProperty("successorIssuerDid").ValueKind);
+    }
+
+
+    [Fact]
+    public async Task ExactPreEnrollmentHttpRecoveryRejectsSubstitutionLegacyAndReplayAcrossHosts()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        await using var firstHost = NewHost();
+        await using var secondHost = NewHost();
+        using var first = firstHost.CreateClient();
+        using var second = secondHost.CreateClient();
+        string issueToken = await GetTokenAsync(first, "credential:verify did:manage").ConfigureAwait(true);
+        string verifyToken = await GetTokenAsync(second, "credential:verify").ConfigureAwait(true);
+        using var previous = NewKey();
+        using var successor = NewKey();
+        using var firstGuardian = NewKey();
+        using var secondGuardian = NewKey();
+        string oldDid = DidFromKey(previous);
+        string newDid = DidFromKey(successor);
+        string firstPin = DidFromKey(firstGuardian);
+        string secondPin = DidFromKey(secondGuardian);
+        byte[] previousSeed = previous.Export(KeyBlobFormat.RawPrivateKey);
+        DateTimeOffset now = TimeProvider.System.GetUtcNow();
+        string original = IssuerGuardianRecoveryEnrollment.Create(
+            oldDid, previousSeed, new[] { firstPin, secondPin }, 2, new Uri(Audience),
+            now.AddMinutes(-1), now.AddHours(3));
+        string originalDigest = IssuerGuardianRecoveryEnrollment.Fingerprint(original);
+
+        using var unpinned = await PostAsync(first, EnrolledChallengeRoute,
+            new
+            {
+                audience = Audience, trustedPreviousIssuerDid = oldDid,
+                signedEnrollmentJwt = original, independentlyPinnedSha256 = new string('0', 64),
+                lifetimeSeconds = 120
+            }, issueToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, unpinned.StatusCode);
+
+        using var issued = await PostAsync(first, EnrolledChallengeRoute,
+            new
+            {
+                audience = Audience, trustedPreviousIssuerDid = oldDid,
+                signedEnrollmentJwt = original, independentlyPinnedSha256 = originalDigest,
+                lifetimeSeconds = 120
+            }, issueToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Created, issued.StatusCode);
+        JsonElement challenge = await ReadJsonAsync(issued).ConfigureAwait(true);
+        string nonce = challenge.GetProperty("nonce").GetString()!;
+        Assert.True(challenge.GetProperty("exactEnrollmentBound").GetBoolean());
+
+        string proof = IssuerGuardianRecovery.Create(oldDid, newDid,
+            successor.Export(KeyBlobFormat.RawPrivateKey),
+            new Dictionary<string, byte[]>
+            {
+                [firstPin] = firstGuardian.Export(KeyBlobFormat.RawPrivateKey),
+                [secondPin] = secondGuardian.Export(KeyBlobFormat.RawPrivateKey)
+            }, new Uri(Audience), nonce, TimeProvider.System);
+
+        // The legacy verification API cannot bypass the exact-enrollment marker.
+        using var legacy = await PostAsync(second, VerifyRoute,
+            new
+            {
+                evidenceJson = proof, audience = Audience, nonce,
+                trustedPreviousIssuerDid = oldDid,
+                trustedGuardianDids = new[] { firstPin, secondPin },
+                requiredGuardianSignatures = 2
+            }, verifyToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, legacy.StatusCode);
+        Assert.Equal("Invalid", (await ReadJsonAsync(legacy).ConfigureAwait(true))
+            .GetProperty("status").GetString());
+
+        // Another genuinely old-key-signed enrollment with the same guardian
+        // roster is not interchangeable, even when its SHA-256 is also pinned.
+        string replacement = IssuerGuardianRecoveryEnrollment.Create(
+            oldDid, previousSeed, new[] { firstPin, secondPin }, 2, new Uri(Audience),
+            now.AddMinutes(-1), now.AddHours(4));
+        using var substituted = await PostAsync(second, EnrolledVerifyRoute,
+            new
+            {
+                evidenceJson = proof, audience = Audience, nonce,
+                trustedPreviousIssuerDid = oldDid,
+                signedEnrollmentJwt = replacement,
+                independentlyPinnedSha256 = IssuerGuardianRecoveryEnrollment.Fingerprint(replacement)
+            }, verifyToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, substituted.StatusCode);
+        JsonElement denied = await ReadJsonAsync(substituted).ConfigureAwait(true);
+        Assert.Equal("Invalid", denied.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, denied.GetProperty("successorIssuerDid").ValueKind);
+
+        var valid = new
+        {
+            evidenceJson = proof, audience = Audience, nonce,
+            trustedPreviousIssuerDid = oldDid, signedEnrollmentJwt = original,
+            independentlyPinnedSha256 = originalDigest
+        };
+        using var accepted = await PostAsync(second, EnrolledVerifyRoute,
+            valid, verifyToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        JsonElement acceptedBody = await ReadJsonAsync(accepted).ConfigureAwait(true);
+        Assert.Equal("ValidRecoveryEvidence", acceptedBody.GetProperty("status").GetString());
+        Assert.Equal(newDid, acceptedBody.GetProperty("successorIssuerDid").GetString());
+
+        using var replay = await PostAsync(first, EnrolledVerifyRoute,
+            valid, issueToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        Assert.Equal("Invalid", (await ReadJsonAsync(replay).ConfigureAwait(true))
+            .GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task ExactPreEnrollmentHttpRequiresScopesAndSupportsIncidentCancellation()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        await using var firstHost = NewHost();
+        await using var secondHost = NewHost();
+        using var first = firstHost.CreateClient();
+        using var second = secondHost.CreateClient();
+        using var old = NewKey();
+        using var successor = NewKey();
+        using var guardian1 = NewKey();
+        using var guardian2 = NewKey();
+        string oldDid = DidFromKey(old);
+        string newDid = DidFromKey(successor);
+        string guardian1Did = DidFromKey(guardian1);
+        string guardian2Did = DidFromKey(guardian2);
+        DateTimeOffset now = TimeProvider.System.GetUtcNow();
+        string policy = IssuerGuardianRecoveryEnrollment.Create(oldDid,
+            old.Export(KeyBlobFormat.RawPrivateKey), new[] { guardian1Did, guardian2Did },
+            2, new Uri(Audience), now.AddMinutes(-1), now.AddHours(3));
+        string digest = IssuerGuardianRecoveryEnrollment.Fingerprint(policy);
+        var issue = new
+        {
+            audience = Audience, trustedPreviousIssuerDid = oldDid,
+            signedEnrollmentJwt = policy, independentlyPinnedSha256 = digest,
+            lifetimeSeconds = 120
+        };
+
+        using var anonymous = await first.PostAsJsonAsync(EnrolledChallengeRoute,
+            issue, TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        string verifyOnly = await GetTokenAsync(first, "credential:verify").ConfigureAwait(true);
+        string manageOnly = await GetTokenAsync(first, "did:manage").ConfigureAwait(true);
+        using var missingManage = await PostAsync(first, EnrolledChallengeRoute,
+            issue, verifyOnly).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, missingManage.StatusCode);
+        using var missingVerify = await PostAsync(first, EnrolledChallengeRoute,
+            issue, manageOnly).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, missingVerify.StatusCode);
+
+        string both = await GetTokenAsync(first, "credential:verify did:manage").ConfigureAwait(true);
+        using var issued = await PostAsync(first, EnrolledChallengeRoute, issue,
+            both).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Created, issued.StatusCode);
+        string nonce = (await ReadJsonAsync(issued).ConfigureAwait(true))
+            .GetProperty("nonce").GetString()!;
+        string proof = IssuerGuardianRecovery.Create(oldDid, newDid,
+            successor.Export(KeyBlobFormat.RawPrivateKey),
+            new Dictionary<string, byte[]>
+            {
+                [guardian1Did] = guardian1.Export(KeyBlobFormat.RawPrivateKey),
+                [guardian2Did] = guardian2.Export(KeyBlobFormat.RawPrivateKey)
+            }, new Uri(Audience), nonce, TimeProvider.System);
+        var check = new
+        {
+            evidenceJson = proof, audience = Audience, nonce,
+            trustedPreviousIssuerDid = oldDid, signedEnrollmentJwt = policy,
+            independentlyPinnedSha256 = digest
+        };
+        using var cannotVerify = await PostAsync(first, EnrolledVerifyRoute,
+            check, manageOnly).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, cannotVerify.StatusCode);
+
+        string canceller = await GetTokenAsync(second, "credential:verify did:manage").ConfigureAwait(true);
+        using var cancelled = await PostAsync(second, CancelRoute,
+            new { audience = Audience, nonce, trustedPreviousIssuerDid = oldDid },
+            canceller).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NoContent, cancelled.StatusCode);
+        using var rejected = await PostAsync(first, EnrolledVerifyRoute,
+            check, both).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, rejected.StatusCode);
+        Assert.Equal("Invalid", (await ReadJsonAsync(rejected).ConfigureAwait(true))
+            .GetProperty("status").GetString());
     }
 
     private async Task EnsureMigratedAsync()
