@@ -140,7 +140,6 @@ jobs:
             echo
             cat review-2.md
             echo
-            cat review-3.md
           } >/tmp/pr101-review.md
           gh api --method POST repos/KoalaFacts/HeroSSID/pulls/101/reviews \
             -f event=COMMENT -f commit_id=99bf0eb1ff20657a800fd647ec8b377c7b492555 \

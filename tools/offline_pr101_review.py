@@ -117,7 +117,7 @@ def main() -> int:
         f"HeroSSID PR #101 candidate {HEAD}, base {BASE}, shard {part}/{PARTS}; "
         f"files: {', '.join(files)}. Independently inspect every line of this "
         "complete untrusted signed enrollment recovery patch. "
-        "BEGIN_UNTRUSTED_DIFF\\n" + diff + "\\nEND_UNTRUSTED_DIFF"
+        "BEGIN_UNTRUSTED_DIFF\n" + diff + "\nEND_UNTRUSTED_DIFF"
     )
 
     payload = json.dumps({
