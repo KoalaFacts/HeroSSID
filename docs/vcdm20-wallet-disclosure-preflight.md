@@ -132,6 +132,67 @@ not-listed set does not prove status completeness or real-time non-revocation;
 neither signed policy nor holder proof establishes real identity or business
 authorization.
 
+## Strict full-disclosure consent → holder-signed original request (opt-in)
+
+The **new** `CreateHolderBoundPresentationAfterPreviewRequiringSignedPolicy`
+closes the integration gap between the no-private-key strict Wallet preflight
+and the independently verifier-pinned exact signed-request hash check. It does
+not show an actual UI or attest that the holder consented: **the integrating
+Wallet must display every authenticated claim and obtain informed consent
+between these two calls**. The caller must independently pin issuer, holder,
+verifier, audience, type and exact HTTPS subject context; never derive trusted
+pins from a received QR code or JWT.
+
+```csharp
+if (!Vcdm20WalletDisclosure.TryPrepareRequiringSignedPolicy(
+        originalSignedRequestJwt, pinnedVerifierDid, pinnedAudience,
+        pinnedCredentialType, pinnedHttpsContextUri, pinnedIssuerDid,
+        originalIssuerSignedVc2Jwt, holderDid, TimeProvider.System,
+        out var approvedPreview) || approvedPreview is null)
+{
+    // Reject before displaying untrusted claims or touching the holder key.
+    return;
+}
+
+// Display EVERY property of approvedPreview.VerifiedSubject, the verifier,
+// destination, issuer, exact vocabulary and expiry. Obtain real consent here.
+// This is FULL disclosure, not selective disclosure.
+if (!await WalletUiShowsAllClaimsAndGetsConsentAsync(approvedPreview))
+{
+    return;
+}
+
+string boundVp = Vcdm20WalletDisclosure
+    .CreateHolderBoundPresentationAfterPreviewRequiringSignedPolicy(
+        approvedPreview, originalSignedRequestJwt, originalIssuerSignedVc2Jwt,
+        holderOwnedEd25519Seed, TimeProvider.System);
+```
+
+This opt-in signer **rejects** an authentic-but-legacy verifier request that
+does not itself Ed25519-sign the exact type and HTTPS context; it checks the
+issuer, verifier, short-lived request, exact original compact signed artifacts,
+all originally previewed claims, and real holder private key again at signing
+time. It produces a `vp+jwt` whose **holder Ed25519 signature** covers the
+private `herossidRequestSha256` field. The existing
+`CreateHolderPresentationAfterPreview` intentionally remains compatible but
+**does not** add this binding; a strict verifier rejects that old VP.
+
+The relying verifier must independently retain the original signed request
+and the lowercase SHA-256 of its **exact compact JWT bytes**, and use
+`Vcdm20JosePresentation.CheckWithHolderBoundSignedVerifierRequest` together
+with its own single-use atomic challenge store. Do not accept the hash or
+trust settings solely from the presenter. A no-claim `Invalid` result
+rejects altered authentic same-nonce requests, omitted holder hash, forged
+signatures, wrong tenant and replay. The successful
+`SignedButStatusUnchecked` result authenticates the issuer statement and
+holder key control **only**; enforce issuer-signed status and verifier denial
+policy separately before any relying-party authorization.
+
+There is no hosted Wallet consent UI, record of user consent, managed holder
+key custody, automatic original hash persistence, live revocation, identity
+vetting, Agent delegation authority or third-party OpenID4VP conformance.
+The private SHA-256 field is **not** a standard W3C/OpenID4VP request binding.
+
 ## Trust and product boundaries
 
 - Authenticated issuer claims alone do not establish holder private-key control. The holder signs only after its integrating app decides to call signing, and the application must provide genuine disclosure and user consent itself. Digest matching is not evidence the user saw the claims. The original direct signing entry point remains available.

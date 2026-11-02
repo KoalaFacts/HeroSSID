@@ -109,6 +109,44 @@ public static class Vcdm20WalletDisclosure
     }
 
     /// <summary>
+    /// Sign the exact original verifier request digest only after a strict
+    /// policy-bound full-disclosure preview and the application's consent step.
+    /// Legacy verifier requests must not silently downgrade this opt-in flow.
+    /// </summary>
+    public static string CreateHolderBoundPresentationAfterPreviewRequiringSignedPolicy(
+        Vcdm20WalletDisclosurePreview preview, string signedRequestJwt,
+        string credentialJwt, byte[] holderSeed, TimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(preview);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        // A legacy signed request is genuine, but does NOT bind the credential
+        // type and context selected by the verifier. Do not silently downgrade.
+        if (preview.SubjectContextUri is null ||
+            !OfflineSignedPresentationRequest.TryReadPolicyBound(
+                signedRequestJwt, preview.VerifierDid, preview.VerifierAudience,
+                preview.CredentialType, preview.SubjectContextUri, clock,
+                out var signedChallenge) ||
+            signedChallenge is null ||
+            !string.Equals(signedChallenge.TrustedIssuerDid,
+                preview.TrustedIssuerDid, StringComparison.Ordinal) ||
+            signedChallenge.ExpiresAt != preview.RequestExpiresAt)
+        {
+            throw new ArgumentException(
+                "An authentic, unchanged verifier-signed type and HTTPS context policy is required.",
+                nameof(preview));
+        }
+
+        // Re-authenticate both original signed artifacts and the entire
+        // full-disclosure preview *before* accessing the holder's private key.
+        // The resulting holder Ed25519 signature includes the EXACT request
+        // hash; the verifier must independently retain and check its own pin.
+        return CreateHolderPresentationAfterPreviewCore(
+            preview, signedRequestJwt, credentialJwt, holderSeed, clock,
+            bindOriginalRequest: true);
+    }
+
+    /// <summary>
     /// After the integrating Wallet has obtained actual informed consent, recheck
     /// both signed artifacts, their exact compact-JWS digests, expiry and disclosed
     /// subject before invoking the independent Ed25519 holder signer. This guards
@@ -118,7 +156,15 @@ public static class Vcdm20WalletDisclosure
     /// </summary>
     public static string CreateHolderPresentationAfterPreview(
         Vcdm20WalletDisclosurePreview preview, string signedRequestJwt,
-        string credentialJwt, byte[] holderSeed, TimeProvider clock)
+        string credentialJwt, byte[] holderSeed, TimeProvider clock) =>
+        CreateHolderPresentationAfterPreviewCore(
+            preview, signedRequestJwt, credentialJwt, holderSeed, clock,
+            bindOriginalRequest: false);
+
+    private static string CreateHolderPresentationAfterPreviewCore(
+        Vcdm20WalletDisclosurePreview preview, string signedRequestJwt,
+        string credentialJwt, byte[] holderSeed, TimeProvider clock,
+        bool bindOriginalRequest)
     {
         ArgumentNullException.ThrowIfNull(preview);
         ArgumentNullException.ThrowIfNull(holderSeed);
@@ -143,13 +189,18 @@ public static class Vcdm20WalletDisclosure
                 nameof(preview));
         }
 
-        // Revalidate issuer provenance, exact verifier request and actual holder
-        // seed again inside the existing VP signer; preview metadata is never a
-        // substitute for cryptographic checks and verifier one-use enforcement.
-        return Vcdm20JosePresentation.Create(
-            signedRequestJwt, preview.VerifierDid, preview.VerifierAudience,
-            credentialJwt, preview.CredentialType, preview.SubjectContextUri,
-            preview.HolderDid, holderSeed, clock);
+        // Both entry points check the authentic issuer credential, signed
+        // verifier request and exact preview; only the new opt-in strict path
+        // adds the signed exact-request SHA-256 claim. Legacy behavior remains.
+        return bindOriginalRequest
+            ? Vcdm20JosePresentation.CreateWithSignedRequestBinding(
+                signedRequestJwt, preview.VerifierDid, preview.VerifierAudience,
+                credentialJwt, preview.CredentialType, preview.SubjectContextUri,
+                preview.HolderDid, holderSeed, clock)
+            : Vcdm20JosePresentation.Create(
+                signedRequestJwt, preview.VerifierDid, preview.VerifierAudience,
+                credentialJwt, preview.CredentialType, preview.SubjectContextUri,
+                preview.HolderDid, holderSeed, clock);
     }
 
     /// <summary>
