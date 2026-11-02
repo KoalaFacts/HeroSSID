@@ -486,7 +486,60 @@ internal static class Vcdm20PresentationEndpoints
         [FromServices] ITenantContext tenantContext,
         [FromServices] TimeProvider clock)
     {
-        throw new NotSupportedException("Host-pinned VC2 holder verification is not implemented.");
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(registry);
+        ArgumentNullException.ThrowIfNull(challenges);
+        ArgumentNullException.ThrowIfNull(tenantContext);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        if (!HostPinnedVcdm20IssuerRegistry.IsPolicyId(request.PolicyId) ||
+            request.Presentation is not { Length: > 0 and <= MaximumPresentationLength } ||
+            request.RevocationSnapshot is not { Length: > 0 and <= MaximumSnapshotLength } ||
+            !ValidAudience(request.Audience) || !ValidNonce(request.Nonce))
+        {
+            return Results.Problem(
+                title: "Invalid Host-Pinned VC2 Presentation",
+                detail: "A bounded signed holder proof, issuer status, HTTPS audience, issued nonce and policy selector are required.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        Guid tenantId = tenantContext.GetCurrentTenantId();
+        if (tenantId == Guid.Empty)
+        {
+            return Results.Unauthorized();
+        }
+
+        // The authenticated caller supplies only opaque policy ID and signed
+        // artifacts. Issuer trust, status cutoff and emergency refusal come
+        // solely from the verifier operator's immutable tenant configuration.
+        if (!registry.TryGet(tenantId, request.PolicyId!, out HostPinnedVcdm20IssuerPolicy? policy) ||
+            policy is null)
+        {
+            return Results.Ok(new VerifyVcdm20PresentationResponse(
+                Vcdm20RevocationCheckResult.Invalid.ToString(), null));
+        }
+
+        try
+        {
+            Vcdm20RevocationCheckResult status =
+                Vcdm20RevocationSnapshot.CheckPresentationWithVerifierPolicy(
+                    request.Presentation!, request.RevocationSnapshot!, tenantId,
+                    request.Audience!, request.Nonce!, policy.TrustedIssuerDids,
+                    policy.CredentialType, policy.SubjectContextUri,
+                    policy.DeniedCredentialSha256, policy.MinimumStatusObservedAtUtc,
+                    challenges, clock, out var verifiedSubject);
+            return Results.Ok(new VerifyVcdm20PresentationResponse(
+                status.ToString(),
+                status == Vcdm20RevocationCheckResult.SignedNotListed ? verifiedSubject : null));
+        }
+        catch (NpgsqlException)
+        {
+            return Unavailable();
+        }
+        catch (TimeoutException)
+        {
+            return Unavailable();
+        }
     }
 
     private static IResult InvalidSignedPolicy() => Results.Ok(
