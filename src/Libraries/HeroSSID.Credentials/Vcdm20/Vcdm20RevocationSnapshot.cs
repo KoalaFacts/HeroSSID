@@ -301,6 +301,7 @@ public static class Vcdm20RevocationSnapshot
         Uri expectedContextUri, IPresentationChallengeStore challenges,
         TimeProvider clock, out JsonElement verifiedSubject)
     {
+        ArgumentNullException.ThrowIfNull(presentationJwt);
         ArgumentNullException.ThrowIfNull(snapshotJwt);
         ArgumentNullException.ThrowIfNull(challenges);
         ArgumentNullException.ThrowIfNull(clock);
