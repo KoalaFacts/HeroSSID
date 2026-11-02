@@ -404,6 +404,28 @@ public sealed class HostPinnedVcdm20VerificationTests
         }
     }
 
+    [Fact]
+    public void NestedIncidentCutoffConfigurationCannotBeSilentlyIgnored()
+    {
+        var fixture = Create();
+        var nested = Configuration(fixture.Tenant, fixture.IssuerDid);
+        nested["Vcdm20VerifierTrust:Policies:0:MinimumStatusObservedAtUtc:Nested"] =
+            Now.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Throws<InvalidOperationException>(
+            () => new HostPinnedVcdm20IssuerRegistry(nested));
+    }
+
+    [Fact]
+    public void HttpStatusCallerCannotInjectItsOwnObservationCutoff()
+    {
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize<VerifyHostPinnedVcdm20WithStatusRequest>(
+                """
+                {"policyId":"membership-v1","credential":"x.y.z","revocationSnapshot":"signed.status.jwt","minimumStatusObservedAtUtc":"1900-01-01T00:00:00Z"}
+                """,
+                HttpJsonOptions));
+    }
+
     private static string Digest(string jwt) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(jwt)));
 
