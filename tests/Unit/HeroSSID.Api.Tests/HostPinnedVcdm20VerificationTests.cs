@@ -18,6 +18,7 @@ public sealed class HostPinnedVcdm20VerificationTests
     private static readonly DateTimeOffset Now = new(2026, 11, 2, 3, 0, 0, TimeSpan.Zero);
     private static readonly Uri Vocabulary = new("https://issuer.example/contexts/membership/v1");
     private const string Type = "MembershipCredential";
+    private static readonly JsonSerializerOptions HttpJsonOptions = new(JsonSerializerDefaults.Web);
 
     [Fact]
     public async Task AuthenticatedHostPinnedIssuerVerificationRouteIsAvailable()
@@ -145,7 +146,7 @@ public sealed class HostPinnedVcdm20VerificationTests
     {
         Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<VerifyHostPinnedVcdm20Request>(
             "{\"policyId\":\"membership-v1\",\"credential\":\"x.y.z\",\"trustedIssuerDids\":[\"did:key:attacker\"]}",
-            new JsonSerializerOptions { PropertyNameCaseInsensitive = true }));
+            HttpJsonOptions));
     }
 
     private static Dictionary<string, string?> ConfigurationEntries(Guid tenant, string issuer) => new()
