@@ -104,6 +104,33 @@ public sealed class IssuerPinnedSuccessorAdmissionTests
         Assert.Equal(string.Empty, expired);
     }
 
+    [Fact]
+    public void ConcurrentPinnedAdmissionAcceptsOnlyOneContender()
+    {
+        var oldKey = NewKey();
+        var approved = NewKey();
+        var clock = new FixedClock();
+        var store = new InMemoryPresentationChallengeStore(clock);
+        Guid tenant = Guid.NewGuid();
+        var challenge = IssuerKeySuccessorAttestation.IssueChallenge(
+            tenant, Audience, oldKey.Did, store);
+        string proof = IssueProof(oldKey, approved, challenge.Nonce, clock);
+        int accepted = 0;
+
+        Parallel.For(0, 24, _ =>
+        {
+            if (IssuerKeySuccessorAttestation.TryVerifyAndConsumePinnedSuccessor(
+                proof, oldKey.Did, approved.Did, Audience, challenge.Nonce,
+                tenant, store, clock, out string successor))
+            {
+                Assert.Equal(approved.Did, successor);
+                Interlocked.Increment(ref accepted);
+            }
+        });
+
+        Assert.Equal(1, accepted);
+    }
+
     private static string IssueProof(
         (string Did, byte[] Seed) oldKey,
         (string Did, byte[] Seed) newKey,
