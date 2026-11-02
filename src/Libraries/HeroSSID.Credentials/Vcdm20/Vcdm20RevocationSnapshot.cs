@@ -236,6 +236,24 @@ public static class Vcdm20RevocationSnapshot
         return status;
     }
 
+
+    /// <summary>
+    /// Opt-in verifier-owned incident cutoff for a holder-signed direct VC2 presentation.
+    /// A genuine issuer status observed before the cutoff must be rejected even if
+    /// otherwise unexpired. The verifier owns the cutoff; it is not a holder claim.
+    /// </summary>
+    public static Vcdm20RevocationCheckResult CheckPresentationWithObservationCutoff(
+        string presentationJwt, string snapshotJwt, Guid tenantId, string expectedAudience,
+        string expectedNonce, string expectedCredentialType, Uri expectedContextUri,
+        DateTimeOffset minimumObservedAt, IPresentationChallengeStore challenges,
+        TimeProvider clock, out JsonElement verifiedSubject)
+    {
+        _ = minimumObservedAt;
+        return CheckPresentation(presentationJwt, snapshotJwt, tenantId,
+            expectedAudience, expectedNonce, expectedCredentialType,
+            expectedContextUri, challenges, clock, out verifiedSubject);
+    }
+
     private static bool IsAuthenticDirectVc2(string? credentialJwt, string issuerDid, byte[] issuerPublicKey)
     {
         if (!StrictJwtReader.TryRead(credentialJwt!, "vc+jwt", MaximumCredentialLength,
