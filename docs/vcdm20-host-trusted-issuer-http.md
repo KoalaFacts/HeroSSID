@@ -37,7 +37,7 @@ non-UTC, negative or nested values fail startup. The seven supported
 per-policy keys are exactly `TenantId`, `PolicyId`, `CredentialType`,
 `SubjectContextUri`, `TrustedIssuerDids`, `DeniedCredentialSha256`, and
 `MinimumStatusObservedAtUtc`. Unexpected keys (including typos such as
-`MinimumStatusObservedAtUTC` and `DeniedCredentialsSha256`) and nested values
+`MinimumStatusObservationUtc` and `DeniedCredentialsSha256`) and nested values
 under scalar keys **fail startup**, rather than silently disabling an operator
 safeguard. List children remain confined to the two documented issuer/denial
 collections. This protects against misconfigured policy deployment, but
