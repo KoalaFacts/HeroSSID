@@ -251,8 +251,15 @@ in-memory latch. Keep revoked digests in the separately protected, durable
 operator policy, synchronize them across all verifier replicas, and require a
 separate explicit incident review before intentionally restoring an enrollment.
 A replica that never observed a particular withdrawal cannot infer it from
-another replica, and an in-flight verification can still win a race against
-an arriving update.
+another replica. Both host-pinned and caller-supplied enrolled HTTP verification
+now re-read the operator's monotonic denial policy **after successful Ed25519
+verification and atomic challenge consumption, before releasing a candidate
+successor DID**. A withdrawal observed during nonce consumption therefore
+returns `Invalid` with no successor DID; its nonce is conservatively spent.
+This narrows the in-flight race but cannot make configuration delivery, nonce
+consumption and HTTP response atomic: a withdrawal arriving after the final
+policy check may still lose the race. It also cannot cover an unnotified
+replica or a process restarted with an old policy inventory.
 
 A withdrawn enrollment returns 400 rather than issuing a new challenge.
 Verification of even a genuine pending successor/guardian proof returns
