@@ -3,7 +3,7 @@ name: Independent PR106 guardian enrollment emergency withdrawal review
 on:
   push:
     branches:
-      - review/pr106-guardian-host-preflight-20261102
+      - review/pr106-guardian-emergency-revocation-20261102
 
 permissions: {}
 
