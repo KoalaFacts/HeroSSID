@@ -873,6 +873,31 @@ public sealed class IssuerGuardianRecoveryHttpIntegrationTests(DatabaseFixture f
             issue, authorized).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.BadRequest, blockedIssue.StatusCode);
 
+        // A legitimate-looking configuration rollback or replacement must not
+        // silently resurrect an enrollment that this running verifier already
+        // observed as revoked. The replacement itself is a valid canonical
+        // digest, so malformed-config fail-closed checks cannot save us.
+        var configuration = host.Services.GetRequiredService<IConfiguration>();
+        string unrelatedDigest = new string(digest[0] == 'A' ? 'B' : 'A', 64);
+        configuration["IssuerGuardianEnrollmentTrust:RevokedSha256:0"] = unrelatedDigest;
+
+        using var rollbackIssue = await PostAsync(client, HostPinnedChallengeRoute,
+            issue, authorized).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, rollbackIssue.StatusCode);
+
+        using var rollbackHostVerify = await PostAsync(client, HostPinnedVerifyRoute,
+            verify, authorized).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, rollbackHostVerify.StatusCode);
+        Assert.Equal("Invalid", (await ReadJsonAsync(rollbackHostVerify)
+            .ConfigureAwait(true)).GetProperty("status").GetString());
+
+        using var rollbackEnrolledVerify = await PostAsync(client, EnrolledVerifyRoute,
+            bypassAttempt, authorized).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, rollbackEnrolledVerify.StatusCode);
+        Assert.Equal("Invalid", (await ReadJsonAsync(rollbackEnrolledVerify)
+            .ConfigureAwait(true)).GetProperty("status").GetString());
+
+
         // A separate verifier replica configured with the same denied digest
         // must also reject the genuine signed proof, even without a restart race.
         var deniedConfig = new Dictionary<string, string?>(trusted)

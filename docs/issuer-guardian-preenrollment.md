@@ -236,9 +236,23 @@ cannot override it. The host validates this list at startup; an invalid
 fingerprint, duplicate, scalar value or excessive list prevents startup. On
 each host-pinned **challenge and verification** request it reads the current
 `IConfiguration` values again. A reloadable provider can therefore withdraw
-an existing signed policy without restarting a running instance. If a changed
+an existing signed policy without restarting a running instance. **Withdrawals
+observed at startup or during a valid live configuration read are monotonic
+within that running process:** once a fingerprint is denied, replacing or
+rolling back the config entry to a different valid SHA-256 cannot silently
+restore the revoked guardian enrollment. This protection applies to both
+host-pinned and caller-supplied exact-enrollment HTTP adapters. If a changed
 list is malformed, every host-pinned lookup on that instance fails closed until
-the configuration is corrected.
+the configuration is corrected, without erasing earlier witnessed withdrawals.
+
+This is a process-local safety latch, **not durable revocation storage**: an
+operator-controlled restart with an older policy inventory clears the
+in-memory latch. Keep revoked digests in the separately protected, durable
+operator policy, synchronize them across all verifier replicas, and require a
+separate explicit incident review before intentionally restoring an enrollment.
+A replica that never observed a particular withdrawal cannot infer it from
+another replica, and an in-flight verification can still win a race against
+an arriving update.
 
 A withdrawn enrollment returns 400 rather than issuing a new challenge.
 Verification of even a genuine pending successor/guardian proof returns

@@ -21,6 +21,11 @@ internal sealed class HostPinnedGuardianEnrollmentRegistry
 {
     private const string EmergencyDenialsKey = "IssuerGuardianEnrollmentTrust:RevokedSha256";
     private readonly IConfiguration _configuration;
+    private readonly object _emergencyDenialsLock = new();
+    // Once a running verifier has observed an authentic operator withdrawal,
+    // a transient configuration rollback must never silently restore trust.
+    // A deliberate re-enrollment requires an independently reviewed restart.
+    private readonly HashSet<string> _observedEmergencyDenials = new(StringComparer.Ordinal);
     private readonly Dictionary<(Guid Tenant, string Issuer, string Audience), HostPinnedGuardianEnrollment> _registrations = [];
 
     public HostPinnedGuardianEnrollmentRegistry(IConfiguration configuration, TimeProvider clock)
@@ -31,10 +36,12 @@ internal sealed class HostPinnedGuardianEnrollmentRegistry
 
         // A malformed emergency denial list must not be silently ignored on
         // startup. Later reloads fail closed in TryGet without crashing the host.
-        if (!TryReadEmergencyDenials(configuration, null, out _))
+        if (!TryReadEmergencyDenials(configuration, out HashSet<string> initialDenials))
         {
             throw new InvalidOperationException("Invalid host-pinned guardian emergency revocation configuration.");
         }
+
+        _observedEmergencyDenials.UnionWith(initialDenials);
 
         var entries = configuration.GetSection("IssuerGuardianEnrollmentTrust:Registrations").GetChildren().ToArray();
         DateTimeOffset now = clock.GetUtcNow();
@@ -86,8 +93,22 @@ internal sealed class HostPinnedGuardianEnrollmentRegistry
     // Exact operator withdrawals apply to BOTH host-pinned and legacy
     // caller-supplied enrollment routes, which share enrollment-bound nonces.
     // Invalid live configuration must never be treated as an empty denylist.
-    internal bool IsAllowedFingerprint(string fingerprint) =>
-        TryReadEmergencyDenials(_configuration, fingerprint, out bool revoked) && !revoked;
+    internal bool IsAllowedFingerprint(string fingerprint)
+    {
+        lock (_emergencyDenialsLock)
+        {
+            // A malformed live reload fails closed without discarding prior
+            // revocations. Every well-formed observation can only ADD denied
+            // digests to this process's effective policy, never restore them.
+            if (!TryReadEmergencyDenials(_configuration, out HashSet<string> currentDenials))
+            {
+                return false;
+            }
+
+            _observedEmergencyDenials.UnionWith(currentDenials);
+            return !_observedEmergencyDenials.Contains(fingerprint);
+        }
+    }
 
     internal bool TryGet(Guid tenantId, string oldIssuerDid, string audience,
         out HostPinnedGuardianEnrollment? registration)
@@ -107,9 +128,9 @@ internal sealed class HostPinnedGuardianEnrollmentRegistry
     }
 
     private static bool TryReadEmergencyDenials(
-        IConfiguration configuration, string? fingerprint, out bool revoked)
+        IConfiguration configuration, out HashSet<string> deniedFingerprints)
     {
-        revoked = false;
+        deniedFingerprints = new HashSet<string>(StringComparer.Ordinal);
         IConfigurationSection section = configuration.GetSection(EmergencyDenialsKey);
         // Reject a scalar or nested/ambiguous value instead of accidentally
         // interpreting a malformed revocation policy as an empty list.
@@ -124,20 +145,14 @@ internal sealed class HostPinnedGuardianEnrollmentRegistry
             return false;
         }
 
-        var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (IConfigurationSection entry in entries)
         {
             string? digest = entry.Value;
             if (digest is not { Length: 64 } ||
                 digest.Any(static c => c is not (>= '0' and <= '9' or >= 'A' and <= 'F')) ||
-                !seen.Add(digest))
+                !deniedFingerprints.Add(digest))
             {
                 return false;
-            }
-
-            if (string.Equals(digest, fingerprint, StringComparison.Ordinal))
-            {
-                revoked = true;
             }
         }
 
