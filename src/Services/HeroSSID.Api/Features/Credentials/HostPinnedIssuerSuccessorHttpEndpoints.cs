@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json.Serialization;
 using HeroSSID.Api.Authentication;
 using HeroSSID.Core.TenantManagement;
@@ -106,6 +108,57 @@ internal sealed record HostPinnedIssuerSuccessorPolicy(
     string Audience, string TrustedPreviousIssuerDid, string PreapprovedSuccessorIssuerDid);
 
 /// <summary>
+/// Isolate host-pinned successor challenges from the older unpinned route and
+/// from other operator policies (including future successor replacements).
+/// The SDK expects its own purpose prefix; the adapter maps it to a separate
+/// stable SHA-256 policy-bound namespace in the same existing PostgreSQL table.
+/// </summary>
+internal sealed class HostPinnedIssuerSuccessorChallengeStore : IPresentationChallengeStore
+{
+    private readonly IPresentationChallengeStore _inner;
+    private readonly string _expectedAudience;
+    private readonly string _storedPurpose;
+
+    public HostPinnedIssuerSuccessorChallengeStore(
+        IPresentationChallengeStore inner, string policyId,
+        HostPinnedIssuerSuccessorPolicy policy)
+    {
+        ArgumentNullException.ThrowIfNull(inner);
+        ArgumentNullException.ThrowIfNull(policyId);
+        ArgumentNullException.ThrowIfNull(policy);
+        _inner = inner;
+        _expectedAudience = IssuerKeySuccessorAttestation.ChallengePurposePrefix + policy.Audience;
+
+        string policyIdentity = string.Join("\n", policyId, policy.Audience,
+            policy.TrustedPreviousIssuerDid, policy.PreapprovedSuccessorIssuerDid);
+        _storedPurpose = "issuer-successor-host-pinned:" +
+            Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(policyIdentity)));
+    }
+
+    public PresentationChallenge Issue(
+        Guid verifierTenantId, string audience, string trustedIssuerDid,
+        TimeSpan? lifetime = null) =>
+        _inner.Issue(verifierTenantId, Scope(audience), trustedIssuerDid, lifetime);
+
+    public PresentationChallenge? Find(
+        Guid verifierTenantId, string audience, string nonce) =>
+        _inner.Find(verifierTenantId, Scope(audience), nonce);
+
+    public bool TryConsume(Guid verifierTenantId, string audience, string nonce) =>
+        _inner.TryConsume(verifierTenantId, Scope(audience), nonce);
+
+    private string Scope(string audience)
+    {
+        if (!string.Equals(audience, _expectedAudience, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Unexpected issuer successor challenge scope.", nameof(audience));
+        }
+
+        return _storedPurpose;
+    }
+}
+
+/// <summary>
 /// An independently enrolled, verifier-operated alternative to the legacy
 /// caller-selected issuer-successor challenge and key-control-only verifier.
 /// It NEVER enrolls a DID or grants organisation/business authority.
@@ -170,9 +223,11 @@ internal static class HostPinnedIssuerSuccessorHttpEndpoints
 
         try
         {
+            var scopedStore = new HostPinnedIssuerSuccessorChallengeStore(
+                challenges, request.PolicyId!, policy);
             var challenge = IssuerKeySuccessorAttestation.IssueChallenge(
                 tenant, new Uri(policy.Audience, UriKind.Absolute),
-                policy.TrustedPreviousIssuerDid, challenges,
+                policy.TrustedPreviousIssuerDid, scopedStore,
                 TimeSpan.FromSeconds(request.LifetimeSeconds));
             return Results.Json(new IssueIssuerSuccessorChallengeResponse(
                 policy.Audience, challenge.Nonce, policy.TrustedPreviousIssuerDid,
@@ -237,10 +292,12 @@ internal static class HostPinnedIssuerSuccessorHttpEndpoints
 
         try
         {
+            var scopedStore = new HostPinnedIssuerSuccessorChallengeStore(
+                challenges, request.PolicyId!, policy);
             bool valid = IssuerKeySuccessorAttestation.TryVerifyAndConsumePinnedSuccessor(
                 request.Attestation, policy.TrustedPreviousIssuerDid,
                 policy.PreapprovedSuccessorIssuerDid, new Uri(policy.Audience, UriKind.Absolute),
-                request.Nonce, tenant, challenges, clock, out string successorDid);
+                request.Nonce, tenant, scopedStore, clock, out string successorDid);
             return Results.Ok(new VerifyIssuerSuccessorProofResponse(
                 valid ? "ValidPinnedKeyContinuity" : "Invalid",
                 valid ? successorDid : null));
