@@ -19,12 +19,23 @@ namespace HeroSSID.Api.Features.Credentials;
 /// </summary>
 internal sealed class HostPinnedGuardianEnrollmentRegistry
 {
+    private const string EmergencyDenialsKey = "IssuerGuardianEnrollmentTrust:RevokedSha256";
+    private readonly IConfiguration _configuration;
     private readonly Dictionary<(Guid Tenant, string Issuer, string Audience), HostPinnedGuardianEnrollment> _registrations = [];
 
     public HostPinnedGuardianEnrollmentRegistry(IConfiguration configuration, TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(clock);
+        _configuration = configuration;
+
+        // A malformed emergency denial list must not be silently ignored on
+        // startup. Later reloads fail closed in TryGet without crashing the host.
+        if (!TryReadEmergencyDenials(configuration, null, out _))
+        {
+            throw new InvalidOperationException("Invalid host-pinned guardian emergency revocation configuration.");
+        }
+
         var entries = configuration.GetSection("IssuerGuardianEnrollmentTrust:Registrations").GetChildren().ToArray();
         DateTimeOffset now = clock.GetUtcNow();
         if (entries.Length > 256)
@@ -73,8 +84,60 @@ internal sealed class HostPinnedGuardianEnrollmentRegistry
     }
 
     internal bool TryGet(Guid tenantId, string oldIssuerDid, string audience,
-        out HostPinnedGuardianEnrollment? registration) =>
-        _registrations.TryGetValue((tenantId, oldIssuerDid, audience), out registration);
+        out HostPinnedGuardianEnrollment? registration)
+    {
+        registration = null;
+        if (!_registrations.TryGetValue((tenantId, oldIssuerDid, audience),
+                out HostPinnedGuardianEnrollment? approved) ||
+            !TryReadEmergencyDenials(_configuration, approved.ApprovedSha256, out bool revoked) ||
+            revoked)
+        {
+            // Neither a revoked policy nor malformed operator configuration
+            // may cause a new challenge or redeem an outstanding one.
+            return false;
+        }
+
+        registration = approved;
+        return true;
+    }
+
+    private static bool TryReadEmergencyDenials(
+        IConfiguration configuration, string? fingerprint, out bool revoked)
+    {
+        revoked = false;
+        IConfigurationSection section = configuration.GetSection(EmergencyDenialsKey);
+        // Reject a scalar or nested/ambiguous value instead of accidentally
+        // interpreting a malformed revocation policy as an empty list.
+        if (section.Value is not null)
+        {
+            return false;
+        }
+
+        IConfigurationSection[] entries = [.. section.GetChildren()];
+        if (entries.Length > 256)
+        {
+            return false;
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (IConfigurationSection entry in entries)
+        {
+            string? digest = entry.Value;
+            if (digest is not { Length: 64 } ||
+                digest.Any(static c => c is not (>= '0' and <= '9' or >= 'A' and <= 'F')) ||
+                !seen.Add(digest))
+            {
+                return false;
+            }
+
+            if (string.Equals(digest, fingerprint, StringComparison.Ordinal))
+            {
+                revoked = true;
+            }
+        }
+
+        return true;
+    }
 }
 
 internal sealed record HostPinnedGuardianEnrollment(string SignedEnrollmentJwt, string ApprovedSha256);
