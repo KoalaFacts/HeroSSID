@@ -194,6 +194,12 @@ host inventory or invalid signature yields **200**
 authentic but **unapproved** successor is rejected **before** the shared
 PostgreSQL nonce is consumed, so the approved controller can still respond.
 A successful acceptance atomically consumes the one-use nonce across hosts.
+The host-pinned challenge uses a **separate, policy-bound PostgreSQL
+purpose** derived from its policy ID, HTTPS audience and exact old/new issuer
+pins. The legacy unpinned key-control-only verification route (or another
+host policy) cannot burn or accept that nonce, even with genuinely signed
+old-key/unauthorised-new-key proof. Policy changes cannot silently redeem
+an outstanding nonce under a different successor pin. No schema is added.
 
 Unknown policy at issuance, wrong request shape, or any attempt to add a
 request-field trust override is **400**; anonymous **401**, missing verifier
