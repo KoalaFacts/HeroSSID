@@ -262,19 +262,32 @@ public static class Vcdm20RevocationSnapshot
     }
 
     /// <summary>
-    /// Check the authentic verifier-signed credential vocabulary and matching
-    /// retained nonce before authenticating the VC2 issuer, holder and issuer status.
-    /// Only SignedNotListed releases claims; it is not live status or authorization.
+    /// Enforce a verifier-retained exact SHA-256 pin of its genuine eight-field
+    /// signed request before authenticating the VC2 issuer and holder proof,
+    /// consuming the matching nonce and checking the actual issuer's 60-second
+    /// private status snapshot. A presenter cannot supply the trust pin.
+    /// SignedNotListed is not live non-revocation, consent or authorization.
     /// </summary>
-    public static Vcdm20RevocationCheckResult CheckPresentationWithSignedVerifierRequest(
-        string presentationJwt, string signedRequestJwt, string trustedVerifierDid,
-        string snapshotJwt, Guid verifierTenantId, string expectedAudience,
-        string expectedNonce, string expectedCredentialType, Uri expectedContextUri,
-        IPresentationChallengeStore challenges, TimeProvider clock,
-        out JsonElement verifiedSubject)
+    public static Vcdm20RevocationCheckResult CheckPresentationWithPinnedSignedVerifierRequest(
+        string presentationJwt, string signedRequestJwt, string trustedRequestSha256,
+        string trustedVerifierDid, string snapshotJwt, Guid verifierTenantId,
+        string expectedAudience, string expectedNonce, string expectedCredentialType,
+        Uri expectedContextUri, IPresentationChallengeStore challenges,
+        TimeProvider clock, out JsonElement verifiedSubject)
     {
         verifiedSubject = default;
-        throw new NotSupportedException("Verifier-signed status policy is not implemented.");
+        if (!Vcdm20JosePresentation.MatchesPinnedSignedVerifierRequest(
+                signedRequestJwt, trustedRequestSha256, trustedVerifierDid,
+                verifierTenantId, expectedAudience, expectedNonce,
+                expectedCredentialType, expectedContextUri, challenges, clock))
+        {
+            return Vcdm20RevocationCheckResult.Invalid;
+        }
+
+        return CheckPresentationCore(presentationJwt, snapshotJwt, verifierTenantId,
+            expectedAudience, expectedNonce, expectedCredentialType,
+            expectedContextUri, null, null, null, challenges, clock,
+            out verifiedSubject);
     }
 
     // The sole credential extraction, signature, nonce-consumption and status
