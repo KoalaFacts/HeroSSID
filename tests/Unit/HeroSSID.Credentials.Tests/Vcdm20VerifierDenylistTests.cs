@@ -147,6 +147,55 @@ public sealed class Vcdm20VerifierDenylistTests
                 out var expiredIssuer, out var expiredClaims), expiredIssuer, expiredClaims);
     }
 
+    [Fact]
+    public void VerifierOwnedIncidentCutoffRejectsFreshButPreIncidentStatusWithoutClaims()
+    {
+        string credential = Issue(_issuer, "member");
+        string before = Snapshot(_issuer, []);
+        DateTimeOffset cutoff = Now.AddSeconds(1);
+        DateTimeOffset checkedAt = Now.AddSeconds(3);
+        AssertNoClaims(Vcdm20VerifierPolicyResult.Invalid,
+            Vcdm20VerifierDenylist.CheckWithStatusObservedAfter(
+                credential, before, [_issuer.Did], [], _holder.Did,
+                CredentialType, Vocabulary, checkedAt, cutoff,
+                out var staleIssuer, out var staleClaims), staleIssuer, staleClaims);
+
+        string cleanAfter = Vcdm20RevocationSnapshot.Create(
+            _issuer.Did, [], _issuer.Seed, Now.AddSeconds(2),
+            new FixedClock(Now.AddSeconds(2)));
+        Assert.Equal(Vcdm20VerifierPolicyResult.SignedNotListed,
+            Vcdm20VerifierDenylist.CheckWithStatusObservedAfter(
+                credential, cleanAfter, [_issuer.Did], [], _holder.Did,
+                CredentialType, Vocabulary, checkedAt, cutoff,
+                out var issuer, out var verified));
+        Assert.Equal(_issuer.Did, issuer);
+        Assert.Equal("member", verified.GetProperty("membership").GetString());
+
+        AssertNoClaims(Vcdm20VerifierPolicyResult.DeniedByVerifier,
+            Vcdm20VerifierDenylist.CheckWithStatusObservedAfter(
+                credential, cleanAfter, [_issuer.Did], [Digest(credential)],
+                _holder.Did, CredentialType, Vocabulary, checkedAt, cutoff,
+                out var deniedIssuer, out var deniedClaims),
+            deniedIssuer, deniedClaims);
+
+        string revokedAfter = Vcdm20RevocationSnapshot.Create(
+            _issuer.Did, [credential], _issuer.Seed, Now.AddSeconds(2),
+            new FixedClock(Now.AddSeconds(2)));
+        AssertNoClaims(Vcdm20VerifierPolicyResult.IssuerReportedRevoked,
+            Vcdm20VerifierDenylist.CheckWithStatusObservedAfter(
+                credential, revokedAfter, [_issuer.Did], [], _holder.Did,
+                CredentialType, Vocabulary, checkedAt, cutoff,
+                out var revokedIssuer, out var revokedClaims),
+            revokedIssuer, revokedClaims);
+
+        AssertNoClaims(Vcdm20VerifierPolicyResult.Invalid,
+            Vcdm20VerifierDenylist.CheckWithStatusObservedAfter(
+                credential, cleanAfter, [_issuer.Did], [], _holder.Did,
+                CredentialType, Vocabulary, checkedAt, checkedAt.AddSeconds(1),
+                out var futureIssuer, out var futureClaims),
+            futureIssuer, futureClaims);
+    }
+
     private Vcdm20VerifierPolicyResult Check(
         string jwt, IReadOnlyCollection<string> trusted, IReadOnlyCollection<string> denied,
         out string issuer, out JsonElement claims) =>
