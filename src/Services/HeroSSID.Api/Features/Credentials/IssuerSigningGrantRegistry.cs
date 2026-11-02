@@ -17,7 +17,7 @@ internal sealed class IssuerSigningGrantRegistry
     private readonly HashSet<Guid> _enforcedTenants = [];
     private readonly HashSet<(Guid Tenant, string ClientId, string IssuerDid)> _grants = [];
 
-    internal IssuerSigningGrantRegistry(IConfiguration configuration)
+    public IssuerSigningGrantRegistry(IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         IConfigurationSection root = configuration.GetSection("IssuerSigningGrants");
