@@ -352,6 +352,18 @@ public static class Vcdm20WalletDisclosure
         return presentation;
     }
 
+
+    /// <summary>
+    /// After a status-aware, signed-policy preview, sign the exact verifier
+    /// request digest with the holder's key while requiring the same unchanged,
+    /// current issuer-signed status. No UI consent attestation is implied.
+    /// </summary>
+    public static string CreateHolderBoundPresentationAfterStatusPreviewRequiringSignedPolicy(
+        Vcdm20WalletStatusDisclosurePreview preview, string signedRequestJwt,
+        string credentialJwt, string issuerSignedSnapshotJwt,
+        byte[] holderSeed, TimeProvider clock) =>
+        throw new NotSupportedException("Status-aware holder-bound signing is not yet implemented.");
+
     private static string Sha256(string jwt) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(jwt)));
 }
