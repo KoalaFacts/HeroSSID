@@ -111,7 +111,7 @@ def main() -> int:
         "withdrawal arriving during successful consumption, and the final "
         "process-local monotonic IConfiguration denial check before returning "
         "the candidate DID. Examine both host-pinned and caller-supplied "
-        "enrolled-verification endpoints for alternate route bypass, null /
+        "enrolled-verification endpoints for alternate route bypass, null or "
         "invalid configuration, failure disclosure, correct one-use behavior, "
         "TOCTOU windows after final check, and honest documentation of "
         "cross-process, restart and post-check races. Check positive controls "
