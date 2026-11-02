@@ -9,7 +9,7 @@ permissions: {}
 
 jobs:
   review:
-    name: Independent Qwen three-file emergency revocation review
+    name: Independent Qwen four-file emergency revocation review
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
@@ -20,17 +20,18 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Require exact product HEAD, main baseline and all three paths
+      - name: Require exact product HEAD, main baseline and all four paths
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse bb03b1469595b1d88ce9bc587aab1f28059694a8^{commit})" = "bb03b1469595b1d88ce9bc587aab1f28059694a8"
+          test "$(git rev-parse 11f66d202d36bc23c84fd560f0577f4b2fd492c0^{commit})" = "11f66d202d36bc23c84fd560f0577f4b2fd492c0"
           test "$(git rev-parse 1c6a145d57e4306d310820d02876d6571d7b5b50^{commit})" = "1c6a145d57e4306d310820d02876d6571d7b5b50"
-          git diff --name-only 1c6a145d57e4306d310820d02876d6571d7b5b50 bb03b1469595b1d88ce9bc587aab1f28059694a8 | sort >/tmp/review-files.txt
+          git diff --name-only 1c6a145d57e4306d310820d02876d6571d7b5b50 11f66d202d36bc23c84fd560f0577f4b2fd492c0 | sort >/tmp/review-files.txt
           python3 - <<'PY'
           from pathlib import Path
           expected = {
               "src/Services/HeroSSID.Api/Features/Credentials/HostPinnedIssuerGuardianRecoveryHttpEndpoints.cs",
+              "src/Services/HeroSSID.Api/Features/Credentials/IssuerGuardianEnrollmentHttpEndpoints.cs",
               "tests/Integration/HeroSSID.Integration.Tests/IssuerGuardianRecoveryHttpIntegrationTests.cs",
               "docs/issuer-guardian-preenrollment.md",
           }
@@ -58,7 +59,7 @@ jobs:
             test -s "review-$part.json"
             test -s "review-model-$part.json"
             test -s "review-$part.md"
-            test "$(cat "review-head-$part.txt")" = "bb03b1469595b1d88ce9bc587aab1f28059694a8"
+            test "$(cat "review-head-$part.txt")" = "11f66d202d36bc23c84fd560f0577f4b2fd492c0"
           done
       - name: Preserve raw model inference, exact-head proofs and rendered review
         if: always()
@@ -86,21 +87,22 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: independent-pr106-review
-      - name: Verify live PR head, full three-file set and original inference
+      - name: Verify live PR head, full four-file set and original inference
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/106 --jq '.head.sha')"
-          test "$actual" = "bb03b1469595b1d88ce9bc587aab1f28059694a8"
+          test "$actual" = "11f66d202d36bc23c84fd560f0577f4b2fd492c0"
           gh api repos/KoalaFacts/HeroSSID/pulls/106/files --paginate --jq '.[].filename' | sort >/tmp/pr106-files.txt
           python3 - <<'PY'
           import json
           from pathlib import Path
-          head = "bb03b1469595b1d88ce9bc587aab1f28059694a8"
+          head = "11f66d202d36bc23c84fd560f0577f4b2fd492c0"
           expected = {
               "src/Services/HeroSSID.Api/Features/Credentials/HostPinnedIssuerGuardianRecoveryHttpEndpoints.cs",
+              "src/Services/HeroSSID.Api/Features/Credentials/IssuerGuardianEnrollmentHttpEndpoints.cs",
               "tests/Integration/HeroSSID.Integration.Tests/IssuerGuardianRecoveryHttpIntegrationTests.cs",
               "docs/issuer-guardian-preenrollment.md",
           }
@@ -127,9 +129,9 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo "Independent Qwen2.5-Coder 7B local-model review of all three exact PR #106 emergency-revocation patches."
+            echo "Independent Qwen2.5-Coder 7B local-model review of all four exact PR #106 emergency-revocation patches."
             echo
-            echo "Reviewed exact HEAD: bb03b1469595b1d88ce9bc587aab1f28059694a8. Base: 1c6a145d57e4306d310820d02876d6571d7b5b50."
+            echo "Reviewed exact HEAD: 11f66d202d36bc23c84fd560f0577f4b2fd492c0. Base: 1c6a145d57e4306d310820d02876d6571d7b5b50."
             echo "Automated independent code review only; NOT human approval, an external cryptographic security audit, W3C conformance, third-party Wallet interoperability, personal identity validation or business authorization."
             echo "All authentic raw model verdicts and findings retained; each finding requires evidence-based disposition."
             echo
@@ -139,6 +141,6 @@ jobs:
             echo
           } >/tmp/pr106-review.md
           gh api --method POST repos/KoalaFacts/HeroSSID/pulls/106/reviews \
-            -f event=COMMENT -f commit_id=bb03b1469595b1d88ce9bc587aab1f28059694a8 \
+            -f event=COMMENT -f commit_id=11f66d202d36bc23c84fd560f0577f4b2fd492c0 \
             -f body="$(cat /tmp/pr106-review.md)" \
             --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
