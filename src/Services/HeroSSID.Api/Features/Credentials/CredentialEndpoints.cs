@@ -68,6 +68,7 @@ public static class CredentialEndpoints
         Vcdm20RetiredIssuerIncidentHttpEndpoint.Map(credentials);
         Vcdm20PresentationEndpoints.Map(credentials);
         IssuerSuccessorEndpoints.Map(credentials);
+        HostPinnedIssuerSuccessorHttpEndpoints.Map(credentials);
         IssuerGuardianRecoveryHttpEndpoints.Map(credentials);
         IssuerGuardianEnrollmentHttpEndpoints.Map(credentials);
         HostPinnedIssuerGuardianRecoveryHttpEndpoints.Map(credentials);

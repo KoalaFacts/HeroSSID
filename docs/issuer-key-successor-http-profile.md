@@ -127,3 +127,91 @@ HTTP hosts with distinct real Ed25519 old/new keys. They test successful
 verification, cross-host replay rejection, foreign old-key rejection without
 nonce consumption, auth and malformed requests. They are not a third-party
 wallet test, external security certification or production migration.
+
+
+## 4. Opt-in verifier-host-owned successor policy (HTTP)
+
+The original `/issuer-successor/verify` route above deliberately checks
+**dual signing-key control only**, not an enrolled new issuer. Relying parties
+that have independently pre-enrolled an expected **new** issuer DID can use
+the separate **host-pinned** challenge and verify pair instead. This closes
+the gap between the SDK-only `TryVerifyAndConsumePinnedSuccessor` policy and
+authenticated non-.NET HTTP clients.
+
+The verifier operator configures `IssuerSuccessorTrust:Policies` **before**
+serving requests, not through a credential, signed claim or HTTP input.
+Example environment/configuration keys (values are illustrative, not real
+enrollment evidence):
+
+```text
+IssuerSuccessorTrust__Policies__0__TenantId=<verifier-tenant-GUID>
+IssuerSuccessorTrust__Policies__0__PolicyId=issuer-migration
+IssuerSuccessorTrust__Policies__0__Audience=https://verifier.example/host-pinned-successor
+IssuerSuccessorTrust__Policies__0__TrustedPreviousIssuerDid=did:key:z...
+IssuerSuccessorTrust__Policies__0__PreapprovedSuccessorIssuerDid=did:key:z...
+```
+
+Each policy is an exact tenant + policy ID + canonical HTTPS audience +
+distinct old/new Ed25519 `did:key` pair, with at most 128 entries. Unknown,
+nested, duplicate, malformed or insecure configuration **fails startup**.
+A policy ID selects an existing operator inventory record but conveys no
+approval by itself. The actual operator must independently obtain and secure
+evidence for *when* and *by whom* the successor was approved: a configuration
+file alone does not prove pre-incident enrollment or business authority.
+
+With an authenticated `credential:verify` scoped token, issue a challenge
+using **only** the registered policy ID:
+
+```http
+POST /api/v1/credentials/issuer-successor/host-pinned-challenge
+Authorization: Bearer <credential:verify scoped token>
+Content-Type: application/json
+
+{"policyId":"issuer-migration","lifetimeSeconds":120}
+```
+
+**201 Created** returns the pinned `audience`, `trustedPreviousIssuerDid`,
+random `nonce` and `expiresAt`. The HTTP caller cannot choose either issuer
+DID or audience. The old and proposed new controllers separately authenticate
+the expected verifier and sign the exact nonce/audience statement using
+their distinct Ed25519 keys; neither sends its signing seed to this API.
+
+```http
+POST /api/v1/credentials/issuer-successor/host-pinned-verify
+Authorization: Bearer <credential:verify scoped token>
+Content-Type: application/json
+
+{"policyId":"issuer-migration","nonce":"<issued-nonce>",
+ "attestation":"<original-dual-signed-json-artifact>"}
+```
+
+A valid proof and still-live challenge yield **200**
+`{"status":"ValidPinnedKeyContinuity","successorIssuerDid":"did:key:z..."}`.
+An authentic two-key proof for a *different* new DID, a mismatched old DID,
+wrong verifier audience, foreign tenant, expired/replayed challenge, missing
+host inventory or invalid signature yields **200**
+`{"status":"Invalid","successorIssuerDid":null}`. In particular, an
+authentic but **unapproved** successor is rejected **before** the shared
+PostgreSQL nonce is consumed, so the approved controller can still respond.
+A successful acceptance atomically consumes the one-use nonce across hosts.
+The host-pinned challenge uses a **separate, policy-bound PostgreSQL
+purpose** derived from its policy ID, HTTPS audience and exact old/new issuer
+pins. The legacy unpinned key-control-only verification route (or another
+host policy) cannot burn or accept that nonce, even with genuinely signed
+old-key/unauthorised-new-key proof. Policy changes cannot silently redeem
+an outstanding nonce under a different successor pin. No schema is added.
+
+Unknown policy at issuance, wrong request shape, or any attempt to add a
+request-field trust override is **400**; anonymous **401**, missing verifier
+scope **403**, capacity **429** at issuance, durable store failure **503**.
+No new PostgreSQL schema, migration, credential issuance or trust mutation
+occurs. Hosts must deploy the **same operator policy inventory** and durable
+challenge store; a missing inventory rejects rather than authenticates.
+
+This is **privately defined HeroSSID key-continuity evidence**, not DID
+rotation, independently proven historical enrollment, automatic issuer trust,
+key compromise detection, real-person identity verification, agent delegation,
+business authorization, OpenID4VP compliance or third-party Wallet
+interoperability. The older unpinned endpoints remain available for
+key-control-only checks and their result **must not be interpreted** as a
+host-pinned successor acceptance.
