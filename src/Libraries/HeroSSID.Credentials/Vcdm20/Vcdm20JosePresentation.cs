@@ -50,18 +50,31 @@ public static class Vcdm20JosePresentation
     public static string Create(
         string signedRequestJwt, string trustedVerifierDid, string expectedAudience,
         string credentialJwt, string expectedCredentialType, Uri expectedContextUri,
-        string holderDid, byte[] holderSeed, TimeProvider clock)
+        string holderDid, byte[] holderSeed, TimeProvider clock) =>
+        CreateCore(signedRequestJwt, trustedVerifierDid, expectedAudience,
+            credentialJwt, expectedCredentialType, expectedContextUri,
+            holderDid, holderSeed, clock, bindOriginalRequest: false);
+
+    private static string CreateCore(
+        string signedRequestJwt, string trustedVerifierDid, string expectedAudience,
+        string credentialJwt, string expectedCredentialType, Uri expectedContextUri,
+        string holderDid, byte[] holderSeed, TimeProvider clock, bool bindOriginalRequest)
     {
         ArgumentNullException.ThrowIfNull(expectedContextUri);
         ArgumentNullException.ThrowIfNull(holderSeed);
         ArgumentNullException.ThrowIfNull(clock);
 
-        if ((!OfflineSignedPresentationRequest.TryRead(
-                signedRequestJwt, trustedVerifierDid, expectedAudience, clock, out var challenge) &&
-            !OfflineSignedPresentationRequest.TryReadPolicyBound(
+        PresentationChallenge? challenge;
+        bool requestAuthenticated = bindOriginalRequest
+            ? OfflineSignedPresentationRequest.TryReadPolicyBound(
                 signedRequestJwt, trustedVerifierDid, expectedAudience,
-                expectedCredentialType, expectedContextUri, clock, out challenge)) ||
-            challenge is null)
+                expectedCredentialType, expectedContextUri, clock, out challenge)
+            : OfflineSignedPresentationRequest.TryRead(
+                signedRequestJwt, trustedVerifierDid, expectedAudience, clock, out challenge)
+                || OfflineSignedPresentationRequest.TryReadPolicyBound(
+                    signedRequestJwt, trustedVerifierDid, expectedAudience,
+                    expectedCredentialType, expectedContextUri, clock, out challenge);
+        if (!requestAuthenticated || challenge is null)
         {
             throw new ArgumentException("An authentic request from the pinned verifier is required.", nameof(signedRequestJwt));
         }
@@ -92,7 +105,7 @@ public static class Vcdm20JosePresentation
             cty = "vp",
             kid = KeyId(holderDid)
         });
-        string payload = JsonSerializer.Serialize(new Dictionary<string, object>(StringComparer.Ordinal)
+        var claims = new Dictionary<string, object>(StringComparer.Ordinal)
         {
             ["@context"] = BaseContexts,
             ["type"] = PresentationTypes,
@@ -110,7 +123,17 @@ public static class Vcdm20JosePresentation
             ["nonce"] = challenge.Nonce,
             ["iat"] = issuedAt,
             ["exp"] = expiry
-        });
+        };
+        if (bindOriginalRequest)
+        {
+            // This private JOSE claim is part of the holder's Ed25519-signed
+            // bytes and refers to the EXACT compact verifier-signed request.
+            // The relying verifier must independently load the original pin.
+            claims["herossidRequestSha256"] = Convert.ToHexStringLower(
+                SHA256.HashData(Encoding.UTF8.GetBytes(signedRequestJwt)));
+        }
+
+        string payload = JsonSerializer.Serialize(claims);
         string signed = Ed25519JwtSigner.CreateSignedJwt(header, payload, holderSeed);
         if (signed.Length > MaximumPresentationLength ||
             !Ed25519JwtSigner.VerifySignedJwt(signed, holderPublicKey))
@@ -134,7 +157,9 @@ public static class Vcdm20JosePresentation
         string signedRequestJwt, string trustedVerifierDid, string expectedAudience,
         string credentialJwt, string expectedCredentialType, Uri expectedContextUri,
         string holderDid, byte[] holderSeed, TimeProvider clock) =>
-        throw new NotSupportedException("Holder-bound original-request proof has not been implemented.");
+        CreateCore(signedRequestJwt, trustedVerifierDid, expectedAudience,
+            credentialJwt, expectedCredentialType, expectedContextUri,
+            holderDid, holderSeed, clock, bindOriginalRequest: true);
 
     /// <summary>
     /// Verifier checks real issuer and holder Ed25519 signatures, exact pinned context,
@@ -150,7 +175,7 @@ public static class Vcdm20JosePresentation
         out JsonElement verifiedSubject) =>
         CheckCore(presentationJwt, verifierTenantId, expectedAudience,
             expectedNonce, expectedCredentialType, expectedContextUri,
-            challenges, clock, out verifiedSubject, out _, out _);
+            challenges, clock, null, out verifiedSubject, out _, out _);
 
     /// <summary>
     /// Internal issuer/holder-authenticated artifact access for additional
@@ -164,7 +189,7 @@ public static class Vcdm20JosePresentation
         out JsonElement verifiedSubject, out string credentialJwt, out string holderDid) =>
         CheckCore(presentationJwt, verifierTenantId, expectedAudience,
             expectedNonce, expectedCredentialType, expectedContextUri,
-            challenges, clock, out verifiedSubject, out credentialJwt, out holderDid);
+            challenges, clock, null, out verifiedSubject, out credentialJwt, out holderDid);
 
     /// <summary>
     /// Require the verifier's independently retained SHA-256 pin of the EXACT
@@ -204,8 +229,22 @@ public static class Vcdm20JosePresentation
         string trustedVerifierDid, Guid verifierTenantId, string expectedAudience,
         string expectedNonce, string expectedCredentialType, Uri expectedContextUri,
         IPresentationChallengeStore challenges, TimeProvider clock,
-        out JsonElement verifiedSubject) =>
-        throw new NotSupportedException("Strict holder-bound request verification has not been implemented.");
+        out JsonElement verifiedSubject)
+    {
+        verifiedSubject = default;
+        if (!MatchesPinnedSignedVerifierRequest(
+                signedRequestJwt, trustedRequestSha256, trustedVerifierDid,
+                verifierTenantId, expectedAudience, expectedNonce,
+                expectedCredentialType, expectedContextUri, challenges, clock))
+        {
+            return Vcdm20PresentationCheckResult.Invalid;
+        }
+
+        return CheckCore(presentationJwt, verifierTenantId, expectedAudience,
+            expectedNonce, expectedCredentialType, expectedContextUri,
+            challenges, clock, trustedRequestSha256,
+            out verifiedSubject, out _, out _);
+    }
 
     /// <summary>
     /// Pre-consumption, no-claim verifier request authentication shared by
@@ -253,8 +292,8 @@ public static class Vcdm20JosePresentation
         string presentationJwt, Guid verifierTenantId, string expectedAudience,
         string expectedNonce, string expectedCredentialType, Uri expectedContextUri,
         IPresentationChallengeStore challenges, TimeProvider clock,
-        out JsonElement verifiedSubject, out string authenticatedCredentialJwt,
-        out string authenticatedHolderDid)
+        string? requiredHolderSignedRequestSha256, out JsonElement verifiedSubject,
+        out string authenticatedCredentialJwt, out string authenticatedHolderDid)
     {
         authenticatedCredentialJwt = string.Empty;
         authenticatedHolderDid = string.Empty;
@@ -278,7 +317,13 @@ public static class Vcdm20JosePresentation
             !StrictJwtReader.TryRead(
                 presentationJwt, "vp+jwt", MaximumPresentationLength,
                 out var payload, KeyId(holderDid), "vp") ||
-            payload.EnumerateObject().Count() != 8 ||
+            payload.EnumerateObject().Count() !=
+                (requiredHolderSignedRequestSha256 is null ? 8 : 9) ||
+            (requiredHolderSignedRequestSha256 is not null &&
+                (!StrictJwtReader.TryGetString(payload, "herossidRequestSha256",
+                    out var holderSignedRequestHash) ||
+                 !string.Equals(holderSignedRequestHash,
+                    requiredHolderSignedRequestSha256, StringComparison.Ordinal))) ||
             !HasOneString(payload, "@context", BaseContext) ||
             !HasOneString(payload, "type", "VerifiablePresentation") ||
             !StrictJwtReader.TryGetString(payload, "holder", out var signedHolder) ||
