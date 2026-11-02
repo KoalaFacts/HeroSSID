@@ -22,21 +22,29 @@ clarity. HeroSSID does not persist, export or escrow the seeds.
 
 ```csharp
 using HeroSSID.Credentials.Vcdm20;
+using HeroSSID.Credentials.VerifiablePresentations;
 
 Uri verifier = new("https://verifier.example/issuer-successor");
-string nonce = freshVerifierGeneratedNonce;
+Guid verifierTenant = independentlyAuthenticatedVerifierTenant;
+IPresentationChallengeStore challenges = sharedAtomicChallengeStore;
+
+// The verifier independently pins its previous trusted issuer DID.
+var issued = IssuerKeySuccessorAttestation.IssueChallenge(
+    verifierTenant, verifier, previouslyTrustedIssuerDid, challenges,
+    TimeSpan.FromMinutes(2));
+
+// After independently authenticating the verifier, the two issuers sign locally.
 string artifact = IssuerKeySuccessorAttestation.Create(
     previouslyTrustedIssuerDid, proposedSuccessorDid,
-    oldIssuerSeed, newIssuerSeed, verifier, nonce, TimeProvider.System);
+    oldIssuerSeed, newIssuerSeed, verifier, issued.Nonce, TimeProvider.System);
 
-// On the independently configured verifier:
-if (IssuerKeySuccessorAttestation.TryVerify(
-    artifact, previouslyTrustedIssuerDid, verifier, nonce,
-    DateTimeOffset.UtcNow, out string successor))
+// The verifier returns the proposed successor only once after atomic consumption.
+if (IssuerKeySuccessorAttestation.TryVerifyAndConsume(
+    artifact, previouslyTrustedIssuerDid, verifier, issued.Nonce,
+    verifierTenant, challenges, TimeProvider.System, out string successor))
 {
-    // Both keys controlled the same statement; NOT trust-list promotion.
-    // Atomically consume your nonce, investigate possible old-key compromise,
-    // require your own issuer-enrollment policy, then decide whether to trust successor.
+    // Both keys signed. Independently check compromise, enrollment and policy.
+    // Do NOT automatically trust this new issuer or grant any business authority.
 }
 ```
 
@@ -59,10 +67,20 @@ has been transferred, or that any credential issued by the successor is
 trusted. An attacker controlling the previous key can sign a fake successor
 transition; requiring the successor signature does **not** prevent this.
 Issuer trust policies MUST therefore review changes and independently
-authenticate critical ownership changes. Because the proof itself has no
-shared state, the verifier MUST atomically consume its own nonce if it treats
-the transition as a one-time admission operation. Rechecking the same signed
-artifact is not a proof of a new authorization event.
+authenticate critical ownership changes. The signature-only `TryVerify` is intentionally stateless and MUST NOT alone
+be used for an admission decision. The opt-in `IssueChallenge` /
+`TryVerifyAndConsume` pair uses an issuer-successor-only, tenant-bound nonce
+namespace. A valid key proof cannot consume a credential presentation nonce.
+Only one competing verifier may win the store's atomic `TryConsume`. Proof and
+challenge expiry are rechecked after potentially blocking consumption, before
+any successor is released. Invalid signatures do not consume a good nonce,
+while an expired proof discovered after consumption fails closed and may spend it.
+
+Across hosts, use a single shared durable atomic store (for example
+`PostgresPresentationChallengeStore` with its already-existing schema), not
+per-process `InMemoryPresentationChallengeStore`. Caller owns verifier policy,
+trust enrollment, security incident checks and business authorization; this
+SDK operation cannot automatically promote the successor.
 
 The library does not change stored DID records, credential signatures,
 revocation snapshots, database schemas or REST issuer ownership. Existing
