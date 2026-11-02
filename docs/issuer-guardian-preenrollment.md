@@ -207,6 +207,8 @@ IssuerGuardianEnrollmentTrust:Registrations:0:TrustedPreviousIssuerDid = <old di
 IssuerGuardianEnrollmentTrust:Registrations:0:Audience = https://verifier.example/issuer-guardian-recovery
 IssuerGuardianEnrollmentTrust:Registrations:0:SignedEnrollmentJwt = <original old-key-signed enrollment JWT>
 IssuerGuardianEnrollmentTrust:Registrations:0:ApprovedSha256 = <pre-incident approved uppercase SHA-256>
+# Optional emergency denylist, maintained ONLY by the verifier operator:
+IssuerGuardianEnrollmentTrust:RevokedSha256:0 = <uppercase SHA-256 of a withdrawn original enrollment JWT>
 ```
 
 At most 256 records are supported, with unique exact
@@ -219,11 +221,36 @@ the host from starting**, instead of allowing a broken recovery configuration
 to remain latent until an incident. Every issuance and verification still
 rechecks the signed policy and expiration. Operators must install a currently
 valid policy and renew it before expiry, or a restart will fail closed.
-Records are loaded as an immutable process-local
+Original enrollment records are loaded as an immutable process-local
 snapshot; every verifier instance must have the **same protected, independently
-approved policy inventory**. Registry changes require a controlled host
-restart/rollout and an operator-owned incident and revocation process. The
-JWT is not a signing seed, but its trust approval and integrity are sensitive.
+approved policy inventory**. Changes to original registrations require a
+controlled host restart/rollout. The JWT is not a signing seed, but its trust
+approval and integrity are sensitive.
+
+**Emergency withdrawal (opt-in):** the verifier operator may additionally
+configure up to 256 distinct **uppercase, 64-character SHA-256** fingerprints
+under `IssuerGuardianEnrollmentTrust:RevokedSha256:0`, `:1`, etc. This is a
+process-wide denial of each exact signed JWT wherever it is registered,
+including across tenants. It is **not** an HTTP request field and a caller
+cannot override it. The host validates this list at startup; an invalid
+fingerprint, duplicate, scalar value or excessive list prevents startup. On
+each host-pinned **challenge and verification** request it reads the current
+`IConfiguration` values again. A reloadable provider can therefore withdraw
+an existing signed policy without restarting a running instance. If a changed
+list is malformed, every host-pinned lookup on that instance fails closed until
+the configuration is corrected.
+
+A withdrawn enrollment returns 400 rather than issuing a new challenge.
+Verification of even a genuine pending successor/guardian proof returns
+`Invalid` with no candidate DID and does not consume the pending nonce.
+This is **verifier-operator policy withdrawal**, not cryptographic revocation
+of the issuer's old DID or invalidation of already accepted recovery evidence.
+It cannot undo an in-flight verification that wins the race against a
+configuration update. **All verifier replicas must receive and apply the
+same protected list** before operators may rely on cluster-wide denial;
+configuration reloads are not a distributed atomic revocation protocol.
+The operator must investigate, audit, and authorize any subsequent business
+recovery or DID trust-list change separately.
 
 1. `POST /api/v1/credentials/issuer-guardian-recovery/host-pinned-challenge`
    needs **both** `credential:verify` and `did:manage`. Body:
