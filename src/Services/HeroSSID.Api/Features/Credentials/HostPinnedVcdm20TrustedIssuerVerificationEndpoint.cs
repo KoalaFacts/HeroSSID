@@ -176,7 +176,7 @@ internal static class HostPinnedVcdm20TrustedIssuerVerificationEndpoint
 /// accepted from the caller; unknown JSON members fail binding.
 /// </summary>
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
-public sealed class VerifyHostPinnedVcdm20Request
+public sealed record class VerifyHostPinnedVcdm20Request
 {
     public string? PolicyId { get; init; }
     public string? Credential { get; init; }
