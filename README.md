@@ -429,3 +429,13 @@ Production readiness still requires shared challenge deployment and operations, 
 - [Testing guide](docs/testing-guide.md)
 
 The applicable upstream specifications include [DID Core](https://www.w3.org/TR/did-core/), [VC Data Model](https://www.w3.org/TR/vc-data-model-2.0/), [OpenID4VCI](https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html) and [OpenID4VP](https://openid.net/specs/openid-4-verifiable-presentations-1_0.html). These are implementation targets; linking them is not a conformance assertion.
+
+## Opt-in per-client issuer signing grants
+
+An operator may independently grant an OAuth client permission to use only specific
+active tenant-owned Ed25519 issuer DIDs. For explicitly enrolled tenants, all
+three authenticated HTTP credential issuance routes fail closed on ungranted
+client/DID pairs before private-key access. Unconfigured tenants retain the
+existing tenant-wide `credential:issue` scope. This is host-owned signing-key
+access control, not a credential trust decision or business authorization.
+See [configuration, boundaries and rollout](docs/issuer-client-signing-grants.md).

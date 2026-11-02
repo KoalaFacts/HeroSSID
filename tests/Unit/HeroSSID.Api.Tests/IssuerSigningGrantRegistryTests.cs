@@ -115,7 +115,7 @@ public sealed class IssuerSigningGrantRegistryTests
     private static ClaimsPrincipal Principal(string? clientId, bool authenticated = true,
         string? sub = null, bool duplicateClient = false, bool duplicateSubject = false)
     {
-        var claims = new List<Claim>();
+        var claims = new List<Claim> { new("tenant_id", Tenant.ToString("D")) };
         if (clientId is not null)
         {
             claims.Add(new Claim("client_id", clientId));

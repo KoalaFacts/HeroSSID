@@ -24,6 +24,7 @@ internal static class Vcdm20CredentialIssuanceEndpoint
     {
         credentials.MapPost("/vcdm20/issue", IssueAsync)
             .RequireAuthorization(CredentialIssueRequirement.PolicyName)
+            .RequireIssuerSigningGrant()
             .WithName("IssueVcdm20Credential")
             .WithSummary("Sign a short-lived direct VC2 JWT using this tenant's active did:key issuer")
             .Produces<IssueVcdm20CredentialResponse>(StatusCodes.Status201Created)
