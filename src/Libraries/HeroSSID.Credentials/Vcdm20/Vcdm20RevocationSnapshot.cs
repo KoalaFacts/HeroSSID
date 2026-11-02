@@ -290,6 +290,57 @@ public static class Vcdm20RevocationSnapshot
             out verifiedSubject);
     }
 
+    /// <summary>
+    /// Require holder-signed original request binding and genuine same-issuer
+    /// status before exposing full-disclosure subject claims.
+    /// </summary>
+    public static Vcdm20RevocationCheckResult CheckPresentationWithHolderBoundSignedVerifierRequest(
+        string presentationJwt, string signedRequestJwt, string trustedRequestSha256,
+        string trustedVerifierDid, string snapshotJwt, Guid verifierTenantId,
+        string expectedAudience, string expectedNonce, string expectedCredentialType,
+        Uri expectedContextUri, IPresentationChallengeStore challenges,
+        TimeProvider clock, out JsonElement verifiedSubject)
+    {
+        ArgumentNullException.ThrowIfNull(presentationJwt);
+        ArgumentNullException.ThrowIfNull(snapshotJwt);
+        ArgumentNullException.ThrowIfNull(challenges);
+        ArgumentNullException.ThrowIfNull(clock);
+        verifiedSubject = default;
+        if (!PresentationChallengePolicy.IsValidLookup(
+                verifierTenantId, expectedAudience, expectedNonce))
+        {
+            return Vcdm20RevocationCheckResult.Invalid;
+        }
+
+        // Obtain issuer trust solely from the verifier's original challenge.
+        // The strict proof path checks the exact verifier-owned request pin,
+        // holder-signed request digest and all three genuine Ed25519 signatures
+        // before atomically consuming the challenge.
+        var retained = challenges.Find(verifierTenantId, expectedAudience, expectedNonce);
+        JsonElement subject = default;
+        if (retained is null ||
+            Vcdm20JosePresentation.CheckWithHolderBoundSignedVerifierRequest(
+                presentationJwt, signedRequestJwt, trustedRequestSha256,
+                trustedVerifierDid, verifierTenantId, expectedAudience, expectedNonce,
+                expectedCredentialType, expectedContextUri, challenges, clock,
+                out subject) != Vcdm20PresentationCheckResult.SignedButStatusUnchecked ||
+            !TryExtractEnclosedJwt(presentationJwt, out var credentialJwt))
+        {
+            return Vcdm20RevocationCheckResult.Invalid;
+        }
+
+        // An authentic but revoked/expired/missing issuer snapshot cannot
+        // release the signed subject. The one-use challenge remains spent.
+        var status = Check(snapshotJwt, credentialJwt, retained.TrustedIssuerDid,
+            clock.GetUtcNow());
+        if (status == Vcdm20RevocationCheckResult.SignedNotListed)
+        {
+            verifiedSubject = subject;
+        }
+
+        return status;
+    }
+
     // The sole credential extraction, signature, nonce-consumption and status
     // path for both compatibility and incident-cutoff verification. A bypass
     // cannot arise from applying the cutoff only to standalone credentials.

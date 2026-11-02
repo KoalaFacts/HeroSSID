@@ -182,6 +182,179 @@ public sealed class Vcdm20SignedVerifierRequestTests
         Assert.Equal("active", accepted.GetProperty("membership").GetString());
     }
 
+    [Fact]
+    public void HolderSignedOriginalRequestHashCannotBeReplacedByAnotherAuthenticRequest()
+    {
+        var tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did);
+        var now = _clock.GetUtcNow();
+        var bound = challenge with { CredentialType = Type, SubjectContextUri = Context };
+        string original = OfflineSignedPresentationRequest.Create(
+            bound, _verifier.Did, _verifier.Seed, new FixedClock(now.AddSeconds(-2)));
+        string alternate = OfflineSignedPresentationRequest.Create(
+            bound, _verifier.Did, _verifier.Seed, new FixedClock(now.AddSeconds(-1)));
+        Assert.NotEqual(Pin(original), Pin(alternate));
+        string credential = IssueCredential(Type, Context);
+        string presentationForAlternate = Vcdm20JosePresentation.CreateWithSignedRequestBinding(
+            alternate, _verifier.Did, Audience, credential, Type, Context,
+            _holder.Did, _holder.Seed, _clock);
+
+        Assert.Equal(Vcdm20PresentationCheckResult.Invalid,
+            Vcdm20JosePresentation.CheckWithHolderBoundSignedVerifierRequest(
+                presentationForAlternate, original, Pin(original), _verifier.Did,
+                tenant, Audience, challenge.Nonce, Type, Context, store, _clock,
+                out var denied));
+        Assert.Equal(JsonValueKind.Undefined, denied.ValueKind);
+
+        string presentationForOriginal = Vcdm20JosePresentation.CreateWithSignedRequestBinding(
+            original, _verifier.Did, Audience, credential, Type, Context,
+            _holder.Did, _holder.Seed, _clock);
+        Assert.Equal(Vcdm20PresentationCheckResult.SignedButStatusUnchecked,
+            Vcdm20JosePresentation.CheckWithHolderBoundSignedVerifierRequest(
+                presentationForOriginal, original, Pin(original), _verifier.Did,
+                tenant, Audience, challenge.Nonce, Type, Context, store, _clock,
+                out var accepted));
+        Assert.Equal("active", accepted.GetProperty("membership").GetString());
+        Assert.Equal(Vcdm20PresentationCheckResult.Invalid,
+            Vcdm20JosePresentation.CheckWithHolderBoundSignedVerifierRequest(
+                presentationForOriginal, original, Pin(original), _verifier.Did,
+                tenant, Audience, challenge.Nonce, Type, Context, store, _clock,
+                out var replay));
+        Assert.Equal(JsonValueKind.Undefined, replay.ValueKind);
+    }
+
+    [Fact]
+    public void StrictVerifierRejectsLegacyHolderProofWithoutRequestHashBeforeNonceUse()
+    {
+        var tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did);
+        string request = SignBound(challenge);
+        string credential = IssueCredential(Type, Context);
+        string legacyProof = SignPresentation(request, credential, Type, Context);
+
+        Assert.Equal(Vcdm20PresentationCheckResult.Invalid,
+            Vcdm20JosePresentation.CheckWithHolderBoundSignedVerifierRequest(
+                legacyProof, request, Pin(request), _verifier.Did,
+                tenant, Audience, challenge.Nonce, Type, Context, store, _clock,
+                out var denied));
+        Assert.Equal(JsonValueKind.Undefined, denied.ValueKind);
+
+        string strongProof = Vcdm20JosePresentation.CreateWithSignedRequestBinding(
+            request, _verifier.Did, Audience, credential, Type, Context,
+            _holder.Did, _holder.Seed, _clock);
+        Assert.Equal(Vcdm20PresentationCheckResult.SignedButStatusUnchecked,
+            Vcdm20JosePresentation.CheckWithHolderBoundSignedVerifierRequest(
+                strongProof, request, Pin(request), _verifier.Did,
+                tenant, Audience, challenge.Nonce, Type, Context, store, _clock,
+                out var accepted));
+        Assert.Equal("active", accepted.GetProperty("membership").GetString());
+    }
+
+    [Fact]
+    public void HolderBoundStatusCheckNeedsRealIssuerStatusAndExactRequestProof()
+    {
+        var tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did);
+        string request = SignBound(challenge);
+        string credential = IssueCredential(Type, Context);
+        string presentation = Vcdm20JosePresentation.CreateWithSignedRequestBinding(
+            request, _verifier.Did, Audience, credential, Type, Context,
+            _holder.Did, _holder.Seed, _clock);
+        string unlisted = Vcdm20RevocationSnapshot.Create(
+            _issuer.Did, Array.Empty<string>(), _issuer.Seed, _clock.GetUtcNow(), _clock);
+
+        Assert.Equal(Vcdm20RevocationCheckResult.Invalid,
+            Vcdm20RevocationSnapshot.CheckPresentationWithHolderBoundSignedVerifierRequest(
+                presentation, request, Pin(request).ToUpperInvariant(), _verifier.Did,
+                unlisted, tenant, Audience, challenge.Nonce, Type, Context, store, _clock,
+                out var badPin));
+        Assert.Equal(JsonValueKind.Undefined, badPin.ValueKind);
+
+        Assert.Equal(Vcdm20RevocationCheckResult.SignedNotListed,
+            Vcdm20RevocationSnapshot.CheckPresentationWithHolderBoundSignedVerifierRequest(
+                presentation, request, Pin(request), _verifier.Did, unlisted,
+                tenant, Audience, challenge.Nonce, Type, Context, store, _clock,
+                out var accepted));
+        Assert.Equal("active", accepted.GetProperty("membership").GetString());
+    }
+
+    [Fact]
+    public void HolderBoundRevokedCredentialFailsWithoutDisclosureAndSpendsTheNonce()
+    {
+        var tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did);
+        string request = SignBound(challenge);
+        string credential = IssueCredential(Type, Context);
+        string holderProof = Vcdm20JosePresentation.CreateWithSignedRequestBinding(
+            request, _verifier.Did, Audience, credential, Type, Context,
+            _holder.Did, _holder.Seed, _clock);
+        string revoked = Vcdm20RevocationSnapshot.Create(
+            _issuer.Did, [credential], _issuer.Seed, _clock.GetUtcNow(), _clock);
+
+        Assert.Equal(Vcdm20RevocationCheckResult.Revoked,
+            Vcdm20RevocationSnapshot.CheckPresentationWithHolderBoundSignedVerifierRequest(
+                holderProof, request, Pin(request), _verifier.Did, revoked,
+                tenant, Audience, challenge.Nonce, Type, Context, store, _clock,
+                out var denied));
+        Assert.Equal(JsonValueKind.Undefined, denied.ValueKind);
+        Assert.Equal(Vcdm20RevocationCheckResult.Invalid,
+            Vcdm20RevocationSnapshot.CheckPresentationWithHolderBoundSignedVerifierRequest(
+                holderProof, request, Pin(request), _verifier.Did, revoked,
+                tenant, Audience, challenge.Nonce, Type, Context, store, _clock,
+                out var replay));
+        Assert.Equal(JsonValueKind.Undefined, replay.ValueKind);
+    }
+
+    [Fact]
+    public void ForgedHolderRequestDigestAndWrongTenantNeverReleaseClaims()
+    {
+        var tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did);
+        string request = SignBound(challenge);
+        string holderProof = Vcdm20JosePresentation.CreateWithSignedRequestBinding(
+            request, _verifier.Did, Audience, IssueCredential(Type, Context),
+            Type, Context, _holder.Did, _holder.Seed, _clock);
+        string signedPayload = HeroSSID.Credentials.Utilities.Ed25519JwtSigner
+            .ExtractPayload(holderProof);
+        string corruptedDigest = new string('a', 64);
+        if (string.Equals(corruptedDigest, Pin(request), StringComparison.Ordinal))
+        {
+            corruptedDigest = new string('b', 64);
+        }
+
+        string forgedPayload = signedPayload.Replace(
+            Pin(request), corruptedDigest, StringComparison.Ordinal);
+        Assert.NotEqual(signedPayload, forgedPayload);
+        string[] fragments = holderProof.Split('.');
+        fragments[1] = HeroSSID.Credentials.Utilities.Base64UrlEncoder.Encode(forgedPayload);
+        string tamperedProof = string.Join('.', fragments);
+
+        Assert.Equal(Vcdm20PresentationCheckResult.Invalid,
+            Vcdm20JosePresentation.CheckWithHolderBoundSignedVerifierRequest(
+                tamperedProof, request, Pin(request), _verifier.Did,
+                tenant, Audience, challenge.Nonce, Type, Context, store, _clock,
+                out var forged));
+        Assert.Equal(JsonValueKind.Undefined, forged.ValueKind);
+        Assert.Equal(Vcdm20PresentationCheckResult.Invalid,
+            Vcdm20JosePresentation.CheckWithHolderBoundSignedVerifierRequest(
+                holderProof, request, Pin(request), _verifier.Did,
+                Guid.NewGuid(), Audience, challenge.Nonce, Type, Context, store, _clock,
+                out var foreignTenant));
+        Assert.Equal(JsonValueKind.Undefined, foreignTenant.ValueKind);
+
+        Assert.Equal(Vcdm20PresentationCheckResult.SignedButStatusUnchecked,
+            Vcdm20JosePresentation.CheckWithHolderBoundSignedVerifierRequest(
+                holderProof, request, Pin(request), _verifier.Did,
+                tenant, Audience, challenge.Nonce, Type, Context, store, _clock,
+                out var accepted));
+        Assert.Equal("active", accepted.GetProperty("membership").GetString());
+    }
+
     private Vcdm20PresentationCheckResult Check(
         string presentation, string request, Guid tenant, PresentationChallenge challenge,
         string type, Uri context, IPresentationChallengeStore store, out JsonElement claims) =>
