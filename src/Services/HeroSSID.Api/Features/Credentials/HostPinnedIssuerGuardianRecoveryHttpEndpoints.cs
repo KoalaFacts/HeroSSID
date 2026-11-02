@@ -302,6 +302,16 @@ internal static class HostPinnedIssuerGuardianRecoveryHttpEndpoints
                 new Uri(request.Audience!), request.Nonce!, clock,
                 out string candidateSuccessorDid);
 
+            // A real operator withdrawal can arrive while cryptography and
+            // atomic nonce consumption are in progress. Re-read the monotonic
+            // process-local denial latch before releasing a successor DID.
+            // If withdrawn, conservatively spend the nonce without disclosure.
+            if (valid && !registry.IsAllowedFingerprint(policy.ApprovedSha256))
+            {
+                valid = false;
+                candidateSuccessorDid = string.Empty;
+            }
+
             return Results.Ok(new VerifyIssuerGuardianRecoveryResponse(
                 valid ? "ValidRecoveryEvidence" : "Invalid",
                 valid ? candidateSuccessorDid : null));
