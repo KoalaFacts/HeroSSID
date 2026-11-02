@@ -24,9 +24,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse d55900723c3a90310615a2d2b02e9b3d451809bf^{commit})" = "d55900723c3a90310615a2d2b02e9b3d451809bf"
+          test "$(git rev-parse fce3f2f9a3c41950f1fd381d1dc085a1e5b5b830^{commit})" = "fce3f2f9a3c41950f1fd381d1dc085a1e5b5b830"
           test "$(git rev-parse 7d57fe586399d2cb63051d2ef4f138755a7ad901^{commit})" = "7d57fe586399d2cb63051d2ef4f138755a7ad901"
-          git diff --name-only 7d57fe586399d2cb63051d2ef4f138755a7ad901 d55900723c3a90310615a2d2b02e9b3d451809bf | sort >/tmp/review-files.txt
+          git diff --name-only 7d57fe586399d2cb63051d2ef4f138755a7ad901 fce3f2f9a3c41950f1fd381d1dc085a1e5b5b830 | sort >/tmp/review-files.txt
           python3 - <<'PY'
           from pathlib import Path
           expected = {
@@ -62,7 +62,7 @@ jobs:
             test -s "review-$part.json"
             test -s "review-model-$part.json"
             test -s "review-$part.md"
-            test "$(cat "review-head-$part.txt")" = "d55900723c3a90310615a2d2b02e9b3d451809bf"
+            test "$(cat "review-head-$part.txt")" = "fce3f2f9a3c41950f1fd381d1dc085a1e5b5b830"
           done
       - name: Preserve raw model inference, exact-head proofs and rendered review
         if: always()
@@ -97,12 +97,12 @@ jobs:
         run: |
           set -euo pipefail
           actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/123 --jq '.head.sha')"
-          test "$actual" = "d55900723c3a90310615a2d2b02e9b3d451809bf"
+          test "$actual" = "fce3f2f9a3c41950f1fd381d1dc085a1e5b5b830"
           gh api repos/KoalaFacts/HeroSSID/pulls/123/files --paginate --jq '.[].filename' | sort >/tmp/pr123-files.txt
           python3 - <<'PY'
           import json
           from pathlib import Path
-          head = "d55900723c3a90310615a2d2b02e9b3d451809bf"
+          head = "fce3f2f9a3c41950f1fd381d1dc085a1e5b5b830"
           expected = {
               "src/Services/HeroSSID.Api/Features/Credentials/HostPinnedIssuerSuccessorHttpEndpoints.cs",
               "tests/Integration/HeroSSID.Integration.Tests/HostPinnedIssuerSuccessorHttpIntegrationTests.cs",
@@ -137,7 +137,7 @@ jobs:
           {
             echo "Independent Qwen2.5-Coder 7B local-model review of all seven exact PR #123 verifier-pinned issuer successor patches."
             echo
-            echo "Reviewed exact HEAD: d55900723c3a90310615a2d2b02e9b3d451809bf. Base: 7d57fe586399d2cb63051d2ef4f138755a7ad901."
+            echo "Reviewed exact HEAD: fce3f2f9a3c41950f1fd381d1dc085a1e5b5b830. Base: 7d57fe586399d2cb63051d2ef4f138755a7ad901."
             echo "Automated independent code review only; NOT human approval, an external cryptographic security audit, W3C conformance, third-party Wallet interoperability, personal identity validation or business authorization."
             echo "All authentic raw model verdicts and findings retained; each finding requires evidence-based disposition."
             echo
@@ -152,6 +152,6 @@ jobs:
             echo
           } >/tmp/pr123-review.md
           gh api --method POST repos/KoalaFacts/HeroSSID/pulls/123/reviews \
-            -f event=COMMENT -f commit_id=d55900723c3a90310615a2d2b02e9b3d451809bf \
+            -f event=COMMENT -f commit_id=fce3f2f9a3c41950f1fd381d1dc085a1e5b5b830 \
             -f body="$(cat /tmp/pr123-review.md)" \
             --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
