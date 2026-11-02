@@ -3,7 +3,7 @@ name: Independent PR123 host-owned issuer successor HTTP review
 on:
   push:
     branches:
-      - review/pr123-pinned-successor-20261103
+      - review/pr123-host-pinned-successor-20261103
 
 permissions: {}
 
