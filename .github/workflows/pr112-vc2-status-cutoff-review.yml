@@ -30,13 +30,13 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           expected = {
-    "src/Libraries/HeroSSID.Credentials/Vcdm20/Vcdm20VerifierDenylist.cs",
-    "src/Services/HeroSSID.Api/Features/Credentials/HostPinnedVcdm20TrustedIssuerVerificationEndpoint.cs",
-    "tests/Unit/HeroSSID.Api.Tests/HostPinnedVcdm20VerificationTests.cs",
-    "tests/Unit/HeroSSID.Credentials.Tests/Vcdm20VerifierDenylistTests.cs",
-    "docs/vcdm20-host-trusted-issuer-http.md",
-    "README.md",
-}
+              "src/Libraries/HeroSSID.Credentials/Vcdm20/Vcdm20VerifierDenylist.cs",
+              "src/Services/HeroSSID.Api/Features/Credentials/HostPinnedVcdm20TrustedIssuerVerificationEndpoint.cs",
+              "tests/Unit/HeroSSID.Api.Tests/HostPinnedVcdm20VerificationTests.cs",
+              "tests/Unit/HeroSSID.Credentials.Tests/Vcdm20VerifierDenylistTests.cs",
+              "docs/vcdm20-host-trusted-issuer-http.md",
+              "README.md",
+          }
           assert set(Path("/tmp/review-files.txt").read_text().splitlines()) == expected
           PY
       - name: Install independent Qwen2.5-Coder model
@@ -95,21 +95,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/111 --jq '.head.sha')"
+          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/112 --jq '.head.sha')"
           test "$actual" = "9a5b587f94c4f670bf6bad92e8210399302f95c8"
-          gh api repos/KoalaFacts/HeroSSID/pulls/111/files --paginate --jq '.[].filename' | sort >/tmp/pr112-files.txt
+          gh api repos/KoalaFacts/HeroSSID/pulls/112/files --paginate --jq '.[].filename' | sort >/tmp/pr112-files.txt
           python3 - <<'PY'
           import json
           from pathlib import Path
           head = "9a5b587f94c4f670bf6bad92e8210399302f95c8"
           expected = {
-    "src/Libraries/HeroSSID.Credentials/Vcdm20/Vcdm20VerifierDenylist.cs",
-    "src/Services/HeroSSID.Api/Features/Credentials/HostPinnedVcdm20TrustedIssuerVerificationEndpoint.cs",
-    "tests/Unit/HeroSSID.Api.Tests/HostPinnedVcdm20VerificationTests.cs",
-    "tests/Unit/HeroSSID.Credentials.Tests/Vcdm20VerifierDenylistTests.cs",
-    "docs/vcdm20-host-trusted-issuer-http.md",
-    "README.md",
-}
+              "src/Libraries/HeroSSID.Credentials/Vcdm20/Vcdm20VerifierDenylist.cs",
+              "src/Services/HeroSSID.Api/Features/Credentials/HostPinnedVcdm20TrustedIssuerVerificationEndpoint.cs",
+              "tests/Unit/HeroSSID.Api.Tests/HostPinnedVcdm20VerificationTests.cs",
+              "tests/Unit/HeroSSID.Credentials.Tests/Vcdm20VerifierDenylistTests.cs",
+              "docs/vcdm20-host-trusted-issuer-http.md",
+              "README.md",
+          }
           assert set(Path("/tmp/pr112-files.txt").read_text().splitlines()) == expected
           all_files = []
           for part in (1, 2):
@@ -145,7 +145,7 @@ jobs:
             echo
             echo
           } >/tmp/pr112-review.md
-          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/111/reviews \
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/112/reviews \
             -f event=COMMENT -f commit_id=9a5b587f94c4f670bf6bad92e8210399302f95c8 \
             -f body="$(cat /tmp/pr112-review.md)" \
             --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
