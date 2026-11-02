@@ -836,6 +836,39 @@ public sealed class IssuerGuardianRecoveryHttpIntegrationTests(DatabaseFixture f
         Assert.Equal("Invalid", body.GetProperty("status").GetString());
         Assert.Equal(JsonValueKind.Null, body.GetProperty("successorIssuerDid").ValueKind);
 
+        // A host-pinned v3 nonce is also technically redeemable by the legacy
+        // caller-supplied enrolled-verification route. Denial must follow the
+        // ORIGINAL signed JWT across both API adapters, or an attacker could
+        // bypass operator withdrawal simply by switching endpoint.
+        var bypassAttempt = new
+        {
+            audience = Audience,
+            trustedPreviousIssuerDid = oldDid,
+            nonce,
+            evidenceJson = evidence,
+            signedEnrollmentJwt = signedPolicy,
+            independentlyPinnedSha256 = digest
+        };
+        using var blockedEnrolledVerify = await PostAsync(client, EnrolledVerifyRoute,
+            bypassAttempt, authorized).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, blockedEnrolledVerify.StatusCode);
+        JsonElement blockedEnrolledBody = await ReadJsonAsync(blockedEnrolledVerify)
+            .ConfigureAwait(true);
+        Assert.Equal("Invalid", blockedEnrolledBody.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null,
+            blockedEnrolledBody.GetProperty("successorIssuerDid").ValueKind);
+
+        using var blockedEnrolledIssue = await PostAsync(client, EnrolledChallengeRoute,
+            new
+            {
+                audience = Audience,
+                trustedPreviousIssuerDid = oldDid,
+                signedEnrollmentJwt = signedPolicy,
+                independentlyPinnedSha256 = digest,
+                lifetimeSeconds = 120
+            }, authorized).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, blockedEnrolledIssue.StatusCode);
+
         using var blockedIssue = await PostAsync(client, HostPinnedChallengeRoute,
             issue, authorized).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.BadRequest, blockedIssue.StatusCode);
