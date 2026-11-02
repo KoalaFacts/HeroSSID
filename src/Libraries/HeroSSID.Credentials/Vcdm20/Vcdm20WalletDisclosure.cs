@@ -109,6 +109,16 @@ public static class Vcdm20WalletDisclosure
     }
 
     /// <summary>
+    /// Sign the exact original verifier request digest only after a strict
+    /// policy-bound full-disclosure preview and the application's consent step.
+    /// Legacy verifier requests must not silently downgrade this opt-in flow.
+    /// </summary>
+    public static string CreateHolderBoundPresentationAfterPreviewRequiringSignedPolicy(
+        Vcdm20WalletDisclosurePreview preview, string signedRequestJwt,
+        string credentialJwt, byte[] holderSeed, TimeProvider clock) =>
+        throw new NotSupportedException("Holder-bound consent signing is not implemented.");
+
+    /// <summary>
     /// After the integrating Wallet has obtained actual informed consent, recheck
     /// both signed artifacts, their exact compact-JWS digests, expiry and disclosed
     /// subject before invoking the independent Ed25519 holder signer. This guards

@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using HeroSSID.Credentials.Utilities;
 using HeroSSID.Credentials.Vcdm20;
@@ -250,6 +252,101 @@ public sealed class Vcdm20WalletDisclosureTests
             boundRequest, _verifier.Did, Audience, CredentialType, Context,
             _issuer.Did, credential, _holder.Did, _clock, out var preview));
         Assert.NotNull(preview);
+    }
+
+    [Fact]
+    public void StrictConsentPreviewProducesHolderSignedOriginalRequestBindingAndRejectsReplay()
+    {
+        Guid tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did) with
+        {
+            CredentialType = CredentialType,
+            SubjectContextUri = Context
+        };
+        string request = SignRequest(challenge);
+        string credential = IssueCredential("member");
+        Assert.True(Vcdm20WalletDisclosure.TryPrepareRequiringSignedPolicy(
+            request, _verifier.Did, Audience, CredentialType, Context,
+            _issuer.Did, credential, _holder.Did, _clock, out var preview));
+        Assert.NotNull(preview);
+        Assert.Equal("member", preview.VerifiedSubject.GetProperty("membership").GetString());
+
+        // The application presents ALL signed claims and obtains consent here.
+        // The holder private seed is not passed to the preflight.
+        string signed = Vcdm20WalletDisclosure
+            .CreateHolderBoundPresentationAfterPreviewRequiringSignedPolicy(
+                preview, request, credential, _holder.Seed, _clock);
+        string retainedPin = Convert.ToHexStringLower(
+            SHA256.HashData(Encoding.UTF8.GetBytes(request)));
+
+        Assert.Equal(Vcdm20PresentationCheckResult.SignedButStatusUnchecked,
+            Vcdm20JosePresentation.CheckWithHolderBoundSignedVerifierRequest(
+                signed, request, retainedPin, _verifier.Did, tenant,
+                Audience, challenge.Nonce, CredentialType, Context, store, _clock,
+                out var subject));
+        Assert.Equal("member", subject.GetProperty("membership").GetString());
+        Assert.Equal(Vcdm20PresentationCheckResult.Invalid,
+            Vcdm20JosePresentation.CheckWithHolderBoundSignedVerifierRequest(
+                signed, request, retainedPin, _verifier.Did, tenant,
+                Audience, challenge.Nonce, CredentialType, Context, store, _clock,
+                out var replay));
+        Assert.Equal(JsonValueKind.Undefined, replay.ValueKind);
+    }
+
+    [Fact]
+    public void HolderBoundConsentSigningRejectsAuthenticLegacyVerifierRequest()
+    {
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        string legacyRequest = SignRequest(
+            store.Issue(Guid.NewGuid(), Audience, _issuer.Did));
+        string credential = IssueCredential("member");
+        Assert.True(Prepare(legacyRequest, credential, _verifier.Did, Audience,
+            CredentialType, Context, _issuer.Did, _holder.Did, out var preview));
+        Assert.NotNull(preview);
+
+        Assert.Throws<ArgumentException>(() =>
+            Vcdm20WalletDisclosure
+                .CreateHolderBoundPresentationAfterPreviewRequiringSignedPolicy(
+                    preview, legacyRequest, credential, _holder.Seed, _clock));
+    }
+
+    [Fact]
+    public void HolderBoundConsentSigningRejectsGenuineRequestAndCredentialSwaps()
+    {
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(Guid.NewGuid(), Audience, _issuer.Did) with
+        {
+            CredentialType = CredentialType,
+            SubjectContextUri = Context
+        };
+        string request = SignRequest(challenge);
+        string credential = IssueCredential("member");
+        Assert.True(Vcdm20WalletDisclosure.TryPrepareRequiringSignedPolicy(
+            request, _verifier.Did, Audience, CredentialType, Context,
+            _issuer.Did, credential, _holder.Did, _clock, out var preview));
+        Assert.NotNull(preview);
+
+        // Both requests are authentically verifier-signed for the SAME nonce.
+        // Only the originally displayed compact JWS may be holder-signed.
+        string otherRequest = SignRequest(challenge with
+        {
+            ExpiresAt = challenge.ExpiresAt.AddSeconds(-1)
+        });
+        Assert.NotEqual(request, otherRequest);
+        Assert.Throws<ArgumentException>(() =>
+            Vcdm20WalletDisclosure
+                .CreateHolderBoundPresentationAfterPreviewRequiringSignedPolicy(
+                    preview, otherRequest, credential, _holder.Seed, _clock));
+        Assert.Throws<ArgumentException>(() =>
+            Vcdm20WalletDisclosure
+                .CreateHolderBoundPresentationAfterPreviewRequiringSignedPolicy(
+                    preview, request, IssueCredential("administrator"),
+                    _holder.Seed, _clock));
+        Assert.Throws<ArgumentException>(() =>
+            Vcdm20WalletDisclosure
+                .CreateHolderBoundPresentationAfterPreviewRequiringSignedPolicy(
+                    preview, request, credential, _attacker.Seed, _clock));
     }
 
     private string IssueCredentialWithPolicy(string type, Uri vocabulary, string membership)
