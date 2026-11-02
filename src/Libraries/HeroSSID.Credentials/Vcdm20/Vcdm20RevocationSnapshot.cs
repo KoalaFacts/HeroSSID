@@ -16,7 +16,9 @@ public enum Vcdm20RevocationCheckResult
 {
     Invalid,
     Revoked,
-    SignedNotListed
+    SignedNotListed,
+    /// <summary>A valid issuer/holder proof is independently blocked by verifier policy.</summary>
+    DeniedByVerifier
 }
 
 /// <summary>
@@ -202,7 +204,7 @@ public static class Vcdm20RevocationSnapshot
         out JsonElement verifiedSubject) =>
         CheckPresentationCore(presentationJwt, snapshotJwt, tenantId,
             expectedAudience, expectedNonce, expectedCredentialType,
-            expectedContextUri, null, challenges, clock, out verifiedSubject);
+            expectedContextUri, null, null, null, challenges, clock, out verifiedSubject);
 
     /// <summary>
     /// Require a verifier-owned minimum issuer observation time when checking
@@ -219,7 +221,45 @@ public static class Vcdm20RevocationSnapshot
         TimeProvider clock, out JsonElement verifiedSubject) =>
         CheckPresentationCore(presentationJwt, snapshotJwt, tenantId,
             expectedAudience, expectedNonce, expectedCredentialType,
-            expectedContextUri, minimumObservedAt, challenges, clock, out verifiedSubject);
+            expectedContextUri, minimumObservedAt, null, null, challenges, clock, out verifiedSubject);
+
+    /// <summary>
+    /// Authenticate a full-disclosure holder proof with a verifier-owned issuer
+    /// allowlist, exact VC2 credential vocabulary, independent emergency JWT
+    /// denial and optional minimum signed issuer status observation time. The
+    /// holder cannot enroll its own issuer through the request or snapshot.
+    /// Valid proofs atomically spend their nonce even on status/denial refusal.
+    /// This does not attest consent, identity, live revocation or authorization.
+    /// </summary>
+    public static Vcdm20RevocationCheckResult CheckPresentationWithVerifierPolicy(
+        string presentationJwt, string snapshotJwt, Guid tenantId, string expectedAudience,
+        string expectedNonce, IReadOnlyCollection<string> trustedIssuerDids,
+        string expectedCredentialType, Uri expectedContextUri,
+        IReadOnlyCollection<string> deniedCredentialSha256, DateTimeOffset? minimumObservedAt,
+        IPresentationChallengeStore challenges, TimeProvider clock, out JsonElement verifiedSubject)
+    {
+        ArgumentNullException.ThrowIfNull(trustedIssuerDids);
+        ArgumentNullException.ThrowIfNull(deniedCredentialSha256);
+        verifiedSubject = default;
+        // SDK users must not bypass host-registry validation by passing a
+        // malformed or duplicated list. No claim or nonce is released on error.
+        if (trustedIssuerDids.Count is < 1 or > 16 ||
+            deniedCredentialSha256.Count > 256 ||
+            trustedIssuerDids.Any(static did => did is null || did.Length > 255 ||
+                !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(did, out _)) ||
+            trustedIssuerDids.Distinct(StringComparer.Ordinal).Count() != trustedIssuerDids.Count ||
+            deniedCredentialSha256.Any(static digest => digest is not { Length: 64 } ||
+                !digest.All(static ch => ch is >= '0' and <= '9' or >= 'a' and <= 'f')) ||
+            deniedCredentialSha256.Distinct(StringComparer.Ordinal).Count() != deniedCredentialSha256.Count)
+        {
+            return Vcdm20RevocationCheckResult.Invalid;
+        }
+
+        return CheckPresentationCore(presentationJwt, snapshotJwt, tenantId,
+            expectedAudience, expectedNonce, expectedCredentialType, expectedContextUri,
+            minimumObservedAt, trustedIssuerDids, deniedCredentialSha256,
+            challenges, clock, out verifiedSubject);
+    }
 
     // The sole credential extraction, signature, nonce-consumption and status
     // path for both compatibility and incident-cutoff verification. A bypass
@@ -227,7 +267,9 @@ public static class Vcdm20RevocationSnapshot
     private static Vcdm20RevocationCheckResult CheckPresentationCore(
         string presentationJwt, string snapshotJwt, Guid tenantId, string expectedAudience,
         string expectedNonce, string expectedCredentialType, Uri expectedContextUri,
-        DateTimeOffset? minimumObservedAt, IPresentationChallengeStore challenges, TimeProvider clock,
+        DateTimeOffset? minimumObservedAt, IReadOnlyCollection<string>? trustedIssuerDids,
+        IReadOnlyCollection<string>? deniedCredentialSha256,
+        IPresentationChallengeStore challenges, TimeProvider clock,
         out JsonElement verifiedSubject)
     {
         ArgumentNullException.ThrowIfNull(presentationJwt);
@@ -241,6 +283,8 @@ public static class Vcdm20RevocationSnapshot
         // challenge, never from an untrusted presentation or the snapshot.
         var challenge = challenges.Find(tenantId, expectedAudience, expectedNonce);
         if (challenge is null ||
+            (trustedIssuerDids is not null &&
+                !trustedIssuerDids.Contains(challenge.TrustedIssuerDid, StringComparer.Ordinal)) ||
             Vcdm20JosePresentation.Check(presentationJwt, tenantId, expectedAudience,
                 expectedNonce, expectedCredentialType, expectedContextUri,
                 challenges, clock, out var subject) != Vcdm20PresentationCheckResult.SignedButStatusUnchecked)
@@ -263,6 +307,12 @@ public static class Vcdm20RevocationSnapshot
             : Check(snapshotJwt, credentialJwt, challenge.TrustedIssuerDid, now);
         if (status == Vcdm20RevocationCheckResult.SignedNotListed)
         {
+            if (deniedCredentialSha256 is not null &&
+                deniedCredentialSha256.Contains(Digest(credentialJwt), StringComparer.Ordinal))
+            {
+                return Vcdm20RevocationCheckResult.DeniedByVerifier;
+            }
+
             verifiedSubject = subject;
         }
 
