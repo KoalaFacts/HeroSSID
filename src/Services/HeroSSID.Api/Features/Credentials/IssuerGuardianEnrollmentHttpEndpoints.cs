@@ -167,6 +167,15 @@ internal static class IssuerGuardianEnrollmentHttpEndpoints
                 request.TrustedPreviousIssuerDid!, new Uri(request.Audience!),
                 request.Nonce!, clock, out string candidate);
 
+            // This legacy adapter can redeem a host-issued v3 nonce. A
+            // withdrawal observed during atomic consumption must also deny
+            // disclosure here; an earlier admission check is not sufficient.
+            if (accepted && !registry.IsAllowedFingerprint(request.IndependentlyPinnedSha256!))
+            {
+                accepted = false;
+                candidate = string.Empty;
+            }
+
             return Results.Ok(new VerifyIssuerGuardianRecoveryResponse(
                 accepted ? "ValidRecoveryEvidence" : "Invalid",
                 accepted ? candidate : null));
