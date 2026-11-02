@@ -48,6 +48,77 @@ startup. A missing policy for a tenant never falls back to an HTTP-supplied
 issuer. Policies are immutable for the lifetime of the process; to change
 issuer trust, protect the authorization process and redeploy/restart all replicas.
 
+## Verify a holder-signed VC2 presentation with the host's trust policy (opt-in)
+
+A relying verifier can now validate **both** the original issuer's VC2 JWT
+and the independently holder-signed, full-disclosure `vp+jwt` through a single
+authenticated operation. Unlike caller-policy presentation verification,
+`POST /api/v1/credentials/vcdm20/verify-host-pinned-presentation`
+selects the operator-approved **tenant** policy above by opaque `policyId`.
+The HTTP request is not an issuer-enrollment or a status-cutoff update.
+
+First, the verifier obtains an actual one-use tenant/audience/issuer challenge
+using the existing `/vcdm20/presentation-challenge` or
+`/vcdm20/signed-presentation-request` flow. The issued trusted issuer must
+be in the operator's independently approved `TrustedIssuerDids` for this
+profile. Before signing anything, the holder app independently authenticates
+the verifier's request, displays **all** credential claims and obtains
+informed consent. The holder signs the VP with its **own** Ed25519 key;
+the original issuer-signed VC2 JWT is enclosed unchanged. The verifier must
+use a durable shared atomic challenge store across replicas.
+
+Then a tenant bearer token with `credential:verify` may submit:
+
+```http
+POST /api/v1/credentials/vcdm20/verify-host-pinned-presentation
+Authorization: Bearer <valid verifier-tenant access token>
+Content-Type: application/json
+
+{
+  "policyId": "membership-v1",
+  "audience": "https://verifier.example/present",
+  "nonce": "<exact one-use verifier-issued nonce>",
+  "presentation": "<genuine holder-signed VC2 vp+jwt>",
+  "revocationSnapshot": "<original-issuer-signed HeroSSID VC2 snapshot>"
+}
+```
+
+The verifier checks the retained tenant-bound nonce and issuer choice,
+host-pinned issuer DID set, exact credential type and HTTPS vocabulary,
+the original issuer's Ed25519 signature, the independent holder's Ed25519
+signature, request audience/expiry and the exact enclosed original credential.
+It atomically consumes the one-use challenge for a fully authenticated holder
+proof. It then validates the same actual issuer's private signed status
+snapshot (60-second maximum), the optional **operator-owned**
+`MinimumStatusObservedAtUtc` cutoff, and the operator-owned SHA-256 denial
+for the exact original issuer JWT. Only authentic, status-unlisted,
+non-denied proof returns
+`{"status":"SignedNotListed","verifiedSubject":{...}}`.
+A genuine issuer-reported revoked statement returns `Revoked`;
+an authentic operator-denied credential with a clean issuer status returns
+`DeniedByVerifier`; a pre-cutoff, expired, foreign-signed or malformed status,
+untrusted issuer, invalid proof, wrong vocabulary, missing/foreign challenge or
+replay returns `Invalid`. Every rejection withholds `verifiedSubject`.
+
+The caller cannot supply `trustedIssuerDids`, `credentialType`,
+`subjectContextUri`, `deniedCredentialSha256` or the incident cutoff:
+unexpected JSON members fail deserialization. Missing/foreign policy never
+falls back to the holder's declared issuer. The verifier-owned incident cutoff
+is checked after genuine holder proof and the challenge is **spent even when
+that status fails**. This prevents replay using a later status snapshot.
+Operator policy must be securely provisioned and synchronized among hosts.
+
+**Trust boundary:** An issuer's authentic signature is a statement by that
+issuer. A holder signature proves key control for this presentation.
+Neither proves real-world identity, an authorised business role, genuine
+human consent, the completeness or truthful observation of a revocation
+snapshot, real-time non-revocation or permission to perform a business action.
+This is full-disclosure VC2 JOSE using a **private HeroSSID status adjunct**;
+it is not a hosted OpenID4VP exchange, selective disclosure, standard W3C
+Bitstring Status List, formal conformance or proven third-party Wallet
+interoperability. This change adds no production schema, hosted status
+registry, deployment or package publication.
+
 ## Verify from a non-.NET relying client
 
 Obtain a validated tenant bearer token with `credential:verify`, then call:
