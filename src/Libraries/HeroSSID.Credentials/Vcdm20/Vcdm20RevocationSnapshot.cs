@@ -199,6 +199,35 @@ public static class Vcdm20RevocationSnapshot
         string presentationJwt, string snapshotJwt, Guid tenantId, string expectedAudience,
         string expectedNonce, string expectedCredentialType, Uri expectedContextUri,
         IPresentationChallengeStore challenges, TimeProvider clock,
+        out JsonElement verifiedSubject) =>
+        CheckPresentationCore(presentationJwt, snapshotJwt, tenantId,
+            expectedAudience, expectedNonce, expectedCredentialType,
+            expectedContextUri, null, challenges, clock, out verifiedSubject);
+
+    /// <summary>
+    /// Require a verifier-owned minimum issuer observation time when checking
+    /// a holder-signed direct VC2 presentation. A pre-incident or future-dated
+    /// status policy fails closed, including if the signed snapshot is otherwise
+    /// current and its contents claim Revoked. The one-use challenge is spent
+    /// after real issuer/holder proof checks even when status fails.
+    /// This is not a live or complete revocation guarantee or authorization.
+    /// </summary>
+    public static Vcdm20RevocationCheckResult CheckPresentationWithObservationCutoff(
+        string presentationJwt, string snapshotJwt, Guid tenantId, string expectedAudience,
+        string expectedNonce, string expectedCredentialType, Uri expectedContextUri,
+        DateTimeOffset minimumObservedAt, IPresentationChallengeStore challenges,
+        TimeProvider clock, out JsonElement verifiedSubject) =>
+        CheckPresentationCore(presentationJwt, snapshotJwt, tenantId,
+            expectedAudience, expectedNonce, expectedCredentialType,
+            expectedContextUri, minimumObservedAt, challenges, clock, out verifiedSubject);
+
+    // The sole credential extraction, signature, nonce-consumption and status
+    // path for both compatibility and incident-cutoff verification. A bypass
+    // cannot arise from applying the cutoff only to standalone credentials.
+    private static Vcdm20RevocationCheckResult CheckPresentationCore(
+        string presentationJwt, string snapshotJwt, Guid tenantId, string expectedAudience,
+        string expectedNonce, string expectedCredentialType, Uri expectedContextUri,
+        DateTimeOffset? minimumObservedAt, IPresentationChallengeStore challenges, TimeProvider clock,
         out JsonElement verifiedSubject)
     {
         ArgumentNullException.ThrowIfNull(presentationJwt);
@@ -227,7 +256,11 @@ public static class Vcdm20RevocationSnapshot
             return Vcdm20RevocationCheckResult.Invalid;
         }
 
-        var status = Check(snapshotJwt, credentialJwt, challenge.TrustedIssuerDid, clock.GetUtcNow());
+        DateTimeOffset now = clock.GetUtcNow();
+        var status = minimumObservedAt is DateTimeOffset cutoff
+            ? CheckWithObservationCutoff(snapshotJwt, credentialJwt,
+                challenge.TrustedIssuerDid, now, cutoff)
+            : Check(snapshotJwt, credentialJwt, challenge.TrustedIssuerDid, now);
         if (status == Vcdm20RevocationCheckResult.SignedNotListed)
         {
             verifiedSubject = subject;
@@ -235,6 +268,7 @@ public static class Vcdm20RevocationSnapshot
 
         return status;
     }
+
 
     private static bool IsAuthenticDirectVc2(string? credentialJwt, string issuerDid, byte[] issuerPublicKey)
     {

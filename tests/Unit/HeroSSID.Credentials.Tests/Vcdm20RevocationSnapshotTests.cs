@@ -213,6 +213,89 @@ public sealed class Vcdm20RevocationSnapshotTests
             CheckAfterVerifierCutoff(snapshot, credential, now, cutoff));
     }
 
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void HolderProofRejectsGenuinePreIncidentIssuerObservationAndSpendsChallenge(bool revoked)
+    {
+        DateTimeOffset now = _clock.GetUtcNow();
+        string credential = Issue("member");
+        string snapshot = Vcdm20RevocationSnapshot.Create(
+            _issuer.Did, revoked ? [credential] : [], _issuer.Seed,
+            now.AddSeconds(-25), _clock);
+        Guid tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did);
+        string signedRequest = OfflineSignedPresentationRequest.Create(
+            challenge, _verifier.Did, _verifier.Seed, _clock);
+        string presentation = Vcdm20JosePresentation.Create(
+            signedRequest, _verifier.Did, Audience, credential, Type, Context,
+            _holder.Did, _holder.Seed, _clock);
+
+        var result = Vcdm20RevocationSnapshot.CheckPresentationWithObservationCutoff(
+            presentation, snapshot, tenant, Audience, challenge.Nonce,
+            Type, Context, now.AddSeconds(-10), store, _clock, out var claims);
+
+        Assert.Equal(Vcdm20RevocationCheckResult.Invalid, result);
+        Assert.Equal(JsonValueKind.Undefined, claims.ValueKind);
+        // Even a rejected old status must not let a holder replay the one-use VP.
+        Assert.Equal(Vcdm20RevocationCheckResult.Invalid,
+            Vcdm20RevocationSnapshot.CheckPresentation(
+                presentation, snapshot, tenant, Audience, challenge.Nonce,
+                Type, Context, store, _clock, out _));
+    }
+
+    [Fact]
+    public void HolderProofAcceptsFreshPostIncidentIssuerObservationWithRealHolderKey()
+    {
+        DateTimeOffset now = _clock.GetUtcNow();
+        string credential = Issue("active");
+        string snapshot = Vcdm20RevocationSnapshot.Create(
+            _issuer.Did, [], _issuer.Seed, now, _clock);
+        Guid tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did);
+        string signedRequest = OfflineSignedPresentationRequest.Create(
+            challenge, _verifier.Did, _verifier.Seed, _clock);
+        string presentation = Vcdm20JosePresentation.Create(
+            signedRequest, _verifier.Did, Audience, credential, Type, Context,
+            _holder.Did, _holder.Seed, _clock);
+
+        Assert.Equal(Vcdm20RevocationCheckResult.SignedNotListed,
+            Vcdm20RevocationSnapshot.CheckPresentationWithObservationCutoff(
+                presentation, snapshot, tenant, Audience, challenge.Nonce,
+                Type, Context, now.AddSeconds(-10), store, _clock, out var claims));
+        Assert.Equal("active", claims.GetProperty("membership").GetString());
+        Assert.Equal(Vcdm20RevocationCheckResult.Invalid,
+            Vcdm20RevocationSnapshot.CheckPresentationWithObservationCutoff(
+                presentation, snapshot, tenant, Audience, challenge.Nonce,
+                Type, Context, now.AddSeconds(-10), store, _clock, out _));
+    }
+
+    [Fact]
+    public void HolderProofRejectsFutureCutoffWithoutReleasingSubject()
+    {
+        DateTimeOffset now = _clock.GetUtcNow();
+        string credential = Issue("member");
+        string snapshot = Vcdm20RevocationSnapshot.Create(
+            _issuer.Did, [], _issuer.Seed, now, _clock);
+        Guid tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did);
+        string signedRequest = OfflineSignedPresentationRequest.Create(
+            challenge, _verifier.Did, _verifier.Seed, _clock);
+        string presentation = Vcdm20JosePresentation.Create(
+            signedRequest, _verifier.Did, Audience, credential, Type, Context,
+            _holder.Did, _holder.Seed, _clock);
+
+        Assert.Equal(Vcdm20RevocationCheckResult.Invalid,
+            Vcdm20RevocationSnapshot.CheckPresentationWithObservationCutoff(
+                presentation, snapshot, tenant, Audience, challenge.Nonce,
+                Type, Context, now.AddMinutes(2), store, _clock, out var claims));
+        Assert.Equal(JsonValueKind.Undefined, claims.ValueKind);
+    }
+
     private string Issue(string membership)
     {
         var now = _clock.GetUtcNow();

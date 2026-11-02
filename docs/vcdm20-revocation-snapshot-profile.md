@@ -52,6 +52,31 @@ var result = Vcdm20RevocationSnapshot.CheckPresentation(
     verifierChallengeStore, clock, out var signedSubject);
 ```
 
+For a verifier-managed incident, use the opt-in **holder-presentation**
+variant to demand the original issuer's signed observation at or after a
+separately pinned operator cutoff as well as both issuer and holder signatures:
+
+```csharp
+DateTimeOffset verifierIncidentCutoff = /* independent verifier policy */;
+var result = Vcdm20RevocationSnapshot.CheckPresentationWithObservationCutoff(
+    holderSignedVpJwt, snapshot, verifierTenantId, expectedAudience,
+    verifierIssuedNonce, expectedCredentialType, pinnedContextUri,
+    verifierIncidentCutoff, verifierChallengeStore, clock, out var signedSubject);
+```
+
+A genuine but pre-incident snapshot returns `Invalid` regardless of whether
+it lists the credential as revoked; no subject claims are released. A future,
+pre-Unix-epoch or fractional-second cutoff after the issuer's signed
+whole-second observation is also invalid. A genuine post-cutoff, unlisted
+snapshot can return `SignedNotListed` only after verifying the original VC2
+issuer JWS, independent holder JWS, nonce, trusted issuer and type/context.
+The same atomic verifier challenge is consumed on an authenticated proof even
+if the status fails; a retry cannot turn old status into accepted proof.
+The verifier must retain and protect the incident cutoff outside the holder
+payload; an HTTP caller or Wallet cannot assert its own freshness policy.
+This is an SDK entry point, **not** a new hosted HTTP endpoint or proof of
+truthful/complete status observation or real-time non-revocation.
+
 This verifies the original issuer-signed direct VC2 JWT inside the holder-signed VP, real holder key control, the verifier-owned one-use challenge and snapshot membership of **that exact enclosed credential**. Claims are returned only on `SignedNotListed`; replay, wrong tenant/issuer, invalid/expired status or a revoked VC return no claims. Even rejected statuses spend the challenge after cryptographic validation. A multi-instance verifier must use a durable shared atomic challenge store, not the process-local default.
 
 ## Wire and security boundary
