@@ -39,7 +39,8 @@ per-policy keys are exactly `TenantId`, `PolicyId`, `CredentialType`,
 `MinimumStatusObservedAtUtc`. Unexpected keys (including typos such as
 `MinimumStatusObservationUtc` and `DeniedCredentialsSha256`) and nested values
 under scalar keys **fail startup**, rather than silently disabling an operator
-safeguard. List children remain confined to the two documented issuer/denial
+safeguard. Configuration field names follow .NET's case-insensitive
+`IConfiguration` lookup, so case-only spellings of a known key remain valid. List children remain confined to the two documented issuer/denial
 collections. This protects against misconfigured policy deployment, but
 cannot attest that the configured issuer trust, cutoff or denial inventory
 is complete or correctly approved. Invalid configuration prevents host
