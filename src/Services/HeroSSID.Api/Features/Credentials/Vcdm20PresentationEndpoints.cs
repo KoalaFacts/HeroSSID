@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using HeroSSID.Core.TenantManagement;
 using HeroSSID.Data;
 using HeroSSID.DidOperations.DidMethods;
@@ -74,6 +75,16 @@ internal static class Vcdm20PresentationEndpoints
             .RequireAuthorization("credential:verify")
             .WithName("VerifyVcdm20Presentation")
             .WithSummary("Check issuer and holder Ed25519 signatures, replay and signed VC2 status")
+            .Produces<VerifyVcdm20PresentationResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        credentials.MapPost("/vcdm20/verify-host-pinned-presentation", VerifyHostPinned)
+            .RequireAuthorization("credential:verify")
+            .WithName("VerifyHostPinnedVcdm20Presentation")
+            .WithSummary("Verify a holder-signed VC2 presentation with server-owned issuer, vocabulary, status and denial policies")
             .Produces<VerifyVcdm20PresentationResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
@@ -463,6 +474,21 @@ internal static class Vcdm20PresentationEndpoints
         }
     }
 
+    /// <summary>
+    /// The verifier host, not the HTTP claimant, chooses issuer/type/context,
+    /// emergency denial and optional incident status cutoff. A complete
+    /// implementation must authenticate issuer AND holder before returning claims.
+    /// </summary>
+    internal static IResult VerifyHostPinned(
+        [FromBody] VerifyHostPinnedVcdm20PresentationRequest request,
+        [FromServices] HostPinnedVcdm20IssuerRegistry registry,
+        [FromServices] IPresentationChallengeStore challenges,
+        [FromServices] ITenantContext tenantContext,
+        [FromServices] TimeProvider clock)
+    {
+        throw new NotSupportedException("Host-pinned VC2 holder verification is not implemented.");
+    }
+
     private static IResult InvalidSignedPolicy() => Results.Ok(
         new VerifyVcdm20PresentationResponse(
             Vcdm20RevocationCheckResult.Invalid.ToString(), null));
@@ -574,6 +600,20 @@ public sealed class VerifyVcdm20SignedPolicyPresentationRequest
     public string? Audience { get; init; }
     public string? ExpectedCredentialType { get; init; }
     public Uri? SubjectContextUri { get; init; }
+}
+
+/// <summary>
+/// The caller supplies the signed VP and issuer status, not issuer trust,
+/// credential vocabulary, cutoff or emergency-denial decisions.
+/// </summary>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record class VerifyHostPinnedVcdm20PresentationRequest
+{
+    public string? PolicyId { get; init; }
+    public string? Presentation { get; init; }
+    public string? RevocationSnapshot { get; init; }
+    public string? Audience { get; init; }
+    public string? Nonce { get; init; }
 }
 
 /// <summary>Only SignedNotListed returns verified claims; it never grants authorization.</summary>
