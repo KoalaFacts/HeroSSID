@@ -274,12 +274,23 @@ public sealed class Vcdm20WalletDisclosureTests
 
         // The application presents ALL signed claims and obtains consent here.
         // The holder private seed is not passed to the preflight.
-        string signed = Vcdm20WalletDisclosure
-            .CreateHolderBoundPresentationAfterPreviewRequiringSignedPolicy(
+        // The existing compatible Wallet signer creates a valid VP but does
+        // NOT sign the original request hash, so strict verifiers must reject.
+        string legacyUnbound = Vcdm20WalletDisclosure
+            .CreateHolderPresentationAfterPreview(
                 preview, request, credential, _holder.Seed, _clock);
         string retainedPin = Convert.ToHexStringLower(
             SHA256.HashData(Encoding.UTF8.GetBytes(request)));
+        Assert.Equal(Vcdm20PresentationCheckResult.Invalid,
+            Vcdm20JosePresentation.CheckWithHolderBoundSignedVerifierRequest(
+                legacyUnbound, request, retainedPin, _verifier.Did, tenant,
+                Audience, challenge.Nonce, CredentialType, Context, store, _clock,
+                out var unboundRejection));
+        Assert.Equal(JsonValueKind.Undefined, unboundRejection.ValueKind);
 
+        string signed = Vcdm20WalletDisclosure
+            .CreateHolderBoundPresentationAfterPreviewRequiringSignedPolicy(
+                preview, request, credential, _holder.Seed, _clock);
         Assert.Equal(Vcdm20PresentationCheckResult.SignedButStatusUnchecked,
             Vcdm20JosePresentation.CheckWithHolderBoundSignedVerifierRequest(
                 signed, request, retainedPin, _verifier.Did, tenant,
