@@ -83,14 +83,19 @@ internal sealed class HostPinnedGuardianEnrollmentRegistry
         }
     }
 
+    // Exact operator withdrawals apply to BOTH host-pinned and legacy
+    // caller-supplied enrollment routes, which share enrollment-bound nonces.
+    // Invalid live configuration must never be treated as an empty denylist.
+    internal bool IsAllowedFingerprint(string fingerprint) =>
+        TryReadEmergencyDenials(_configuration, fingerprint, out bool revoked) && !revoked;
+
     internal bool TryGet(Guid tenantId, string oldIssuerDid, string audience,
         out HostPinnedGuardianEnrollment? registration)
     {
         registration = null;
         if (!_registrations.TryGetValue((tenantId, oldIssuerDid, audience),
                 out HostPinnedGuardianEnrollment? approved) ||
-            !TryReadEmergencyDenials(_configuration, approved.ApprovedSha256, out bool revoked) ||
-            revoked)
+            !IsAllowedFingerprint(approved.ApprovedSha256))
         {
             // Neither a revoked policy nor malformed operator configuration
             // may cause a new challenge or redeem an outstanding one.
