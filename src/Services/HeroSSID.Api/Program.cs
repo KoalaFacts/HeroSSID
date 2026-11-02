@@ -104,6 +104,8 @@ builder.Services.AddSingleton<IPresentationChallengeStore>(services =>
 // Opt-in operator-owned, pre-incident signed guardian enrollment pins.
 // Never accept enrolled trust policy from the claimant's HTTP body.
 builder.Services.AddSingleton<HostPinnedGuardianEnrollmentRegistry>();
+// Verifier-owned VC2 trust is provisioned independently of HTTP claimants.
+builder.Services.AddSingleton<HostPinnedVcdm20IssuerRegistry>();
 
 // Add API versioning (T028)
 builder.Services.AddApiVersioning(options =>
@@ -237,6 +239,7 @@ var app = builder.Build();
 
 // Invalid or duplicate security-policy configuration fails before serving.
 _ = app.Services.GetRequiredService<HostPinnedGuardianEnrollmentRegistry>();
+_ = app.Services.GetRequiredService<HostPinnedVcdm20IssuerRegistry>();
 
 // Fail before serving requests, after all host configuration providers have been applied.
 _ = app.Services.GetRequiredService<JwtSigningSettings>();
