@@ -248,6 +248,29 @@ public static class IssuerKeySuccessorAttestation
         return true;
     }
 
+    /// <summary>
+    /// Opt-in successor admission requiring a verifier-owned, separately enrolled
+    /// successor DID. A valid two-key claim alone MUST NOT select its own pin.
+    /// This test-first stub intentionally rejects all requests until implemented.
+    /// </summary>
+    public static bool TryVerifyAndConsumePinnedSuccessor(
+        string attestationJson, string trustedPreviousIssuerDid,
+        string expectedSuccessorIssuerDid, Uri expectedVerifierAudience,
+        string expectedNonce, Guid verifierTenantId,
+        IPresentationChallengeStore challenges, TimeProvider clock,
+        out string successorIssuerDid)
+    {
+        ArgumentNullException.ThrowIfNull(attestationJson);
+        ArgumentNullException.ThrowIfNull(trustedPreviousIssuerDid);
+        ArgumentNullException.ThrowIfNull(expectedSuccessorIssuerDid);
+        ArgumentNullException.ThrowIfNull(expectedVerifierAudience);
+        ArgumentNullException.ThrowIfNull(expectedNonce);
+        ArgumentNullException.ThrowIfNull(challenges);
+        ArgumentNullException.ThrowIfNull(clock);
+        successorIssuerDid = string.Empty;
+        return false;
+    }
+
     private static string StoreAudience(Uri verifierAudience) =>
         ChallengePurposePrefix + verifierAudience.AbsoluteUri;
 
