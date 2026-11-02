@@ -346,6 +346,86 @@ public sealed class HostPinnedVcdm20VerificationTests
             () => new HostPinnedVcdm20IssuerRegistry(oversized));
     }
 
+    [Fact]
+    public async Task HostIncidentCutoffRejectsStillFreshPreIncidentIssuerStatusWithoutDisclosure()
+    {
+        var fixture = Create();
+        var config = Configuration(fixture.Tenant, fixture.IssuerDid);
+        config["Vcdm20VerifierTrust:Policies:0:MinimumStatusObservedAtUtc"] =
+            Now.AddSeconds(1).ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+        var registry = new HostPinnedVcdm20IssuerRegistry(config);
+        string beforeIncident = Vcdm20RevocationSnapshot.Create(
+            fixture.IssuerDid, [], fixture.IssuerSeed, Now, new FixedClock(Now));
+        var request = new VerifyHostPinnedVcdm20WithStatusRequest
+        {
+            PolicyId = "membership-v1", Credential = fixture.ValidJwt,
+            ExpectedHolderDid = fixture.HolderDid, RevocationSnapshot = beforeIncident
+        };
+
+        // The signed pre-incident snapshot remains inside its normal 60-second
+        // validity window; only the independent host cutoff must reject it.
+        await AssertInvalidAsync(
+            HostPinnedVcdm20TrustedIssuerVerificationEndpoint.VerifyWithStatus(
+                request, registry, new FixedTenant(fixture.Tenant),
+                new FixedClock(Now.AddSeconds(3)))).ConfigureAwait(true);
+
+        string afterIncident = Vcdm20RevocationSnapshot.Create(
+            fixture.IssuerDid, [], fixture.IssuerSeed, Now.AddSeconds(2),
+            new FixedClock(Now.AddSeconds(2)));
+        var accepted = await ExecuteAsync(
+            HostPinnedVcdm20TrustedIssuerVerificationEndpoint.VerifyWithStatus(
+                request with { RevocationSnapshot = afterIncident }, registry,
+                new FixedTenant(fixture.Tenant), new FixedClock(Now.AddSeconds(3))))
+            .ConfigureAwait(true);
+        Assert.Equal("SignedNotListed", accepted.Body.GetProperty("status").GetString());
+        Assert.Equal(fixture.IssuerDid,
+            accepted.Body.GetProperty("verifiedIssuerDid").GetString());
+        Assert.Equal("member",
+            accepted.Body.GetProperty("verifiedSubject").GetProperty("role").GetString());
+    }
+
+    [Fact]
+    public void MalformedOrNonUtcHostStatusObservationCutoffRejectsEntireStartupPolicy()
+    {
+        var fixture = Create();
+        foreach (string cutoff in new[]
+        {
+            "invalid",
+            Now.ToOffset(TimeSpan.FromHours(2)).ToString("O",
+                System.Globalization.CultureInfo.InvariantCulture),
+            DateTimeOffset.FromUnixTimeSeconds(-1).ToString("O",
+                System.Globalization.CultureInfo.InvariantCulture)
+        })
+        {
+            var invalid = Configuration(fixture.Tenant, fixture.IssuerDid);
+            invalid["Vcdm20VerifierTrust:Policies:0:MinimumStatusObservedAtUtc"] = cutoff;
+            Assert.Throws<InvalidOperationException>(
+                () => new HostPinnedVcdm20IssuerRegistry(invalid));
+        }
+    }
+
+    [Fact]
+    public void NestedIncidentCutoffConfigurationCannotBeSilentlyIgnored()
+    {
+        var fixture = Create();
+        var nested = Configuration(fixture.Tenant, fixture.IssuerDid);
+        nested["Vcdm20VerifierTrust:Policies:0:MinimumStatusObservedAtUtc:Nested"] =
+            Now.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Throws<InvalidOperationException>(
+            () => new HostPinnedVcdm20IssuerRegistry(nested));
+    }
+
+    [Fact]
+    public void HttpStatusCallerCannotInjectItsOwnObservationCutoff()
+    {
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize<VerifyHostPinnedVcdm20WithStatusRequest>(
+                """
+                {"policyId":"membership-v1","credential":"x.y.z","revocationSnapshot":"signed.status.jwt","minimumStatusObservedAtUtc":"1900-01-01T00:00:00Z"}
+                """,
+                HttpJsonOptions));
+    }
+
     private static string Digest(string jwt) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(jwt)));
 

@@ -20,6 +20,9 @@ Vcdm20VerifierTrust:Policies:0:TrustedIssuerDids:0 = did:key:<operator-approved 
 # Operator-controlled emergency refusal, optional; SHA-256 of the ORIGINAL JWT UTF-8 bytes:
 Vcdm20VerifierTrust:Policies:0:DeniedCredentialSha256:0 = <64 lowercase hexadecimal characters>
 # Up to 256 distinct exact-JWT digests per policy; omission means no local denial
+# Optional operator-enforced issuer status observation lower bound, UTC round-trip format:
+Vcdm20VerifierTrust:Policies:0:MinimumStatusObservedAtUtc = 2026-11-02T08:00:00.0000000+00:00
+# Omit the cutoff to preserve the existing 60-second issuer status-only behavior
 ```
 
 The service validates every configured policy before accepting HTTP traffic:
@@ -27,7 +30,10 @@ at most 128 policies, no duplicate tenant/profile selectors, at most 16
 distinct valid Ed25519 issuer DIDs in each policy, at most 256 distinct canonical
 lowercase SHA-256 original-JWT digests (or none), a bounded unambiguous profile
 identifier and HTTPS subject vocabulary. Malformed, duplicated or oversized
-operator denial configuration fails startup, never silently disables denial. Invalid configuration prevents host
+operator denial configuration fails startup, never silently disables denial.
+If supplied, the minimum status observation time must be a canonical UTC
+round-trip timestamp (`O` in .NET) at or after 1970-01-01; malformed,
+non-UTC, negative or nested values fail startup. Invalid configuration prevents host
 startup. A missing policy for a tenant never falls back to an HTTP-supplied
 issuer. Policies are immutable for the lifetime of the process; to change
 issuer trust, protect the authorization process and redeploy/restart all replicas.
@@ -92,6 +98,29 @@ authenticated signer and subject; an issuer-listed JWT returns
 `DeniedByVerifier`, and malformed, expired, foreign-signed, tampered or
 untrusted inputs return `Invalid`. Every rejection withholds issuer and
 subject. Missing or oversized snapshot input returns HTTP 400.
+
+### Optional host-owned incident observation cutoff
+
+An operator may set `MinimumStatusObservedAtUtc` on the selected tenant
+policy **before** accepting the signed-status verification response. Only the
+`verify-host-pinned-with-status` route uses it; the status-unchecked route
+continues to report `SignedButStatusUnchecked` regardless of this setting.
+The cutoff never comes from request JSON. A valid issuer-signed status snapshot
+whose signed `iat` is *before* the operator cutoff returns `Invalid`, with
+no issuer or subject, **even if it remains inside its ordinary 60-second
+validity window**. A status signed at/after the bound can be considered only
+after all original Ed25519 signature, credential, issuer, holder, type,
+context, 60-second freshness and verifier emergency-denial checks pass.
+Issuer snapshots encode whole-second `iat`; a fractional UTC cutoff
+conservatively rejects a snapshot rounded down below the cutoff. A
+future cutoff fails closed until status is old enough to satisfy it.
+
+The cutoff is a relying-party **policy for the signed timestamp**, not proof
+that an issuer honestly observed a complete revocation list at that time.
+A compromised issuer key can forge a timestamp; status distribution and
+list-completeness guarantees still require an independent authoritative
+service and operational controls. The verifier must consistently deploy
+the same policy to every replica, and it remains immutable until restart.
 
 The *issuer*, not the HTTP caller, signs the contents of the snapshot, but
 the caller supplies its bytes; the signature **cannot attest that the list
