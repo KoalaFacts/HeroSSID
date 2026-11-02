@@ -10,6 +10,7 @@ public sealed class HostPinnedIssuerSuccessorRegistryTests
 {
     private const string Prefix = "IssuerSuccessorTrust:Policies:0:";
     private const string Audience = "https://verifier.example/host-pinned-successor";
+    private static readonly JsonSerializerOptions HttpJson = new(JsonSerializerDefaults.Web);
 
     [Fact]
     public void ExactOperatorEnrolledPolicyCanOnlyBeReadForItsTenant()
@@ -80,12 +81,12 @@ public sealed class HostPinnedIssuerSuccessorRegistryTests
                 """
                 {"policyId":"issuer-migration","nonce":"nonce",
                  "attestation":"proof","preapprovedSuccessorIssuerDid":"did:key:attacker"}
-                """, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+                """, HttpJson));
         Assert.Throws<JsonException>(() =>
             JsonSerializer.Deserialize<IssueHostPinnedIssuerSuccessorChallengeRequest>(
                 """
                 {"policyId":"issuer-migration","previousIssuerDid":"did:key:attacker"}
-                """, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+                """, HttpJson));
     }
 
     private static HostPinnedIssuerSuccessorRegistry Registry(Dictionary<string, string?> entries) =>
