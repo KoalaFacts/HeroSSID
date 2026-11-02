@@ -404,6 +404,29 @@ public sealed class HostPinnedVcdm20VerificationTests
         }
     }
 
+    [Theory]
+    [InlineData("MinimumStatusObservationUtc")]
+    [InlineData("DeniedCredentialsSha256:0")]
+    [InlineData("TrustedIssuerDid:0")]
+    [InlineData("CredentialType:Unexpected")]
+    [InlineData("SubjectContextUri:Nested")]
+    public void UnknownHostTrustPolicyFieldMustFailStartupInsteadOfSilentlyLosingProtection(
+        string field)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        var fixture = Create();
+        var config = Configuration(fixture.Tenant, fixture.IssuerDid);
+        config["Vcdm20VerifierTrust:Policies:0:" + field] =
+            field.Contains("Denied", StringComparison.Ordinal)
+                ? Digest(fixture.ValidJwt)
+                : Now.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+
+        // Misspelt emergency denials, incident cutoffs and issuer pins must
+        // never turn into a seemingly valid but weaker verifier deployment.
+        Assert.Throws<InvalidOperationException>(
+            () => new HostPinnedVcdm20IssuerRegistry(config));
+    }
+
     [Fact]
     public void NestedIncidentCutoffConfigurationCannotBeSilentlyIgnored()
     {

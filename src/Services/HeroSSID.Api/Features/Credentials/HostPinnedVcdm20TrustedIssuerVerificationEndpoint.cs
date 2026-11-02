@@ -18,6 +18,12 @@ namespace HeroSSID.Api.Features.Credentials;
 /// </summary>
 internal sealed class HostPinnedVcdm20IssuerRegistry
 {
+    private static readonly HashSet<string> AllowedPolicyFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "TenantId", "PolicyId", "CredentialType", "SubjectContextUri",
+        "TrustedIssuerDids", "DeniedCredentialSha256", "MinimumStatusObservedAtUtc"
+    };
+
     private readonly Dictionary<(Guid Tenant, string PolicyId), HostPinnedVcdm20IssuerPolicy> _policies = [];
 
     public HostPinnedVcdm20IssuerRegistry(IConfiguration configuration)
@@ -37,6 +43,28 @@ internal sealed class HostPinnedVcdm20IssuerRegistry
 
         foreach (IConfigurationSection entry in entries)
         {
+            // A typo in a host-only emergency denial or incident cutoff must
+            // not silently weaken a verifier policy while the host starts.
+            // Scalar fields must also reject nested configuration.
+            if (entry.Value is not null)
+            {
+                throw new InvalidOperationException("Invalid host-owned VC2 trust policy structure.");
+            }
+
+            foreach (IConfigurationSection field in entry.GetChildren())
+            {
+                bool isList = string.Equals(field.Key, "TrustedIssuerDids",
+                    StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(field.Key, "DeniedCredentialSha256",
+                        StringComparison.OrdinalIgnoreCase);
+                if (!AllowedPolicyFields.Contains(field.Key) ||
+                    (!isList && field.GetChildren().Any()))
+                {
+                    throw new InvalidOperationException(
+                        "Unknown or nested host-owned VC2 trust policy field.");
+                }
+            }
+
             string? tenantText = entry["TenantId"];
             string? policyId = entry["PolicyId"];
             string? type = entry["CredentialType"];

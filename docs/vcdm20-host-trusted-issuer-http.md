@@ -33,7 +33,17 @@ identifier and HTTPS subject vocabulary. Malformed, duplicated or oversized
 operator denial configuration fails startup, never silently disables denial.
 If supplied, the minimum status observation time must be a canonical UTC
 round-trip timestamp (`O` in .NET) at or after 1970-01-01; malformed,
-non-UTC, negative or nested values fail startup. Invalid configuration prevents host
+non-UTC, negative or nested values fail startup. The seven supported
+per-policy keys are exactly `TenantId`, `PolicyId`, `CredentialType`,
+`SubjectContextUri`, `TrustedIssuerDids`, `DeniedCredentialSha256`, and
+`MinimumStatusObservedAtUtc`. Unexpected keys (including typos such as
+`MinimumStatusObservationUtc` and `DeniedCredentialsSha256`) and nested values
+under scalar keys **fail startup**, rather than silently disabling an operator
+safeguard. Configuration field names follow .NET's case-insensitive
+`IConfiguration` lookup, so case-only spellings of a known key remain valid. List children remain confined to the two documented issuer/denial
+collections. This protects against misconfigured policy deployment, but
+cannot attest that the configured issuer trust, cutoff or denial inventory
+is complete or correctly approved. Invalid configuration prevents host
 startup. A missing policy for a tenant never falls back to an HTTP-supplied
 issuer. Policies are immutable for the lifetime of the process; to change
 issuer trust, protect the authorization process and redeploy/restart all replicas.
