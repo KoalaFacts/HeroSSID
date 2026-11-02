@@ -57,6 +57,51 @@ match and include exactly version 1, `previousIssuer`, `successorIssuer`,
 The identifiers must differ; the expiration is at most 300 seconds after
 issuance, and verifier-supplied audience/nonce must match exactly.
 
+## Verifier-preapproved successor admission (opt-in SDK)
+
+A real old-issuer signature does **not** give the old key the right to select
+the next trusted issuer. When an organisation's successor key has been
+independently pre-enrolled under the relying party's own security policy,
+use `TryVerifyAndConsumePinnedSuccessor` instead of the compatibility
+`TryVerifyAndConsume` path. This is an executable additional refusal
+boundary, not automatic issuer registration.
+
+```csharp
+// All three DIDs come from verifier-controlled configuration or enrollment.
+// In particular, never read preapprovedSuccessorDid from the submitted proof.
+bool accepted = IssuerKeySuccessorAttestation.TryVerifyAndConsumePinnedSuccessor(
+    artifact,
+    previouslyTrustedIssuerDid,
+    preapprovedSuccessorDid,
+    verifier,
+    issued.Nonce,
+    verifierTenant,
+    sharedAtomicChallengeStore,
+    TimeProvider.System,
+    out string authenticatedSuccessorDid);
+
+if (accepted)
+{
+    // Two real keys co-signed the same statement AND the proposed successor
+    // matched our independent prior pin. This is still only key-control
+    // evidence; business trust admission needs a separate policy decision.
+}
+```
+
+An authentic, dual-signed **alternative** successor fails *before* consuming
+the verifier's challenge, leaving the already-enrolled successor able to
+present its proof. Accepted proofs atomically consume their purpose-separated
+challenge and reject replay or concurrent second acceptance, including when
+multiple verifiers use the same durable atomic store. The SDK also rechecks
+proof and challenge expiry after potentially delayed consumption.
+
+The existing authenticated HTTP verifier still returns *untrusted proposed*
+successor evidence: it does not currently bind a successor DID to
+host-controlled pre-enrollment policy. An HTTP caller supplying a successor
+string is not equivalent to independently pinned server configuration.
+This new SDK method does not modify PostgreSQL schema, DID records, wallet
+keys, credential claims, authorization, or trusted-issuer policy.
+
 ## Critical trust boundary
 
 A successful check proves only possession of two signing keys **at signing
