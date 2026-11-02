@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using HeroSSID.Credentials.Vcdm20;
 using HeroSSID.Credentials.VerifiablePresentations;
@@ -138,20 +140,79 @@ public sealed class Vcdm20SignedVerifierRequestTests
         Assert.Equal(JsonValueKind.Undefined, replay.ValueKind);
     }
 
+    [Fact]
+    public void ASecondAuthenticRequestForSameNonceCannotReplaceTheOriginalDigestPin()
+    {
+        var tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did);
+        var originalTime = _clock.GetUtcNow();
+        string originallyIssuedRequest = OfflineSignedPresentationRequest.Create(
+            challenge with { CredentialType = Type, SubjectContextUri = Context },
+            _verifier.Did, _verifier.Seed, new FixedClock(originalTime.AddSeconds(-2)));
+        string alternativeAlsoSignedRequest = OfflineSignedPresentationRequest.Create(
+            challenge with { CredentialType = Type, SubjectContextUri = Context },
+            _verifier.Did, _verifier.Seed, new FixedClock(originalTime.AddSeconds(-1)));
+        Assert.NotEqual(Pin(originallyIssuedRequest), Pin(alternativeAlsoSignedRequest));
+        string presentation = SignPresentation(originallyIssuedRequest,
+            IssueCredential(Type, Context), Type, Context);
+        string snapshot = Vcdm20RevocationSnapshot.Create(
+            _issuer.Did, Array.Empty<string>(), _issuer.Seed, _clock.GetUtcNow(), _clock);
+
+        // Same real verifier signature, nonce, type, context, issuer and expiry.
+        // Only the verifier-owned original request SHA-256 pin distinguishes them.
+        Assert.Equal(Vcdm20PresentationCheckResult.Invalid,
+            CheckWithPin(presentation, alternativeAlsoSignedRequest, Pin(originallyIssuedRequest),
+                tenant, challenge, Type, Context, store, out var wrongRequest));
+        Assert.Equal(JsonValueKind.Undefined, wrongRequest.ValueKind);
+        Assert.Equal(Vcdm20RevocationCheckResult.Invalid,
+            CheckStatusWithPin(presentation, alternativeAlsoSignedRequest,
+                Pin(originallyIssuedRequest), snapshot, tenant, challenge,
+                Type, Context, store, out var wrongStatus));
+        Assert.Equal(JsonValueKind.Undefined, wrongStatus.ValueKind);
+        Assert.Equal(Vcdm20PresentationCheckResult.Invalid,
+            CheckWithPin(presentation, originallyIssuedRequest, Pin(originallyIssuedRequest).ToUpperInvariant(),
+                tenant, challenge, Type, Context, store, out var noncanonicalPin));
+        Assert.Equal(JsonValueKind.Undefined, noncanonicalPin.ValueKind);
+
+        Assert.Equal(Vcdm20RevocationCheckResult.SignedNotListed,
+            CheckStatusWithPin(presentation, originallyIssuedRequest,
+                Pin(originallyIssuedRequest), snapshot, tenant, challenge,
+                Type, Context, store, out var accepted));
+        Assert.Equal("active", accepted.GetProperty("membership").GetString());
+    }
+
     private Vcdm20PresentationCheckResult Check(
         string presentation, string request, Guid tenant, PresentationChallenge challenge,
         string type, Uri context, IPresentationChallengeStore store, out JsonElement claims) =>
-        Vcdm20JosePresentation.CheckWithSignedVerifierRequest(
-            presentation, request, _verifier.Did, tenant, Audience, challenge.Nonce,
-            type, context, store, _clock, out claims);
+        CheckWithPin(presentation, request, Pin(request),
+            tenant, challenge, type, context, store, out claims);
+
+    private Vcdm20PresentationCheckResult CheckWithPin(
+        string presentation, string request, string trustedRequestDigest,
+        Guid tenant, PresentationChallenge challenge, string type, Uri context,
+        IPresentationChallengeStore store, out JsonElement claims) =>
+        Vcdm20JosePresentation.CheckWithPinnedSignedVerifierRequest(
+            presentation, request, trustedRequestDigest, _verifier.Did,
+            tenant, Audience, challenge.Nonce, type, context, store, _clock, out claims);
 
     private Vcdm20RevocationCheckResult CheckStatus(
         string presentation, string request, string snapshot, Guid tenant,
         PresentationChallenge challenge, string type, Uri context,
         IPresentationChallengeStore store, out JsonElement claims) =>
-        Vcdm20RevocationSnapshot.CheckPresentationWithSignedVerifierRequest(
-            presentation, request, _verifier.Did, snapshot, tenant, Audience,
-            challenge.Nonce, type, context, store, _clock, out claims);
+        CheckStatusWithPin(presentation, request, Pin(request), snapshot,
+            tenant, challenge, type, context, store, out claims);
+
+    private Vcdm20RevocationCheckResult CheckStatusWithPin(
+        string presentation, string request, string trustedRequestDigest, string snapshot,
+        Guid tenant, PresentationChallenge challenge, string type, Uri context,
+        IPresentationChallengeStore store, out JsonElement claims) =>
+        Vcdm20RevocationSnapshot.CheckPresentationWithPinnedSignedVerifierRequest(
+            presentation, request, trustedRequestDigest, _verifier.Did, snapshot,
+            tenant, Audience, challenge.Nonce, type, context, store, _clock, out claims);
+
+    private static string Pin(string request) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(request)));
 
     private string SignBound(PresentationChallenge challenge) =>
         OfflineSignedPresentationRequest.Create(
@@ -181,5 +242,10 @@ public sealed class Vcdm20SignedVerifierRequestTests
         key.PublicKey.Export(KeyBlobFormat.RawPublicKey).CopyTo(prefixed, 2);
         return (key.Export(KeyBlobFormat.RawPrivateKey),
             "did:key:z" + SimpleBase.Base58.Bitcoin.Encode(prefixed));
+    }
+
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 }
