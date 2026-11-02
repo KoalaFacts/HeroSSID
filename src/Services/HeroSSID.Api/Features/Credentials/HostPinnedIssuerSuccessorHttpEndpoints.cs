@@ -147,6 +147,14 @@ internal sealed class HostPinnedIssuerSuccessorChallengeStore : IPresentationCha
     public bool TryConsume(Guid verifierTenantId, string audience, string nonce) =>
         _inner.TryConsume(verifierTenantId, Scope(audience), nonce);
 
+    /// <summary>
+    /// Withdraw an exact host-owned policy challenge through the shared atomic
+    /// store. Unknown, expired and already spent nonces are indistinguishable.
+    /// This never modifies issuer trust or undoes accepted evidence.
+    /// </summary>
+    internal bool TryCancel(Guid verifierTenantId, string nonce) =>
+        _inner.TryConsume(verifierTenantId, _storedPurpose, nonce);
+
     private string Scope(string audience)
     {
         if (!string.Equals(audience, _expectedAudience, StringComparison.Ordinal))
@@ -178,6 +186,16 @@ internal static class HostPinnedIssuerSuccessorHttpEndpoints
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        credentials.MapPost("/issuer-successor/host-pinned-cancel", Cancel)
+            .RequireAuthorization(OperationScopes.CredentialVerify, OperationScopes.DidManage)
+            .WithName("CancelHostPinnedIssuerSuccessorChallenge")
+            .WithSummary("Atomically withdraw a pending operator-pinned issuer successor challenge")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         credentials.MapPost("/issuer-successor/host-pinned-verify", Verify)
@@ -243,6 +261,63 @@ internal static class HostPinnedIssuerSuccessorHttpEndpoints
             return Results.Problem(title: "Challenge Capacity Exhausted",
                 detail: "The verifier has reached its retained one-time challenge capacity.",
                 statusCode: StatusCodes.Status429TooManyRequests);
+        }
+        catch (NpgsqlException)
+        {
+            return Unavailable();
+        }
+        catch (TimeoutException)
+        {
+            return Unavailable();
+        }
+    }
+
+    /// <summary>
+    /// Operator-authorized incident cancellation for the exact verifier-owned
+    /// policy namespace. No client-supplied issuer keys or audience are trusted.
+    /// A 204 discloses neither challenge existence nor prior acceptance and
+    /// cannot retroactively invalidate previously accepted continuity evidence.
+    /// </summary>
+    internal static IResult Cancel(
+        [FromBody] CancelHostPinnedIssuerSuccessorChallengeRequest request,
+        [FromServices] HostPinnedIssuerSuccessorRegistry registry,
+        [FromServices] IPresentationChallengeStore challenges,
+        [FromServices] ITenantContext tenantContext)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(registry);
+        ArgumentNullException.ThrowIfNull(challenges);
+        ArgumentNullException.ThrowIfNull(tenantContext);
+
+        if (!HostPinnedIssuerSuccessorRegistry.IsPolicyId(request.PolicyId) ||
+            request.Nonce is not { Length: 43 } ||
+            !request.Nonce.All(static character =>
+                char.IsAsciiLetterOrDigit(character) || character is '-' or '_'))
+        {
+            return InvalidRequest();
+        }
+
+        Guid tenant = tenantContext.GetCurrentTenantId();
+        if (tenant == Guid.Empty)
+        {
+            return Results.Unauthorized();
+        }
+
+        // Missing and foreign policy IDs are no-ops to avoid an existence oracle.
+        // The exact old/new DID pair, audience and purpose are pinned by the host,
+        // not the HTTP request. The same shared atomic operation handles replay.
+        if (!registry.TryGet(tenant, request.PolicyId!, out HostPinnedIssuerSuccessorPolicy? policy) ||
+            policy is null)
+        {
+            return Results.NoContent();
+        }
+
+        try
+        {
+            var scopedStore = new HostPinnedIssuerSuccessorChallengeStore(
+                challenges, request.PolicyId!, policy);
+            _ = scopedStore.TryCancel(tenant, request.Nonce);
+            return Results.NoContent();
         }
         catch (NpgsqlException)
         {
@@ -332,6 +407,14 @@ public sealed class IssueHostPinnedIssuerSuccessorChallengeRequest
 {
     public string? PolicyId { get; init; }
     public int LifetimeSeconds { get; init; } = 120;
+}
+
+/// <summary>Operator's scoped one-use cancellation, without caller-selected trust keys.</summary>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed class CancelHostPinnedIssuerSuccessorChallengeRequest
+{
+    public string? PolicyId { get; init; }
+    public string? Nonce { get; init; }
 }
 
 /// <summary>Trust pins and HTTPS audience are never accepted from HTTP clients.</summary>

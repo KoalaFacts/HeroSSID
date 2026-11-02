@@ -22,6 +22,7 @@ public sealed class HostPinnedIssuerSuccessorHttpIntegrationTests(DatabaseFixtur
 {
     private const string IssueRoute = "/api/v1/credentials/issuer-successor/host-pinned-challenge";
     private const string VerifyRoute = "/api/v1/credentials/issuer-successor/host-pinned-verify";
+    private const string CancelRoute = "/api/v1/credentials/issuer-successor/host-pinned-cancel";
     private const string Audience = "https://verifier.example/host-pinned-successor";
     private readonly DatabaseFixture _fixture = fixture;
 
@@ -186,6 +187,100 @@ public sealed class HostPinnedIssuerSuccessorHttpIntegrationTests(DatabaseFixtur
             new { policyId = "issuer-migration", nonce = new string('A', 43),
                 attestation = "invalid" }, unrelated).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.Forbidden, forbiddenVerify.StatusCode);
+    }
+
+
+    [Fact]
+    public async Task OperatorCanCancelHostPinnedSuccessorChallengeAcrossReplicasBeforeVerification()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        using var previous = NewKey();
+        using var approved = NewKey();
+        string previousDid = DidFromKey(previous);
+        string approvedDid = DidFromKey(approved);
+        await using var issuingHost = NewHost(previousDid, approvedDid);
+        await using var cancellingHost = NewHost(previousDid, approvedDid);
+        using var first = issuingHost.CreateClient();
+        using var second = cancellingHost.CreateClient();
+        string verifierToken = await GetTokenAsync(first, "credential:verify").ConfigureAwait(true);
+        string operatorToken = await GetTokenAsync(second, "credential:verify did:manage").ConfigureAwait(true);
+
+        string nonce = await IssueNonceAsync(first, verifierToken).ConfigureAwait(true);
+        string signedProof = Proof(previous, approved, nonce);
+        var cancellation = new { policyId = "issuer-migration", nonce };
+        using var cancelled = await PostAsync(second, CancelRoute, cancellation, operatorToken)
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NoContent, cancelled.StatusCode);
+
+        using var afterCancellation = await PostAsync(first, VerifyRoute,
+            new { policyId = "issuer-migration", nonce, attestation = signedProof },
+            verifierToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, afterCancellation.StatusCode);
+        Assert.Equal("Invalid", (await BodyAsync(afterCancellation).ConfigureAwait(true))
+            .GetProperty("status").GetString());
+
+        using var repeated = await PostAsync(second, CancelRoute, cancellation, operatorToken)
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NoContent, repeated.StatusCode);
+
+        string healthyNonce = await IssueNonceAsync(first, verifierToken).ConfigureAwait(true);
+        using var healthy = await PostAsync(first, VerifyRoute,
+            new { policyId = "issuer-migration", nonce = healthyNonce,
+                attestation = Proof(previous, approved, healthyNonce) }, verifierToken)
+            .ConfigureAwait(true);
+        Assert.Equal("ValidPinnedKeyContinuity",
+            (await BodyAsync(healthy).ConfigureAwait(true)).GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task HostPinnedCancellationRequiresOperatorScopesAndCannotCrossPolicyBoundary()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        using var previous = NewKey();
+        using var approved = NewKey();
+        string previousDid = DidFromKey(previous);
+        string approvedDid = DidFromKey(approved);
+        await using var pinnedHost = NewHost(previousDid, approvedDid);
+        await using var unpinnedHost = NewHost(previousDid, approvedDid, configurePin: false);
+        using var pinned = pinnedHost.CreateClient();
+        using var unpinned = unpinnedHost.CreateClient();
+        string verifierToken = await GetTokenAsync(pinned, "credential:verify")
+            .ConfigureAwait(true);
+        string managementToken = await GetTokenAsync(pinned, "did:manage")
+            .ConfigureAwait(true);
+        string operatorToken = await GetTokenAsync(pinned, "credential:verify did:manage")
+            .ConfigureAwait(true);
+        string nonce = await IssueNonceAsync(pinned, verifierToken).ConfigureAwait(true);
+        var request = new { policyId = "issuer-migration", nonce };
+
+        using var anonymous = await pinned.PostAsJsonAsync(CancelRoute, request,
+            TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        using var verifyOnly = await PostAsync(pinned, CancelRoute, request, verifierToken)
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, verifyOnly.StatusCode);
+        using var manageOnly = await PostAsync(pinned, CancelRoute, request, managementToken)
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, manageOnly.StatusCode);
+        using var badNonce = await PostAsync(pinned, CancelRoute,
+            new { policyId = "issuer-migration", nonce = "invalid" }, operatorToken)
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, badNonce.StatusCode);
+
+        using var unknownPolicy = await PostAsync(pinned, CancelRoute,
+            new { policyId = "unregistered", nonce }, operatorToken)
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NoContent, unknownPolicy.StatusCode);
+        using var unconfiguredHost = await PostAsync(unpinned, CancelRoute, request, operatorToken)
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NoContent, unconfiguredHost.StatusCode);
+
+        using var stillAccepted = await PostAsync(pinned, VerifyRoute,
+            new { policyId = "issuer-migration", nonce,
+                attestation = Proof(previous, approved, nonce) }, verifierToken)
+            .ConfigureAwait(true);
+        Assert.Equal("ValidPinnedKeyContinuity",
+            (await BodyAsync(stillAccepted).ConfigureAwait(true)).GetProperty("status").GetString());
     }
 
     private async Task EnsureMigratedAsync()
