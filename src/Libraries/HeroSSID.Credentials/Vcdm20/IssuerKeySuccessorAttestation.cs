@@ -248,6 +248,64 @@ public static class IssuerKeySuccessorAttestation
         return true;
     }
 
+    /// <summary>
+    /// Admit a successor only if it equals the verifier's independently pinned
+    /// preapproved did:key, in addition to both genuine Ed25519 issuer signatures,
+    /// original trusted issuer, audience, nonce, tenant and atomic one-use store.
+    /// This comparison happens BEFORE nonce consumption: an authentic but
+    /// unapproved alternative cannot burn a legitimate successor's challenge.
+    /// The pin MUST come from verifier-controlled prior enrollment, never from
+    /// the untrusted attestation or an untrusted HTTP caller.
+    /// Successful admission proves dual key control, NOT legal identity,
+    /// compromise-free continuity, automatic trust promotion or authority.
+    /// </summary>
+    public static bool TryVerifyAndConsumePinnedSuccessor(
+        string attestationJson, string trustedPreviousIssuerDid,
+        string expectedSuccessorIssuerDid, Uri expectedVerifierAudience,
+        string expectedNonce, Guid verifierTenantId,
+        IPresentationChallengeStore challenges, TimeProvider clock,
+        out string successorIssuerDid)
+    {
+        ArgumentNullException.ThrowIfNull(attestationJson);
+        ArgumentNullException.ThrowIfNull(trustedPreviousIssuerDid);
+        ArgumentNullException.ThrowIfNull(expectedSuccessorIssuerDid);
+        ArgumentNullException.ThrowIfNull(expectedVerifierAudience);
+        ArgumentNullException.ThrowIfNull(expectedNonce);
+        ArgumentNullException.ThrowIfNull(challenges);
+        ArgumentNullException.ThrowIfNull(clock);
+        successorIssuerDid = string.Empty;
+
+        // An old signing key can truthfully co-sign an attacker's new key.
+        // Two signatures alone therefore cannot select the verifier's trust pin.
+        if (!OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(
+                expectedSuccessorIssuerDid, out _) ||
+            string.Equals(expectedSuccessorIssuerDid, trustedPreviousIssuerDid,
+                StringComparison.Ordinal) ||
+            !TryVerify(attestationJson, trustedPreviousIssuerDid,
+                expectedVerifierAudience, expectedNonce, clock.GetUtcNow(),
+                out string signedSuccessor) ||
+            !string.Equals(signedSuccessor, expectedSuccessorIssuerDid,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        // The immutable attestation string is verified again by the existing
+        // challenge admission path, including after atomic store consumption.
+        // It rechecks the stored purpose, tenant, expiry and both signatures.
+        if (!TryVerifyAndConsume(attestationJson, trustedPreviousIssuerDid,
+                expectedVerifierAudience, expectedNonce, verifierTenantId,
+                challenges, clock, out string admittedSuccessor) ||
+            !string.Equals(admittedSuccessor, expectedSuccessorIssuerDid,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        successorIssuerDid = admittedSuccessor;
+        return true;
+    }
+
     private static string StoreAudience(Uri verifierAudience) =>
         ChallengePurposePrefix + verifierAudience.AbsoluteUri;
 
