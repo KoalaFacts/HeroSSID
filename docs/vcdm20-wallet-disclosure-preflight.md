@@ -132,6 +132,44 @@ not-listed set does not prove status completeness or real-time non-revocation;
 neither signed policy nor holder proof establishes real identity or business
 authorization.
 
+
+## Strict issuer status + holder-signed **exact original request** (opt-in)
+
+The legacy-compatible status-aware signer above validates issuer status but emits
+a presentation without the holder-signed original verifier-request hash. That
+proof intentionally fails the independently pinned strict request-binding
+verifier. To combine **both** protections, use the new opt-in SDK entry point
+after a successful `TryPrepareWithStatusRequiringSignedPolicy` preview and
+an application-owned full-disclosure informed-consent decision:
+
+```csharp
+string holderSignedVp =
+    Vcdm20WalletDisclosure.CreateHolderBoundPresentationAfterStatusPreviewRequiringSignedPolicy(
+        strictStatusPreview, signedVerifierRequestJwt,
+        originalIssuerSignedDirectVc2Jwt, issuerSignedVc2RevocationSnapshotJwt,
+        holderOwnedEd25519Seed, TimeProvider.System);
+```
+
+The signer reauthenticates the verifier's signed credential type and HTTPS
+context, original credential, complete displayed subject, original request and
+both exact SHA-256 preview pins; it also requires the **same unchanged,
+current issuer-signed status snapshot** before holder-key signing and after
+the signature has been created. A forged/revoked/replaced/expired snapshot,
+legacy unbound request, other genuine same-nonce request, substituted genuine
+credential or wrong holder seed fails closed. The opt-in signature includes
+private `herossidRequestSha256` over the exact compact signed request.
+
+The verifier must separately retain the **original signed request and its
+lowercase SHA-256 digest** in verifier-controlled storage and use
+`Vcdm20RevocationSnapshot.CheckPresentationWithHolderBoundSignedVerifierRequest`
+with its atomic one-use challenge store and that original signed issuer
+status. The verifier rejects a compatible unbound proof and replay. A
+`SignedNotListed` result does **not** prove the issuer has a complete or
+live revocation set, user consent, actual human/organisation identity,
+authority to perform an Agent action or third-party Wallet/OpenID4VP
+interoperability. No status schema, hosted Wallet UI, production migration
+or managed holder-key custody is introduced.
+
 ## Strict full-disclosure consent → holder-signed original request (opt-in)
 
 The **new** `CreateHolderBoundPresentationAfterPreviewRequiringSignedPolicy`

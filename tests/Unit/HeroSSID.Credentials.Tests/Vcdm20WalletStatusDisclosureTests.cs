@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using HeroSSID.Credentials.Utilities;
 using HeroSSID.Credentials.Vcdm20;
@@ -215,6 +217,123 @@ public sealed class Vcdm20WalletStatusDisclosureTests
             _issuer.Did, credential, _holder.Did, SignSnapshot([credential]),
             _clock, out denied));
         Assert.Null(denied);
+    }
+
+
+    [Fact]
+    public void StatusAwareHolderBoundPreviewSignsExactRequestWithVerifiedIssuerStatusAndRejectsReplay()
+    {
+        Guid tenant = Guid.NewGuid();
+        var challenges = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = challenges.Issue(tenant, Audience, _issuer.Did) with
+        {
+            CredentialType = CredentialType,
+            SubjectContextUri = Context
+        };
+        string request = SignRequest(challenge);
+        string credential = IssueCredential("member");
+        string snapshot = SignSnapshot([]);
+
+        Assert.True(Vcdm20WalletDisclosure.TryPrepareWithStatusRequiringSignedPolicy(
+            request, _verifier.Did, Audience, CredentialType, Context,
+            _issuer.Did, credential, _holder.Did, snapshot, _clock,
+            out var preview));
+        Assert.NotNull(preview);
+        Assert.Equal("member", preview!.Disclosure.VerifiedSubject
+            .GetProperty("membership").GetString());
+
+        string trustedPin = Convert.ToHexStringLower(
+            SHA256.HashData(Encoding.UTF8.GetBytes(request)));
+        string compatibleProof = Vcdm20WalletDisclosure
+            .CreateHolderPresentationAfterStatusPreviewRequiringSignedPolicy(
+                preview, request, credential, snapshot, _holder.Seed, _clock);
+        Assert.Equal(Vcdm20RevocationCheckResult.Invalid,
+            Vcdm20RevocationSnapshot.CheckPresentationWithHolderBoundSignedVerifierRequest(
+                compatibleProof, request, trustedPin, _verifier.Did, snapshot,
+                tenant, Audience, challenge.Nonce, CredentialType, Context,
+                challenges, _clock, out var unboundClaims));
+        Assert.Equal(JsonValueKind.Undefined, unboundClaims.ValueKind);
+
+        // The UI must obtain genuine informed full-disclosure consent here.
+        string holderBoundProof = Vcdm20WalletDisclosure
+            .CreateHolderBoundPresentationAfterStatusPreviewRequiringSignedPolicy(
+                preview, request, credential, snapshot, _holder.Seed, _clock);
+        Assert.Equal(Vcdm20RevocationCheckResult.SignedNotListed,
+            Vcdm20RevocationSnapshot.CheckPresentationWithHolderBoundSignedVerifierRequest(
+                holderBoundProof, request, trustedPin, _verifier.Did, snapshot,
+                tenant, Audience, challenge.Nonce, CredentialType, Context,
+                challenges, _clock, out var verifiedClaims));
+        Assert.Equal("member", verifiedClaims.GetProperty("membership").GetString());
+        Assert.Equal(Vcdm20RevocationCheckResult.Invalid,
+            Vcdm20RevocationSnapshot.CheckPresentationWithHolderBoundSignedVerifierRequest(
+                holderBoundProof, request, trustedPin, _verifier.Did, snapshot,
+                tenant, Audience, challenge.Nonce, CredentialType, Context,
+                challenges, _clock, out var replayClaims));
+        Assert.Equal(JsonValueKind.Undefined, replayClaims.ValueKind);
+    }
+
+    [Fact]
+    public void StatusAwareHolderBoundSignerRejectsLegacyPolicyAndChangesBeforePrivateKeyUse()
+    {
+        var challenges = new InMemoryPresentationChallengeStore(_clock);
+        string credential = IssueCredential("member");
+        string snapshot = SignSnapshot([]);
+        string legacyRequest = SignRequest(
+            challenges.Issue(Guid.NewGuid(), Audience, _issuer.Did));
+        Assert.True(Prepare(legacyRequest, credential, snapshot, out var legacy));
+        Assert.NotNull(legacy);
+        Assert.Throws<ArgumentException>(() =>
+            Vcdm20WalletDisclosure
+                .CreateHolderBoundPresentationAfterStatusPreviewRequiringSignedPolicy(
+                    legacy!, legacyRequest, credential, snapshot, _holder.Seed, _clock));
+
+        var challenge = challenges.Issue(Guid.NewGuid(), Audience, _issuer.Did) with
+        {
+            CredentialType = CredentialType,
+            SubjectContextUri = Context
+        };
+        string request = SignRequest(challenge);
+        Assert.True(Vcdm20WalletDisclosure.TryPrepareWithStatusRequiringSignedPolicy(
+            request, _verifier.Did, Audience, CredentialType, Context,
+            _issuer.Did, credential, _holder.Did, snapshot, _clock,
+            out var preview));
+        Assert.NotNull(preview);
+
+        string replacedRequest = SignRequest(challenge with
+        {
+            ExpiresAt = challenge.ExpiresAt.AddSeconds(-1)
+        });
+        Assert.Throws<ArgumentException>(() =>
+            Vcdm20WalletDisclosure
+                .CreateHolderBoundPresentationAfterStatusPreviewRequiringSignedPolicy(
+                    preview!, replacedRequest, credential, snapshot, _holder.Seed, _clock));
+        Assert.Throws<ArgumentException>(() =>
+            Vcdm20WalletDisclosure
+                .CreateHolderBoundPresentationAfterStatusPreviewRequiringSignedPolicy(
+                    preview!, request, IssueCredential("administrator"), snapshot,
+                    _holder.Seed, _clock));
+        Assert.Throws<ArgumentException>(() =>
+            Vcdm20WalletDisclosure
+                .CreateHolderBoundPresentationAfterStatusPreviewRequiringSignedPolicy(
+                    preview!, request, credential, SignSnapshot([credential]),
+                    _holder.Seed, _clock));
+        Assert.Throws<ArgumentException>(() =>
+            Vcdm20WalletDisclosure
+                .CreateHolderBoundPresentationAfterStatusPreviewRequiringSignedPolicy(
+                    preview!, request, credential, snapshot, _attacker.Seed, _clock));
+
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        string newerSnapshot = SignSnapshot([]);
+        Assert.NotEqual(snapshot, newerSnapshot);
+        Assert.Throws<ArgumentException>(() =>
+            Vcdm20WalletDisclosure
+                .CreateHolderBoundPresentationAfterStatusPreviewRequiringSignedPolicy(
+                    preview!, request, credential, newerSnapshot, _holder.Seed, _clock));
+        _clock.Advance(TimeSpan.FromSeconds(60));
+        Assert.Throws<ArgumentException>(() =>
+            Vcdm20WalletDisclosure
+                .CreateHolderBoundPresentationAfterStatusPreviewRequiringSignedPolicy(
+                    preview!, request, credential, snapshot, _holder.Seed, _clock));
     }
 
     private bool Prepare(string request, string credential, string snapshot,

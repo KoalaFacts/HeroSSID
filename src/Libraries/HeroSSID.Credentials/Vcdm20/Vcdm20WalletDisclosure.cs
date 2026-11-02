@@ -352,6 +352,70 @@ public static class Vcdm20WalletDisclosure
         return presentation;
     }
 
+
+    /// <summary>
+    /// After a status-aware, signed-policy preview, sign the exact verifier
+    /// request digest with the holder's key while requiring the same unchanged,
+    /// current issuer-signed status. No UI consent attestation is implied.
+    /// </summary>
+    public static string CreateHolderBoundPresentationAfterStatusPreviewRequiringSignedPolicy(
+        Vcdm20WalletStatusDisclosurePreview preview, string signedRequestJwt,
+        string credentialJwt, string issuerSignedSnapshotJwt,
+        byte[] holderSeed, TimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(preview);
+        ArgumentNullException.ThrowIfNull(holderSeed);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        // Check the verifier-signed type/context AND the unchanged issuer-signed
+        // status before the holder's seed reaches the independent signer. A
+        // caller-supplied preview alone is not a trusted policy or status pin.
+        if (preview.Disclosure is null ||
+            preview.Disclosure.SubjectContextUri is null ||
+            string.IsNullOrWhiteSpace(issuerSignedSnapshotJwt) ||
+            issuerSignedSnapshotJwt.Length > 65_536 ||
+            !OfflineSignedPresentationRequest.TryReadPolicyBound(
+                signedRequestJwt, preview.Disclosure.VerifierDid,
+                preview.Disclosure.VerifierAudience,
+                preview.Disclosure.CredentialType,
+                preview.Disclosure.SubjectContextUri, clock, out var challenge) ||
+            challenge is null ||
+            !string.Equals(challenge.TrustedIssuerDid,
+                preview.Disclosure.TrustedIssuerDid, StringComparison.Ordinal) ||
+            challenge.ExpiresAt != preview.Disclosure.RequestExpiresAt ||
+            !string.Equals(preview.SnapshotSha256, Sha256(issuerSignedSnapshotJwt),
+                StringComparison.Ordinal) ||
+            Vcdm20RevocationSnapshot.Check(
+                issuerSignedSnapshotJwt, credentialJwt,
+                preview.Disclosure.TrustedIssuerDid, clock.GetUtcNow()) !=
+                Vcdm20RevocationCheckResult.SignedNotListed)
+        {
+            throw new ArgumentException(
+                "An unchanged signed verifier policy and authentic current issuer status are required.",
+                nameof(preview));
+        }
+
+        // Independently recheck the complete original no-key preview, live
+        // signed verifier policy and issuer credential. The holder's real
+        // Ed25519 signature then binds the exact compact verifier request hash.
+        string proof = CreateHolderBoundPresentationAfterPreviewRequiringSignedPolicy(
+            preview.Disclosure, signedRequestJwt, credentialJwt, holderSeed, clock);
+
+        // Signing may cross the issuer snapshot expiry boundary. Never release
+        // a proof that this Wallet has treated as status-checked after expiry.
+        if (Vcdm20RevocationSnapshot.Check(
+                issuerSignedSnapshotJwt, credentialJwt,
+                preview.Disclosure.TrustedIssuerDid, clock.GetUtcNow()) !=
+                Vcdm20RevocationCheckResult.SignedNotListed)
+        {
+            throw new ArgumentException(
+                "The issuer-signed status expired while creating the holder proof.",
+                nameof(issuerSignedSnapshotJwt));
+        }
+
+        return proof;
+    }
+
     private static string Sha256(string jwt) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(jwt)));
 }
