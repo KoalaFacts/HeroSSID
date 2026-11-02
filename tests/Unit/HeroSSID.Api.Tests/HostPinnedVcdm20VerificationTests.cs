@@ -408,6 +408,8 @@ public sealed class HostPinnedVcdm20VerificationTests
     [InlineData("MinimumStatusObservedAtUTC")]
     [InlineData("DeniedCredentialsSha256:0")]
     [InlineData("TrustedIssuerDid:0")]
+    [InlineData("CredentialType:Unexpected")]
+    [InlineData("SubjectContextUri:Nested")]
     public void UnknownHostTrustPolicyFieldMustFailStartupInsteadOfSilentlyLosingProtection(
         string field)
     {
