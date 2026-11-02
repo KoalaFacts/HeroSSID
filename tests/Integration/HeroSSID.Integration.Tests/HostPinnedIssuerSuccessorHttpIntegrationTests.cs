@@ -110,15 +110,51 @@ public sealed class HostPinnedIssuerSuccessorHttpIntegrationTests(DatabaseFixtur
         string nonce = await IssueNonceAsync(first, token).ConfigureAwait(true);
         string attestation = Proof(previous, approved, nonce);
         using var unpinnedVerification = await PostAsync(second, VerifyRoute,
+            new { policyId = "issuer-migration", nonce, attestation }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, unpinnedVerification.StatusCode);
+        Assert.Equal("Invalid",
+            (await BodyAsync(unpinnedVerification).ConfigureAwait(true))
+                .GetProperty("status").GetString());
+
+        // A caller cannot inject its own preapproved successor DID even if a
+        // different host already issued the original durable challenge.
+        using var callerOverride = await PostAsync(second, VerifyRoute,
             new { policyId = "issuer-migration", nonce, attestation,
-                expectedSuccessorIssuerDid = approvedDid }, token).ConfigureAwait(true);
-        // A caller must not be able to turn an undeclared verifier pin into trust.
-        Assert.NotEqual(HttpStatusCode.OK, unpinnedVerification.StatusCode);
+                preapprovedSuccessorIssuerDid = approvedDid }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, callerOverride.StatusCode);
 
         using var accepted = await PostAsync(first, VerifyRoute,
             new { policyId = "issuer-migration", nonce, attestation }, token).ConfigureAwait(true);
         Assert.Equal("ValidPinnedKeyContinuity",
             (await BodyAsync(accepted).ConfigureAwait(true)).GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task HostPinnedEndpointsRequireAuthenticationAndVerifierScope()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        using var previous = NewKey();
+        using var approved = NewKey();
+        await using var host = NewHost(DidFromKey(previous), DidFromKey(approved));
+        using var client = host.CreateClient();
+        var challenge = new { policyId = "issuer-migration", lifetimeSeconds = 120 };
+        using var anonymousIssue = await client.PostAsJsonAsync(IssueRoute, challenge,
+            TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymousIssue.StatusCode);
+        using var anonymousVerify = await client.PostAsJsonAsync(VerifyRoute,
+            new { policyId = "issuer-migration", nonce = new string('A', 43),
+                attestation = "invalid" }, TestContext.Current.CancellationToken)
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymousVerify.StatusCode);
+
+        string unrelated = await GetTokenAsync(client, "did:manage").ConfigureAwait(true);
+        using var forbiddenIssue = await PostAsync(client, IssueRoute,
+            challenge, unrelated).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, forbiddenIssue.StatusCode);
+        using var forbiddenVerify = await PostAsync(client, VerifyRoute,
+            new { policyId = "issuer-migration", nonce = new string('A', 43),
+                attestation = "invalid" }, unrelated).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, forbiddenVerify.StatusCode);
     }
 
     private async Task EnsureMigratedAsync()
