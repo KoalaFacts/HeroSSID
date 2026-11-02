@@ -49,7 +49,7 @@ public static class Vcdm20VerifierDenylist
         out string verifiedIssuerDid, out JsonElement verifiedSubject) =>
         CheckCore(credentialJwt, null, trustedIssuerDids, deniedCredentialSha256,
             expectedHolderDid, expectedCredentialType, expectedSubjectContextUri,
-            now, out verifiedIssuerDid, out verifiedSubject);
+            now, null, out verifiedIssuerDid, out verifiedSubject);
 
     /// <summary>
     /// Additionally require a genuine, current, private 60-second status
@@ -69,7 +69,29 @@ public static class Vcdm20VerifierDenylist
         return CheckCore(credentialJwt, revocationSnapshotJwt,
             trustedIssuerDids, deniedCredentialSha256,
             expectedHolderDid, expectedCredentialType, expectedSubjectContextUri,
-            now, out verifiedIssuerDid, out verifiedSubject);
+            now, null, out verifiedIssuerDid, out verifiedSubject);
+    }
+
+    /// <summary>
+    /// As well as requiring a real signed current issuer status, enforce a
+    /// separately pinned relying-party minimum observation timestamp. A still
+    /// fresh but pre-incident signed clean list fails closed. Issuer timestamps
+    /// are signed assertions, NOT evidence that observation really occurred.
+    /// </summary>
+    public static Vcdm20VerifierPolicyResult CheckWithStatusObservedAfter(
+        string credentialJwt, string revocationSnapshotJwt,
+        IReadOnlyCollection<string> trustedIssuerDids,
+        IReadOnlyCollection<string> deniedCredentialSha256,
+        string expectedHolderDid, string expectedCredentialType,
+        Uri expectedSubjectContextUri, DateTimeOffset now,
+        DateTimeOffset minimumObservedAtUtc,
+        out string verifiedIssuerDid, out JsonElement verifiedSubject)
+    {
+        ArgumentNullException.ThrowIfNull(revocationSnapshotJwt);
+        return CheckCore(credentialJwt, revocationSnapshotJwt,
+            trustedIssuerDids, deniedCredentialSha256,
+            expectedHolderDid, expectedCredentialType, expectedSubjectContextUri,
+            now, minimumObservedAtUtc, out verifiedIssuerDid, out verifiedSubject);
     }
 
     private static Vcdm20VerifierPolicyResult CheckCore(
@@ -78,6 +100,7 @@ public static class Vcdm20VerifierDenylist
         IReadOnlyCollection<string> deniedCredentialSha256,
         string expectedHolderDid, string expectedCredentialType,
         Uri expectedSubjectContextUri, DateTimeOffset now,
+        DateTimeOffset? minimumObservedAtUtc,
         out string verifiedIssuerDid, out JsonElement verifiedSubject)
     {
         ArgumentNullException.ThrowIfNull(credentialJwt);
@@ -128,8 +151,11 @@ public static class Vcdm20VerifierDenylist
         var positiveStatus = Vcdm20VerifierPolicyResult.SignedButStatusUnchecked;
         if (revocationSnapshotJwt is not null)
         {
-            Vcdm20RevocationCheckResult signedStatus = Vcdm20RevocationSnapshot.Check(
-                revocationSnapshotJwt, credentialJwt, authenticIssuer, now);
+            Vcdm20RevocationCheckResult signedStatus = minimumObservedAtUtc is DateTimeOffset cutoff
+                ? Vcdm20RevocationSnapshot.CheckWithObservationCutoff(
+                    revocationSnapshotJwt, credentialJwt, authenticIssuer, now, cutoff)
+                : Vcdm20RevocationSnapshot.Check(
+                    revocationSnapshotJwt, credentialJwt, authenticIssuer, now);
             if (signedStatus == Vcdm20RevocationCheckResult.Revoked)
             {
                 return Vcdm20VerifierPolicyResult.IssuerReportedRevoked;
