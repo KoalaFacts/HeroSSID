@@ -290,6 +290,18 @@ public static class Vcdm20RevocationSnapshot
             out verifiedSubject);
     }
 
+    /// <summary>
+    /// Require holder-signed original request binding and genuine same-issuer
+    /// status before exposing full-disclosure subject claims.
+    /// </summary>
+    public static Vcdm20RevocationCheckResult CheckPresentationWithHolderBoundSignedVerifierRequest(
+        string presentationJwt, string signedRequestJwt, string trustedRequestSha256,
+        string trustedVerifierDid, string snapshotJwt, Guid verifierTenantId,
+        string expectedAudience, string expectedNonce, string expectedCredentialType,
+        Uri expectedContextUri, IPresentationChallengeStore challenges,
+        TimeProvider clock, out JsonElement verifiedSubject) =>
+        throw new NotSupportedException("Status-aware holder-bound request verification has not been implemented.");
+
     // The sole credential extraction, signature, nonce-consumption and status
     // path for both compatibility and incident-cutoff verification. A bypass
     // cannot arise from applying the cutoff only to standalone credentials.
