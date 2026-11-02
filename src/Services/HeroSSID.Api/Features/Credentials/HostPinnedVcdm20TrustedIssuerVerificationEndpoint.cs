@@ -42,10 +42,13 @@ internal sealed class HostPinnedVcdm20IssuerRegistry
             string? contextText = entry["SubjectContextUri"];
             IConfigurationSection issuerSection = entry.GetSection("TrustedIssuerDids");
             IConfigurationSection[] issuers = [.. issuerSection.GetChildren()];
+            IConfigurationSection denialSection = entry.GetSection("DeniedCredentialSha256");
+            IConfigurationSection[] denialEntries = [.. denialSection.GetChildren()];
             if (!Guid.TryParse(tenantText, out Guid tenant) || tenant == Guid.Empty ||
                 !IsPolicyId(policyId) || !IsCredentialType(type) ||
                 !IsContext(contextText, out Uri? context) ||
-                issuerSection.Value is not null || issuers.Length is < 1 or > 16)
+                issuerSection.Value is not null || issuers.Length is < 1 or > 16 ||
+                denialSection.Value is not null || denialEntries.Length > 256)
             {
                 throw new InvalidOperationException("Invalid host-owned VC2 issuer trust policy.");
             }
@@ -62,8 +65,24 @@ internal sealed class HostPinnedVcdm20IssuerRegistry
                 }
             }
 
+            // Emergency denial is a protected, verifier-owned operator decision.
+            // Reject the entire deployment configuration rather than silently
+            // ignoring a malformed, duplicate or oversized original-JWT digest.
+            var denied = new HashSet<string>(StringComparer.Ordinal);
+            foreach (IConfigurationSection denial in denialEntries)
+            {
+                string? digest = denial.Value;
+                if (digest is not { Length: 64 } ||
+                    !digest.All(static character =>
+                        character is >= '0' and <= '9' or >= 'a' and <= 'f') ||
+                    denial.GetChildren().Any() || !denied.Add(digest))
+                {
+                    throw new InvalidOperationException("Invalid or duplicate host-owned VC2 denial digest.");
+                }
+            }
+
             if (!_policies.TryAdd((tenant, policyId!),
-                    new HostPinnedVcdm20IssuerPolicy([.. unique], type!, context!)))
+                    new HostPinnedVcdm20IssuerPolicy([.. unique], type!, context!, [.. denied])))
             {
                 throw new InvalidOperationException("Duplicate tenant VC2 issuer trust policy.");
             }
@@ -102,7 +121,8 @@ internal sealed class HostPinnedVcdm20IssuerRegistry
 }
 
 internal sealed record HostPinnedVcdm20IssuerPolicy(
-    string[] TrustedIssuerDids, string CredentialType, Uri SubjectContextUri);
+    string[] TrustedIssuerDids, string CredentialType, Uri SubjectContextUri,
+    string[] DeniedCredentialSha256);
 
 /// <summary>
 /// A verifier host, not an authenticated caller, chooses current/historical VC2
@@ -155,15 +175,25 @@ internal static class HostPinnedVcdm20TrustedIssuerVerificationEndpoint
         }
 
         if (!registry.TryGet(tenant, request.PolicyId!, out HostPinnedVcdm20IssuerPolicy? policy) ||
-            policy is null ||
-            !Vcdm20TrustedIssuerVerifier.TryVerify(
-                request.Credential, policy.TrustedIssuerDids, request.ExpectedHolderDid,
-                policy.CredentialType, policy.SubjectContextUri,
-                clock.GetUtcNow(), out string actualIssuer, out var verifiedSubject))
+            policy is null)
         {
-            // A missing/foreign policy, attacker issuer or forged credential
-            // exposes neither an enrolled DID nor any untrusted subject data.
+            // An unknown/foreign policy never discloses tenant issuer enrollment.
             return Results.Ok(new VerifyVcdm20TrustedIssuersResponse("Invalid", null, null));
+        }
+
+        // Verify the original Ed25519 issuer statement before comparing the
+        // exact JWT digest. The caller cannot supply or suppress operator denial.
+        Vcdm20VerifierPolicyResult status = Vcdm20VerifierDenylist.Check(
+            request.Credential, policy.TrustedIssuerDids, policy.DeniedCredentialSha256,
+            request.ExpectedHolderDid, policy.CredentialType, policy.SubjectContextUri,
+            clock.GetUtcNow(), out string actualIssuer, out var verifiedSubject);
+        if (status != Vcdm20VerifierPolicyResult.SignedButStatusUnchecked)
+        {
+            // Neither an authentic denied credential nor a forged one releases
+            // issuer identity or claims. DeniedByVerifier is not issuer revocation.
+            string responseStatus = status == Vcdm20VerifierPolicyResult.DeniedByVerifier
+                ? "DeniedByVerifier" : "Invalid";
+            return Results.Ok(new VerifyVcdm20TrustedIssuersResponse(responseStatus, null, null));
         }
 
         return Results.Ok(new VerifyVcdm20TrustedIssuersResponse(

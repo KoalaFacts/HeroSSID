@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using HeroSSID.Api.Features.Credentials;
 using HeroSSID.Core.TenantManagement;
@@ -148,6 +150,86 @@ public sealed class HostPinnedVcdm20VerificationTests
             "{\"policyId\":\"membership-v1\",\"credential\":\"x.y.z\",\"trustedIssuerDids\":[\"did:key:attacker\"]}",
             HttpJsonOptions));
     }
+
+    [Fact]
+    public async Task OperatorDeniedAuthenticVc2NeverReleasesIssuerOrSubject()
+    {
+        var fixture = Create();
+        var request = new VerifyHostPinnedVcdm20Request
+        {
+            PolicyId = "membership-v1", Credential = fixture.ValidJwt,
+            ExpectedHolderDid = fixture.HolderDid
+        };
+        var deniedConfig = Configuration(fixture.Tenant, fixture.IssuerDid);
+        deniedConfig["Vcdm20VerifierTrust:Policies:0:DeniedCredentialSha256:0"] =
+            Digest(fixture.ValidJwt);
+        var deniedRegistry = new HostPinnedVcdm20IssuerRegistry(deniedConfig);
+        var response = await ExecuteAsync(HostPinnedVcdm20TrustedIssuerVerificationEndpoint.Verify(
+            request, deniedRegistry, new FixedTenant(fixture.Tenant), new FixedClock(Now)))
+            .ConfigureAwait(true);
+
+        Assert.Equal(StatusCodes.Status200OK, response.Status);
+        Assert.Equal("DeniedByVerifier", response.Body.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, response.Body.GetProperty("verifiedIssuerDid").ValueKind);
+        Assert.Equal(JsonValueKind.Null, response.Body.GetProperty("verifiedSubject").ValueKind);
+
+        // A different exact JWT digest cannot deny this authentic credential.
+        var unrelatedConfig = Configuration(fixture.Tenant, fixture.IssuerDid);
+        unrelatedConfig["Vcdm20VerifierTrust:Policies:0:DeniedCredentialSha256:0"] =
+            Digest(fixture.RogueJwt);
+        var unrelatedRegistry = new HostPinnedVcdm20IssuerRegistry(unrelatedConfig);
+        var accepted = await ExecuteAsync(HostPinnedVcdm20TrustedIssuerVerificationEndpoint.Verify(
+            request, unrelatedRegistry, new FixedTenant(fixture.Tenant), new FixedClock(Now)))
+            .ConfigureAwait(true);
+        Assert.Equal("SignedButStatusUnchecked", accepted.Body.GetProperty("status").GetString());
+        Assert.Equal(fixture.IssuerDid,
+            accepted.Body.GetProperty("verifiedIssuerDid").GetString());
+
+        // A forged credential cannot become authentic merely by matching a denial hash.
+        var forged = Tamper(fixture.ValidJwt);
+        var forgedConfig = Configuration(fixture.Tenant, fixture.IssuerDid);
+        forgedConfig["Vcdm20VerifierTrust:Policies:0:DeniedCredentialSha256:0"] = Digest(forged);
+        await AssertInvalidAsync(HostPinnedVcdm20TrustedIssuerVerificationEndpoint.Verify(
+            request with { Credential = forged },
+            new HostPinnedVcdm20IssuerRegistry(forgedConfig),
+            new FixedTenant(fixture.Tenant), new FixedClock(Now))).ConfigureAwait(true);
+    }
+
+    [Fact]
+    public void MalformedDuplicateOrOversizedOperatorDenialPolicyFailsStartup()
+    {
+        var fixture = Create();
+        string digest = Digest(fixture.ValidJwt);
+        var invalid = Configuration(fixture.Tenant, fixture.IssuerDid);
+        invalid["Vcdm20VerifierTrust:Policies:0:DeniedCredentialSha256:0"] =
+            digest.ToUpperInvariant();
+        Assert.Throws<InvalidOperationException>(
+            () => new HostPinnedVcdm20IssuerRegistry(invalid));
+
+        var duplicated = Configuration(fixture.Tenant, fixture.IssuerDid);
+        duplicated["Vcdm20VerifierTrust:Policies:0:DeniedCredentialSha256:0"] = digest;
+        duplicated["Vcdm20VerifierTrust:Policies:0:DeniedCredentialSha256:1"] = digest;
+        Assert.Throws<InvalidOperationException>(
+            () => new HostPinnedVcdm20IssuerRegistry(duplicated));
+
+        var nested = Configuration(fixture.Tenant, fixture.IssuerDid);
+        nested["Vcdm20VerifierTrust:Policies:0:DeniedCredentialSha256:0:Nested"] = digest;
+        Assert.Throws<InvalidOperationException>(
+            () => new HostPinnedVcdm20IssuerRegistry(nested));
+
+        var oversized = Configuration(fixture.Tenant, fixture.IssuerDid);
+        for (int i = 0; i < 257; i++)
+        {
+            oversized[$"Vcdm20VerifierTrust:Policies:0:DeniedCredentialSha256:{i}"] =
+                i.ToString("x64", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        Assert.Throws<InvalidOperationException>(
+            () => new HostPinnedVcdm20IssuerRegistry(oversized));
+    }
+
+    private static string Digest(string jwt) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(jwt)));
 
     private static Dictionary<string, string?> ConfigurationEntries(Guid tenant, string issuer) => new()
     {
