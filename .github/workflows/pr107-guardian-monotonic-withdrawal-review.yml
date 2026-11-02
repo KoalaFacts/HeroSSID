@@ -1,0 +1,144 @@
+name: Independent PR107 monotonic guardian enrollment withdrawal review
+
+on:
+  push:
+    branches:
+      - review/pr107-guardian-monotonic-withdrawal-20261102
+
+permissions: {}
+
+jobs:
+  review:
+    name: Independent Qwen three-file monotonic emergency withdrawal review
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout helper and immutable Git history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require exact product HEAD, main baseline and all three paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse c22c413138d860583fc18ca227f29d2c047bf383^{commit})" = "c22c413138d860583fc18ca227f29d2c047bf383"
+          test "$(git rev-parse d9ce6dde1933f6093e43ddeb3b1b57ab928ec414^{commit})" = "d9ce6dde1933f6093e43ddeb3b1b57ab928ec414"
+          git diff --name-only d9ce6dde1933f6093e43ddeb3b1b57ab928ec414 c22c413138d860583fc18ca227f29d2c047bf383 | sort >/tmp/review-files.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          expected = {
+              "src/Services/HeroSSID.Api/Features/Credentials/HostPinnedIssuerGuardianRecoveryHttpEndpoints.cs",
+              "tests/Integration/HeroSSID.Integration.Tests/IssuerGuardianRecoveryHttpIntegrationTests.cs",
+              "docs/issuer-guardian-preenrollment.md",
+          }
+          assert set(Path("/tmp/review-files.txt").read_text().splitlines()) == expected
+          PY
+      - name: Install independent Qwen2.5-Coder model
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location https://ollama.com/install.sh --output /tmp/ollama-install.sh
+          sh /tmp/ollama-install.sh
+          nohup ollama serve >/tmp/ollama-server.log 2>&1 </dev/null &
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null
+          ollama pull qwen2.5-coder:7b
+      - name: Independently audit every changed file in two exhaustive partitions
+        shell: bash
+        run: |
+          set -euo pipefail
+          for part in 1 2; do
+            REVIEW_PART="$part" python3 tools/offline_pr107_review.py
+            test -s "review-$part.json"
+            test -s "review-model-$part.json"
+            test -s "review-$part.md"
+            test "$(cat "review-head-$part.txt")" = "c22c413138d860583fc18ca227f29d2c047bf383"
+          done
+      - name: Preserve raw model inference, exact-head proofs and rendered review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-pr107-review
+          path: |
+            review-*.md
+            review-*.json
+            review-head-*.txt
+            review-model-*.json
+          retention-days: 30
+          if-no-files-found: warn
+
+  publish:
+    name: Submit authentic COMMENTED model review against exact PR107 head
+    needs: review
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    steps:
+      - name: Download independent complete model results
+        uses: actions/download-artifact@v4
+        with:
+          name: independent-pr107-review
+      - name: Verify live PR head, full three-file set and original inference
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/107 --jq '.head.sha')"
+          test "$actual" = "c22c413138d860583fc18ca227f29d2c047bf383"
+          gh api repos/KoalaFacts/HeroSSID/pulls/107/files --paginate --jq '.[].filename' | sort >/tmp/pr107-files.txt
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          head = "c22c413138d860583fc18ca227f29d2c047bf383"
+          expected = {
+              "src/Services/HeroSSID.Api/Features/Credentials/HostPinnedIssuerGuardianRecoveryHttpEndpoints.cs",
+              "tests/Integration/HeroSSID.Integration.Tests/IssuerGuardianRecoveryHttpIntegrationTests.cs",
+              "docs/issuer-guardian-preenrollment.md",
+          }
+          assert set(Path("/tmp/pr107-files.txt").read_text().splitlines()) == expected
+          all_files = []
+          for part in (1, 2):
+              data = json.loads(Path(f"review-{part}.json").read_text())
+              raw = json.loads(Path(f"review-model-{part}.json").read_text())
+              assert data["head"] == head and data["part"] == part
+              assert (data["review"]["verdict"] == raw["verdict"] or
+                      (raw["verdict"] == "no_actionable_findings" and
+                       data["review"]["verdict"] == "inconclusive" and
+                       bool(raw["findings"])))
+              assert raw["verdict"] in ("no_actionable_findings", "actionable_findings", "inconclusive")
+              assert len(Path(f"review-{part}.md").read_text()) > 150
+              assert Path(f"review-head-{part}.txt").read_text().strip() == head
+              all_files.extend(data["files"])
+          assert len(all_files) == len(expected) and set(all_files) == expected
+          PY
+      - name: Submit truthful independently generated COMMENTED review
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo "Independent Qwen2.5-Coder 7B local-model review of all three exact PR #107 emergency-revocation patches."
+            echo
+            echo "Reviewed exact HEAD: c22c413138d860583fc18ca227f29d2c047bf383. Base: d9ce6dde1933f6093e43ddeb3b1b57ab928ec414."
+            echo "Automated independent code review only; NOT human approval, an external cryptographic security audit, W3C conformance, third-party Wallet interoperability, personal identity validation or business authorization."
+            echo "All authentic raw model verdicts and findings retained; each finding requires evidence-based disposition."
+            echo
+            cat review-1.md
+            echo
+            cat review-2.md
+            echo
+          } >/tmp/pr107-review.md
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/107/reviews \
+            -f event=COMMENT -f commit_id=c22c413138d860583fc18ca227f29d2c047bf383 \
+            -f body="$(cat /tmp/pr107-review.md)" \
+            --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
