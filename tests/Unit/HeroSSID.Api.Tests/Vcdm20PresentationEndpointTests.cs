@@ -23,6 +23,7 @@ public sealed class Vcdm20PresentationEndpointTests
     private const string CredentialType = "MembershipCredential";
     private static readonly Uri Context = new("https://issuer.example/context/membership/v1");
     private static readonly DateTimeOffset Epoch = new(2026, 10, 30, 12, 0, 0, TimeSpan.Zero);
+    private static readonly JsonSerializerOptions HttpJsonOptions = new(JsonSerializerDefaults.Web);
     private readonly Clock _clock = new(Epoch);
     private readonly Tenant _tenant = new();
     private readonly (byte[] Seed, string Did) _issuer = NewIdentity();
@@ -254,7 +255,7 @@ public sealed class Vcdm20PresentationEndpointTests
 
         Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<VerifyHostPinnedVcdm20PresentationRequest>(
             "{\"policyId\":\"membership-v1\",\"trustedIssuerDids\":[\"did:key:attacker\"]}",
-            new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+            HttpJsonOptions));
     }
 
     private HostPinnedVcdm20IssuerRegistry Registry(string issuerDid, string? deniedHash = null,
