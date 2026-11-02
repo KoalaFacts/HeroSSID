@@ -143,6 +143,16 @@ internal static class HostPinnedVcdm20TrustedIssuerVerificationEndpoint
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
+        credentials.MapPost("/vcdm20/verify-host-pinned-with-status", VerifyWithStatus)
+            .RequireAuthorization(OperationScopes.CredentialVerify)
+            .WithName("VerifyHostPinnedVcdm20IssuerWithStatus")
+            .WithSummary("Verify a direct VC2 JWT with host-owned issuer policy and the original issuer's fresh signed status")
+            .Produces<VerifyVcdm20TrustedIssuersResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
     }
 
     internal static IResult Verify(
@@ -199,6 +209,70 @@ internal static class HostPinnedVcdm20TrustedIssuerVerificationEndpoint
         return Results.Ok(new VerifyVcdm20TrustedIssuersResponse(
             "SignedButStatusUnchecked", actualIssuer, verifiedSubject));
     }
+    /// <summary>
+    /// Require the actual issuer's real Ed25519 signed, current HeroSSID status
+    /// snapshot in addition to immutable tenant-owned issuer/type/context and
+    /// emergency-denial policies. The HTTP caller can supply the status bytes,
+    /// but never their signer, local allowlist, or a bypass for operator denial.
+    /// A signed non-listing is not a guarantee of complete or live revocation.
+    /// </summary>
+    internal static IResult VerifyWithStatus(
+        [FromBody] VerifyHostPinnedVcdm20WithStatusRequest request,
+        [FromServices] HostPinnedVcdm20IssuerRegistry registry,
+        [FromServices] ITenantContext tenantContext,
+        [FromServices] TimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(registry);
+        ArgumentNullException.ThrowIfNull(tenantContext);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        if (!HostPinnedVcdm20IssuerRegistry.IsPolicyId(request.PolicyId) ||
+            request.Credential is not { Length: > 0 and <= 65_536 } ||
+            request.RevocationSnapshot is not { Length: > 0 and <= 65_536 } ||
+            request.ExpectedHolderDid is not { Length: > 0 and <= 255 } ||
+            !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(
+                request.ExpectedHolderDid, out _))
+        {
+            return Results.Problem(
+                title: "Invalid Host-Pinned VC2 Status Verification Request",
+                detail: "A policy identifier, bounded direct VC2 JWT, issuer-signed status snapshot and holder did:key are required.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        Guid tenant = tenantContext.GetCurrentTenantId();
+        if (tenant == Guid.Empty)
+        {
+            return Results.Unauthorized();
+        }
+
+        if (!registry.TryGet(tenant, request.PolicyId!, out HostPinnedVcdm20IssuerPolicy? policy) ||
+            policy is null)
+        {
+            return Results.Ok(new VerifyVcdm20TrustedIssuersResponse("Invalid", null, null));
+        }
+
+        Vcdm20VerifierPolicyResult status = Vcdm20VerifierDenylist.CheckWithStatus(
+            request.Credential, request.RevocationSnapshot, policy.TrustedIssuerDids,
+            policy.DeniedCredentialSha256, request.ExpectedHolderDid,
+            policy.CredentialType, policy.SubjectContextUri, clock.GetUtcNow(),
+            out string actualIssuer, out var verifiedSubject);
+        if (status != Vcdm20VerifierPolicyResult.SignedNotListed)
+        {
+            string responseStatus = status switch
+            {
+                Vcdm20VerifierPolicyResult.DeniedByVerifier => "DeniedByVerifier",
+                Vcdm20VerifierPolicyResult.IssuerReportedRevoked => "IssuerReportedRevoked",
+                _ => "Invalid"
+            };
+            // All rejection responses withhold issuer and subject, even if
+            // the status was signed by a trusted issuer.
+            return Results.Ok(new VerifyVcdm20TrustedIssuersResponse(responseStatus, null, null));
+        }
+
+        return Results.Ok(new VerifyVcdm20TrustedIssuersResponse(
+            "SignedNotListed", actualIssuer, verifiedSubject));
+    }
 }
 
 /// <summary>
@@ -211,4 +285,19 @@ public sealed record class VerifyHostPinnedVcdm20Request
     public string? PolicyId { get; init; }
     public string? Credential { get; init; }
     public string? ExpectedHolderDid { get; init; }
+}
+
+
+/// <summary>
+/// Caller supplies an original VC2 JWT and same-issuer signed status but cannot
+/// override any verifier-owned issuer, context, type or emergency-denial policy.
+/// This is issuer provenance/status evidence, not holder control or authorization.
+/// </summary>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record class VerifyHostPinnedVcdm20WithStatusRequest
+{
+    public string? PolicyId { get; init; }
+    public string? Credential { get; init; }
+    public string? ExpectedHolderDid { get; init; }
+    public string? RevocationSnapshot { get; init; }
 }

@@ -36,14 +36,20 @@ public sealed class HostPinnedVcdm20VerificationTests
             .SelectMany(static source => source.Endpoints)
             .OfType<RouteEndpoint>().ToArray();
 
-        var route = Assert.Single(routes,
-            endpoint => endpoint.RoutePattern.RawText ==
-                "/api/v1/credentials/vcdm20/verify-host-pinned");
-        Assert.Contains(route.Metadata.GetOrderedMetadata<IAuthorizeData>(),
-            static policy => policy.Policy == "credential:verify");
-        Assert.Null(route.Metadata.GetMetadata<IAllowAnonymous>());
-        Assert.Equal("POST", Assert.Single(route.Metadata
-            .GetMetadata<IHttpMethodMetadata>()!.HttpMethods));
+        foreach (string path in new[]
+        {
+            "/api/v1/credentials/vcdm20/verify-host-pinned",
+            "/api/v1/credentials/vcdm20/verify-host-pinned-with-status"
+        })
+        {
+            var route = Assert.Single(routes,
+                endpoint => endpoint.RoutePattern.RawText == path);
+            Assert.Contains(route.Metadata.GetOrderedMetadata<IAuthorizeData>(),
+                static policy => policy.Policy == "credential:verify");
+            Assert.Null(route.Metadata.GetMetadata<IAllowAnonymous>());
+            Assert.Equal("POST", Assert.Single(route.Metadata
+                .GetMetadata<IHttpMethodMetadata>()!.HttpMethods));
+        }
     }
 
     [Fact]
@@ -196,6 +202,118 @@ public sealed class HostPinnedVcdm20VerificationTests
     }
 
     [Fact]
+    public async Task HostPinnedStatusRequiresAuthenticCurrentSameIssuerSnapshot()
+    {
+        var fixture = Create();
+        var registry = new HostPinnedVcdm20IssuerRegistry(Configuration(
+            fixture.Tenant, fixture.IssuerDid));
+        string clean = Vcdm20RevocationSnapshot.Create(
+            fixture.IssuerDid, [], fixture.IssuerSeed, Now, new FixedClock(Now));
+        var request = new VerifyHostPinnedVcdm20WithStatusRequest
+        {
+            PolicyId = "membership-v1",
+            Credential = fixture.ValidJwt,
+            ExpectedHolderDid = fixture.HolderDid,
+            RevocationSnapshot = clean
+        };
+
+        var verified = await ExecuteAsync(
+            HostPinnedVcdm20TrustedIssuerVerificationEndpoint.VerifyWithStatus(
+                request, registry, new FixedTenant(fixture.Tenant), new FixedClock(Now)))
+            .ConfigureAwait(true);
+        Assert.Equal(StatusCodes.Status200OK, verified.Status);
+        Assert.Equal("SignedNotListed", verified.Body.GetProperty("status").GetString());
+        Assert.Equal(fixture.IssuerDid,
+            verified.Body.GetProperty("verifiedIssuerDid").GetString());
+        Assert.Equal("member",
+            verified.Body.GetProperty("verifiedSubject").GetProperty("role").GetString());
+
+        string unrelatedIssuerSnapshot = Vcdm20RevocationSnapshot.Create(
+            fixture.RogueDid, [], fixture.RogueSeed, Now, new FixedClock(Now));
+        await AssertInvalidAsync(
+            HostPinnedVcdm20TrustedIssuerVerificationEndpoint.VerifyWithStatus(
+                request with { RevocationSnapshot = unrelatedIssuerSnapshot },
+                registry, new FixedTenant(fixture.Tenant), new FixedClock(Now)))
+            .ConfigureAwait(true);
+        await AssertInvalidAsync(
+            HostPinnedVcdm20TrustedIssuerVerificationEndpoint.VerifyWithStatus(
+                request with { Credential = Tamper(fixture.ValidJwt) },
+                registry, new FixedTenant(fixture.Tenant), new FixedClock(Now)))
+            .ConfigureAwait(true);
+        await AssertInvalidAsync(
+            HostPinnedVcdm20TrustedIssuerVerificationEndpoint.VerifyWithStatus(
+                request, registry, new FixedTenant(Guid.NewGuid()), new FixedClock(Now)))
+            .ConfigureAwait(true);
+        await AssertInvalidAsync(
+            HostPinnedVcdm20TrustedIssuerVerificationEndpoint.VerifyWithStatus(
+                request, registry, new FixedTenant(fixture.Tenant),
+                new FixedClock(Now.AddSeconds(61))))
+            .ConfigureAwait(true);
+
+        var missing = await ExecuteAsync(
+            HostPinnedVcdm20TrustedIssuerVerificationEndpoint.VerifyWithStatus(
+                request with { RevocationSnapshot = null },
+                registry, new FixedTenant(fixture.Tenant), new FixedClock(Now)))
+            .ConfigureAwait(true);
+        Assert.Equal(StatusCodes.Status400BadRequest, missing.Status);
+    }
+
+    [Fact]
+    public async Task IssuerRevocationAndOperatorDenialNeverReleaseHostPinnedClaims()
+    {
+        var fixture = Create();
+        var registry = new HostPinnedVcdm20IssuerRegistry(Configuration(
+            fixture.Tenant, fixture.IssuerDid));
+        string revoked = Vcdm20RevocationSnapshot.Create(
+            fixture.IssuerDid, [fixture.ValidJwt], fixture.IssuerSeed, Now,
+            new FixedClock(Now));
+        string clean = Vcdm20RevocationSnapshot.Create(
+            fixture.IssuerDid, [], fixture.IssuerSeed, Now, new FixedClock(Now));
+        var request = new VerifyHostPinnedVcdm20WithStatusRequest
+        {
+            PolicyId = "membership-v1", Credential = fixture.ValidJwt,
+            ExpectedHolderDid = fixture.HolderDid, RevocationSnapshot = revoked
+        };
+        var issuerDenied = await ExecuteAsync(
+            HostPinnedVcdm20TrustedIssuerVerificationEndpoint.VerifyWithStatus(
+                request, registry, new FixedTenant(fixture.Tenant), new FixedClock(Now)))
+            .ConfigureAwait(true);
+        Assert.Equal("IssuerReportedRevoked",
+            issuerDenied.Body.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null,
+            issuerDenied.Body.GetProperty("verifiedIssuerDid").ValueKind);
+        Assert.Equal(JsonValueKind.Null,
+            issuerDenied.Body.GetProperty("verifiedSubject").ValueKind);
+
+        var config = Configuration(fixture.Tenant, fixture.IssuerDid);
+        config["Vcdm20VerifierTrust:Policies:0:DeniedCredentialSha256:0"] =
+            Digest(fixture.ValidJwt);
+        var operatorDenied = await ExecuteAsync(
+            HostPinnedVcdm20TrustedIssuerVerificationEndpoint.VerifyWithStatus(
+                request with { RevocationSnapshot = clean },
+                new HostPinnedVcdm20IssuerRegistry(config),
+                new FixedTenant(fixture.Tenant), new FixedClock(Now)))
+            .ConfigureAwait(true);
+        Assert.Equal("DeniedByVerifier",
+            operatorDenied.Body.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null,
+            operatorDenied.Body.GetProperty("verifiedIssuerDid").ValueKind);
+        Assert.Equal(JsonValueKind.Null,
+            operatorDenied.Body.GetProperty("verifiedSubject").ValueKind);
+    }
+
+    [Fact]
+    public void StatusRequestCannotSupplyOrOverrideOperatorTrust()
+    {
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize<VerifyHostPinnedVcdm20WithStatusRequest>(
+                "{\"policyId\":\"membership-v1\",\"credential\":\"x.y.z\"," +
+                "\"revocationSnapshot\":\"signed.status.jwt\"," +
+                "\"trustedIssuerDids\":[\"did:key:attacker\"]}",
+                HttpJsonOptions));
+    }
+
+    [Fact]
     public void MalformedDuplicateOrOversizedOperatorDenialPolicyFailsStartup()
     {
         var fixture = Create();
@@ -254,7 +372,8 @@ public sealed class HostPinnedVcdm20VerificationTests
             subject, issuerSeed, Now.AddMinutes(-1), Now.AddMinutes(10));
         string rogue = Vcdm20JoseCredential.Create(rogueDid, holderDid, Type, Vocabulary,
             subject, rogueSeed, Now.AddMinutes(-1), Now.AddMinutes(10));
-        return new Fixture(tenant, issuerDid, holderDid, valid, rogue);
+        return new Fixture(tenant, issuerDid, holderDid, valid, rogue,
+            issuerSeed, rogueSeed, rogueDid);
     }
 
     private static string Tamper(string original)
@@ -299,7 +418,8 @@ public sealed class HostPinnedVcdm20VerificationTests
     }
 
     private sealed record Fixture(Guid Tenant, string IssuerDid, string HolderDid,
-        string ValidJwt, string RogueJwt);
+        string ValidJwt, string RogueJwt, byte[] IssuerSeed, byte[] RogueSeed,
+        string RogueDid);
 
     private sealed class FixedTenant(Guid tenant) : ITenantContext
     {

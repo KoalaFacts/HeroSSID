@@ -61,7 +61,48 @@ Unexpected JSON fields (including a claimant's `trustedIssuerDids`,
 `credentialType`, `subjectContextUri` or `deniedCredentialSha256`) are rejected.
 An HTTP caller cannot bypass operator denial by omitting a body field.
 
-This endpoint checks **issuer statements only**. A valid signature does not
+## Require genuine, fresh issuer-signed status as well (opt-in)
+
+For relying parties that require issuer status, use the separate, authenticated
+`POST /api/v1/credentials/vcdm20/verify-host-pinned-with-status` route.
+It uses the **same verifier-operated tenant issuer/type/vocabulary policy
+and emergency denial inventory**. The caller cannot select or replace that
+policy, and cannot omit issuer status:
+
+```http
+POST /api/v1/credentials/vcdm20/verify-host-pinned-with-status
+Authorization: Bearer <valid tenant access token>
+Content-Type: application/json
+
+{
+  "policyId": "membership-v1",
+  "credential": "<original direct VC2 issuer JWT>",
+  "expectedHolderDid": "did:key:<expected holder>",
+  "revocationSnapshot": "<fresh original-issuer-signed HeroSSID VC2 status JWT>"
+}
+```
+
+The verifier validates the original JWT against its own trusted issuer set,
+type, HTTPS vocabulary, holder and expiry. It then checks a **separate,
+genuine Ed25519 signature by that actual issuer**, exact original-JWT SHA-256
+membership and the private 60-second snapshot format. A fresh authentic
+non-listing with no operator denial returns `SignedNotListed` with the
+authenticated signer and subject; an issuer-listed JWT returns
+`IssuerReportedRevoked`, an authentic operator-denied JWT returns
+`DeniedByVerifier`, and malformed, expired, foreign-signed, tampered or
+untrusted inputs return `Invalid`. Every rejection withholds issuer and
+subject. Missing or oversized snapshot input returns HTTP 400.
+
+The *issuer*, not the HTTP caller, signs the contents of the snapshot, but
+the caller supplies its bytes; the signature **cannot attest that the list
+is complete, current beyond its 60-second window, or retrieved from an
+authoritative issuer distribution channel**. There is no live polling,
+network registry, holder key challenge, consent UI or independent Wallet
+interop. Operators must separately assure distribution/completeness and
+manage their host policy across replicas. This is a private HeroSSID status
+profile, **not** W3C Bitstring Status List.
+
+Both endpoints check **issuer statements only**. A valid signature does not
 prove possession of the holder key, consent, current non-revocation, independent
 identity vetting, organization membership beyond the issuer's signed claim, or
 business authorization. The response is deliberately
