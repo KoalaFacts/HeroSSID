@@ -170,6 +170,7 @@ public static class IssuerKeySuccessorAttestation
         Guid verifierTenantId, IPresentationChallengeStore challenges,
         TimeProvider clock, out string successorIssuerDid)
     {
+        ArgumentNullException.ThrowIfNull(expectedVerifierAudience);
         ArgumentNullException.ThrowIfNull(challenges);
         ArgumentNullException.ThrowIfNull(clock);
         successorIssuerDid = string.Empty;
