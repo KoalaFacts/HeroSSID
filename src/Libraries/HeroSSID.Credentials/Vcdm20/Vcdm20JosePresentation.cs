@@ -154,6 +154,23 @@ public static class Vcdm20JosePresentation
             expectedNonce, expectedCredentialType, expectedContextUri,
             challenges, clock, out verifiedSubject, out credentialJwt, out holderDid);
 
+    /// <summary>
+    /// Verify a holder presentation only when the verifier's authentic signed request
+    /// pins the exact credential type, subject vocabulary and retained challenge.
+    /// The caller must independently pin the verifier DID; this does not check status,
+    /// establish consent, identity or business authorization.
+    /// </summary>
+    public static Vcdm20PresentationCheckResult CheckWithSignedVerifierRequest(
+        string presentationJwt, string signedRequestJwt, string trustedVerifierDid,
+        Guid verifierTenantId, string expectedAudience, string expectedNonce,
+        string expectedCredentialType, Uri expectedContextUri,
+        IPresentationChallengeStore challenges, TimeProvider clock,
+        out JsonElement verifiedSubject)
+    {
+        verifiedSubject = default;
+        throw new NotSupportedException("Verifier-signed policy acceptance is not implemented.");
+    }
+
     private static Vcdm20PresentationCheckResult CheckCore(
         string presentationJwt, Guid verifierTenantId, string expectedAudience,
         string expectedNonce, string expectedCredentialType, Uri expectedContextUri,
