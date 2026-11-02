@@ -261,6 +261,22 @@ public static class Vcdm20RevocationSnapshot
             challenges, clock, out verifiedSubject);
     }
 
+    /// <summary>
+    /// Check the authentic verifier-signed credential vocabulary and matching
+    /// retained nonce before authenticating the VC2 issuer, holder and issuer status.
+    /// Only SignedNotListed releases claims; it is not live status or authorization.
+    /// </summary>
+    public static Vcdm20RevocationCheckResult CheckPresentationWithSignedVerifierRequest(
+        string presentationJwt, string signedRequestJwt, string trustedVerifierDid,
+        string snapshotJwt, Guid verifierTenantId, string expectedAudience,
+        string expectedNonce, string expectedCredentialType, Uri expectedContextUri,
+        IPresentationChallengeStore challenges, TimeProvider clock,
+        out JsonElement verifiedSubject)
+    {
+        verifiedSubject = default;
+        throw new NotSupportedException("Verifier-signed status policy is not implemented.");
+    }
+
     // The sole credential extraction, signature, nonce-consumption and status
     // path for both compatibility and incident-cutoff verification. A bypass
     // cannot arise from applying the cutoff only to standalone credentials.
