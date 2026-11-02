@@ -37,6 +37,20 @@ jobs:
           }
           assert set(Path("/tmp/review-files.txt").read_text().splitlines()) == expected
           PY
+      - name: Reuse original exact-head Qwen parts 1 and 2 from failed artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: independent-pr120-review
+          run-id: 41503329176
+          github-token: ${{ github.token }}
+      - name: Require original authentic raw inference before replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s review-model-1.json
+          test -s review-model-2.json
+          test -s review-head-1.txt
+          test "$(cat review-head-1.txt)" = "dd15a9db6272fd0215e28dc0fb62c794b393dba7"
       - name: Install independent Qwen2.5-Coder model
         shell: bash
         run: |
@@ -55,7 +69,11 @@ jobs:
         run: |
           set -euo pipefail
           for part in 1 2 3 4; do
-            REVIEW_PART="$part" python3 tools/offline_pr121_review.py
+            if [ "$part" -le 2 ]; then
+              REVIEW_REPLAY_RAW=1 REVIEW_PART="$part" python3 tools/offline_pr121_review.py
+            else
+              REVIEW_PART="$part" python3 tools/offline_pr121_review.py
+            fi
             test -s "review-$part.json"
             test -s "review-model-$part.json"
             test -s "review-$part.md"

@@ -135,10 +135,16 @@ def main() -> int:
     original_path = Path(f"review-model-{part}.json")
     req = Request("http://127.0.0.1:11434/api/chat", data=payload,
                   headers={"Content-Type": "application/json"}, method="POST")
-    with urlopen(req, timeout=4200) as response:
-        data = json.load(response)
-    raw = str(data.get("message", {}).get("content", "")).strip()
-    original_path.write_text(raw + "\n", encoding="utf-8")
+    if os.environ.get("REVIEW_REPLAY_RAW") == "1":
+        # The previous exact-head run already made genuine independent inference.
+        # Re-render its immutable uploaded raw JSON, do NOT replace its verdict.
+        raw = original_path.read_text(encoding="utf-8").strip()
+        print(f"Reusing prior genuine exact-head model raw response for part {part}.", flush=True)
+    else:
+        with urlopen(req, timeout=4200) as response:
+            data = json.load(response)
+        raw = str(data.get("message", {}).get("content", "")).strip()
+        original_path.write_text(raw + "\n", encoding="utf-8")
     parsed = json.loads(raw)
     if not isinstance(parsed, dict) or parsed.get("verdict") not in (
         "no_actionable_findings", "actionable_findings", "inconclusive"
@@ -161,6 +167,13 @@ def main() -> int:
             # one changed file. Preserve the original raw model JSON as evidence.
             matches = [name for name in CHANGED_FILES
                        if name.rsplit("/", 1)[-1] == model_path]
+            if not matches and "." in model_path:
+                # Qwen sometimes cites ClassName.Method rather than a filename.
+                # Map only when ClassName corresponds to exactly one changed
+                # C# file. Preserve raw model output unchanged in artifacts.
+                symbol = model_path.split(".", 1)[0]
+                matches = [name for name in CHANGED_FILES
+                           if name.endswith("/" + symbol + ".cs")]
             if len(matches) != 1:
                 raise RuntimeError("Finding cites an unknown or ambiguous changed file: " + model_path)
             finding["path"] = matches[0]
