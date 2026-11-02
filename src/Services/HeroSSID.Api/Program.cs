@@ -42,6 +42,8 @@ builder.Services.AddSingleton<IRateLimiter, InMemoryRateLimiter>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantContext, AuthenticatedTenantContext>();
 builder.Services.AddScoped<IAuthorizationHandler, CredentialIssueAuthorizationHandler>();
+// Opt-in host-owned per-client issuer DID signing policy, before any signing key use.
+builder.Services.AddSingleton<IssuerSigningGrantRegistry>();
 
 // Register DID method implementations (did:key and did:web)
 builder.Services.AddScoped<IDidMethod, DidKeyMethod>();
@@ -243,6 +245,7 @@ var app = builder.Build();
 _ = app.Services.GetRequiredService<HostPinnedGuardianEnrollmentRegistry>();
 _ = app.Services.GetRequiredService<HostPinnedVcdm20IssuerRegistry>();
 _ = app.Services.GetRequiredService<HostPinnedIssuerSuccessorRegistry>();
+_ = app.Services.GetRequiredService<IssuerSigningGrantRegistry>();
 
 // Fail before serving requests, after all host configuration providers have been applied.
 _ = app.Services.GetRequiredService<JwtSigningSettings>();

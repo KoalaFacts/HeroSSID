@@ -23,6 +23,7 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
     {
         credentials.MapPost("/jwt-vc-json/issue", IssueAsync)
             .RequireAuthorization(CredentialIssueRequirement.PolicyName)
+            .RequireIssuerSigningGrant()
             .WithName("IssueJwtVcJsonCredential")
             .WithSummary("Issue a short-lived W3C VC1.1 jwt_vc_json with a tenant-owned Ed25519 did:key")
             .Produces<IssueJwtVcJsonCredentialResponse>(StatusCodes.Status201Created)

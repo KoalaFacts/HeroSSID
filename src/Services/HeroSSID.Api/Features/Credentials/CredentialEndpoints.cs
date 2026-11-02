@@ -19,6 +19,7 @@ public static class CredentialEndpoints
 
         credentials.MapPost("/issue", IssueAsync)
             .RequireAuthorization(CredentialIssueRequirement.PolicyName)
+            .RequireIssuerSigningGrant()
             .WithName("IssueCredential")
             .WithSummary("Issue a JWT verifiable credential")
             .Produces<IssueCredentialResponse>(StatusCodes.Status201Created)
@@ -104,7 +105,8 @@ public static class CredentialEndpoints
 
         try
         {
-            // Issuance scope grants access to this tenant's issuers. Per-client DID grants are future work.
+            // The route grant filter has already constrained the validated client to
+            // this exact issuer DID where operator enforcement is enabled.
             var issuerId = await didLookup.FindIssuerAsync(
                 request.IssuerDid, tenantContext.GetCurrentTenantId(), cancellationToken).ConfigureAwait(false);
             var holderId = await didLookup.FindHolderAsync(request.HolderDid, cancellationToken).ConfigureAwait(false);
