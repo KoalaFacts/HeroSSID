@@ -411,6 +411,7 @@ public sealed class HostPinnedVcdm20VerificationTests
     public void UnknownHostTrustPolicyFieldMustFailStartupInsteadOfSilentlyLosingProtection(
         string field)
     {
+        ArgumentNullException.ThrowIfNull(field);
         var fixture = Create();
         var config = Configuration(fixture.Tenant, fixture.IssuerDid);
         config["Vcdm20VerifierTrust:Policies:0:" + field] =
