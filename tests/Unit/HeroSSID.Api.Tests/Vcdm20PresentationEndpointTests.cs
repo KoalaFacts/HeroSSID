@@ -188,6 +188,36 @@ public sealed class Vcdm20PresentationEndpointTests
     }
 
     [Fact]
+    public async Task ForgedHolderAndCrossTenantCannotConsumeAnAuthenticHostPinnedProof()
+    {
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var (challenge, presentation, snapshot) = CreatePresentation(store);
+        var registry = Registry(_issuer.Did);
+        var request = HostRequest(challenge, presentation, snapshot);
+        string[] parts = presentation.Split('.');
+        parts[1] = Base64UrlEncoder.Encode(Ed25519JwtSigner.ExtractPayload(presentation)
+            .Replace(Audience, "https://attacker.example/present", StringComparison.Ordinal));
+        string forgedHolder = string.Join('.', parts);
+
+        var (_, forged) = await JsonAsync(Vcdm20PresentationEndpoints.VerifyHostPinned(
+            request with { Presentation = forgedHolder },
+            registry, store, _tenant, _clock)).ConfigureAwait(true);
+        Assert.Equal("Invalid", forged.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, forged.GetProperty("verifiedSubject").ValueKind);
+
+        var (_, crossTenant) = await JsonAsync(Vcdm20PresentationEndpoints.VerifyHostPinned(
+            request, registry, store, new Tenant(), _clock)).ConfigureAwait(true);
+        Assert.Equal("Invalid", crossTenant.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, crossTenant.GetProperty("verifiedSubject").ValueKind);
+
+        // Neither rejected proof spends the original verifier's challenge.
+        var (_, valid) = await JsonAsync(Vcdm20PresentationEndpoints.VerifyHostPinned(
+            request, registry, store, _tenant, _clock)).ConfigureAwait(true);
+        Assert.Equal("SignedNotListed", valid.GetProperty("status").GetString());
+        Assert.Equal("member", valid.GetProperty("verifiedSubject").GetProperty("role").GetString());
+    }
+
+    [Fact]
     public async Task HostOwnedDenialAndVocabularyRefuseAuthenticHolderProofWithoutClaims()
     {
         var store = new InMemoryPresentationChallengeStore(_clock);
