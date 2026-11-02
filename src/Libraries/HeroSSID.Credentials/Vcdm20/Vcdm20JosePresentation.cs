@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using HeroSSID.Credentials.CredentialVerification;
 using HeroSSID.Credentials.Utilities;
@@ -153,6 +155,77 @@ public static class Vcdm20JosePresentation
         CheckCore(presentationJwt, verifierTenantId, expectedAudience,
             expectedNonce, expectedCredentialType, expectedContextUri,
             challenges, clock, out verifiedSubject, out credentialJwt, out holderDid);
+
+    /// <summary>
+    /// Require the verifier's independently retained SHA-256 pin of the EXACT
+    /// original eight-field policy-bound request, its genuine Ed25519 signature,
+    /// the pinned verifier DID, type/context, and a matching live tenant-owned
+    /// nonce/issuer/expiry BEFORE spending the holder's one-use challenge.
+    /// The pin must come from verifier-controlled storage, not the presenter.
+    /// SignedButStatusUnchecked is not revocation, identity or authorization.
+    /// </summary>
+    public static Vcdm20PresentationCheckResult CheckWithPinnedSignedVerifierRequest(
+        string presentationJwt, string signedRequestJwt, string trustedRequestSha256,
+        string trustedVerifierDid, Guid verifierTenantId, string expectedAudience,
+        string expectedNonce, string expectedCredentialType, Uri expectedContextUri,
+        IPresentationChallengeStore challenges, TimeProvider clock,
+        out JsonElement verifiedSubject)
+    {
+        verifiedSubject = default;
+        if (!MatchesPinnedSignedVerifierRequest(
+                signedRequestJwt, trustedRequestSha256, trustedVerifierDid,
+                verifierTenantId, expectedAudience, expectedNonce,
+                expectedCredentialType, expectedContextUri, challenges, clock))
+        {
+            return Vcdm20PresentationCheckResult.Invalid;
+        }
+
+        return Check(presentationJwt, verifierTenantId, expectedAudience,
+            expectedNonce, expectedCredentialType, expectedContextUri,
+            challenges, clock, out verifiedSubject);
+    }
+
+    /// <summary>
+    /// Pre-consumption, no-claim verifier request authentication shared by
+    /// both status-unchecked and issuer-status-checked presentation paths.
+    /// </summary>
+    internal static bool MatchesPinnedSignedVerifierRequest(
+        string signedRequestJwt, string trustedRequestSha256, string trustedVerifierDid,
+        Guid verifierTenantId, string expectedAudience, string expectedNonce,
+        string expectedCredentialType, Uri expectedContextUri,
+        IPresentationChallengeStore challenges, TimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(expectedContextUri);
+        ArgumentNullException.ThrowIfNull(challenges);
+        ArgumentNullException.ThrowIfNull(clock);
+        if (string.IsNullOrWhiteSpace(signedRequestJwt) ||
+            signedRequestJwt.Length > 16_384 ||
+            trustedRequestSha256 is not { Length: 64 } ||
+            !trustedRequestSha256.All(static character =>
+                character is >= '0' and <= '9' or >= 'a' and <= 'f') ||
+            !string.Equals(Convert.ToHexStringLower(
+                    SHA256.HashData(Encoding.UTF8.GetBytes(signedRequestJwt))),
+                trustedRequestSha256, StringComparison.Ordinal) ||
+            !PresentationChallengePolicy.IsValidLookup(
+                verifierTenantId, expectedAudience, expectedNonce) ||
+            !OfflineSignedPresentationRequest.TryReadPolicyBound(
+                signedRequestJwt, trustedVerifierDid, expectedAudience,
+                expectedCredentialType, expectedContextUri, clock, out var signed) ||
+            signed is null ||
+            !string.Equals(signed.Nonce, expectedNonce, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        // The JWS must describe precisely the request retained by this tenant.
+        // The challenge store intentionally does NOT persist a vocabulary or JWS
+        // digest; the relying verifier independently owns the digest pin.
+        var retained = challenges.Find(verifierTenantId, expectedAudience, expectedNonce);
+        return retained is not null &&
+            retained.ExpiresAt == signed.ExpiresAt &&
+            string.Equals(retained.TrustedIssuerDid, signed.TrustedIssuerDid,
+                StringComparison.Ordinal);
+    }
 
     private static Vcdm20PresentationCheckResult CheckCore(
         string presentationJwt, Guid verifierTenantId, string expectedAudience,
