@@ -87,6 +87,12 @@ public sealed class HostPinnedIssuerSuccessorRegistryTests
                 """
                 {"policyId":"issuer-migration","previousIssuerDid":"did:key:attacker"}
                 """, HttpJson));
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize<CancelHostPinnedIssuerSuccessorChallengeRequest>(
+                """
+                {"policyId":"issuer-migration","nonce":"nonce",
+                 "preapprovedSuccessorIssuerDid":"did:key:attacker"}
+                """, HttpJson));
     }
 
     private static HostPinnedIssuerSuccessorRegistry Registry(Dictionary<string, string?> entries) =>

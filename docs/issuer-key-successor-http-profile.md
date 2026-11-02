@@ -208,6 +208,42 @@ No new PostgreSQL schema, migration, credential issuance or trust mutation
 occurs. Hosts must deploy the **same operator policy inventory** and durable
 challenge store; a missing inventory rejects rather than authenticates.
 
+### Operator incident cancellation of a pending pinned successor nonce
+
+An operator holding **both** `credential:verify` and `did:manage` scopes can
+cancel a still-pending pinned challenge **before** it is accepted, across
+all verifier HTTP hosts sharing the same durable PostgreSQL store:
+
+```http
+POST /api/v1/credentials/issuer-successor/host-pinned-cancel
+Authorization: Bearer <credential:verify and did:manage scoped operator token>
+Content-Type: application/json
+
+{"policyId":"issuer-migration","nonce":"<issued-nonce>"}
+```
+
+**204 No Content** means the cancellation request was processed; it does
+**not** reveal whether this nonce existed, was expired, was previously
+cancelled or was already used. The server derives the tenant from the
+authenticated token and the audience and **both** issuer DIDs from its
+operator inventory, never from HTTP inputs. It atomically consumes the
+exact policy-isolated challenge namespace used by `host-pinned-verify`,
+so a genuine subsequent dual-Ed25519 proof for the cancelled nonce is
+rejected across replicas. An unknown/foreign policy ID is indistinguishable
+from a non-existent challenge. An invalid policy ID or malformed nonce
+returns **400**, missing authentication **401**, missing either required
+scope **403**, and an unavailable challenge store **503**. Arbitrary trust
+override fields in the JSON request are rejected.
+
+Cancellation does **not** undo evidence previously accepted or revoke an
+issuer credential, and does not transfer control or trust to a new key.
+Operators must coordinate the **same** host-pinned inventory and shared
+store across replicas; if an old host continues to serve an earlier
+policy, cancelling a nonce under a different policy scope cannot stop
+that old host. Remove/disable stale hosts and incident-response privileges
+as part of the operator's own workflow. There is no new database schema,
+production migration, hosted enrollment, revocation registry or Wallet UI.
+
 This is **privately defined HeroSSID key-continuity evidence**, not DID
 rotation, independently proven historical enrollment, automatic issuer trust,
 key compromise detection, real-person identity verification, agent delegation,
