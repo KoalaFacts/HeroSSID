@@ -243,6 +243,12 @@ the configuration is corrected.
 A withdrawn enrollment returns 400 rather than issuing a new challenge.
 Verification of even a genuine pending successor/guardian proof returns
 `Invalid` with no candidate DID and does not consume the pending nonce.
+**This same operator denylist is checked by both the host-pinned routes and
+the earlier caller-supplied `enrolled-challenge`/`enrolled-verify` routes.**
+Otherwise a caller could redeem the same exact-enrollment-bound nonce through
+the older endpoint and bypass an emergency withdrawal. A malformed live
+denylist fails closed for both adapters; unrelated policy-free recovery routes
+retain their own distinct challenge purpose.
 This is **verifier-operator policy withdrawal**, not cryptographic revocation
 of the issuer's old DID or invalidation of already accepted recovery evidence.
 It cannot undo an in-flight verification that wins the race against a
