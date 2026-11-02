@@ -127,6 +127,16 @@ public static class Vcdm20JosePresentation
     }
 
     /// <summary>
+    /// Create a holder-signed VP with an exact original verifier request SHA-256.
+    /// This is a private, opt-in HeroSSID extension, not OpenID4VP conformance.
+    /// </summary>
+    public static string CreateWithSignedRequestBinding(
+        string signedRequestJwt, string trustedVerifierDid, string expectedAudience,
+        string credentialJwt, string expectedCredentialType, Uri expectedContextUri,
+        string holderDid, byte[] holderSeed, TimeProvider clock) =>
+        throw new NotSupportedException("Holder-bound original-request proof has not been implemented.");
+
+    /// <summary>
     /// Verifier checks real issuer and holder Ed25519 signatures, exact pinned context,
     /// credential type, issuer policy, audience/nonce and single-use atomic challenge
     /// consumption. Claims are returned ONLY on success. No revocation/status proof:
@@ -184,6 +194,18 @@ public static class Vcdm20JosePresentation
             expectedNonce, expectedCredentialType, expectedContextUri,
             challenges, clock, out verifiedSubject);
     }
+
+    /// <summary>
+    /// Require the holder's own signed exact request hash in addition to the
+    /// verifier-owned exact request pin and live tenant challenge.
+    /// </summary>
+    public static Vcdm20PresentationCheckResult CheckWithHolderBoundSignedVerifierRequest(
+        string presentationJwt, string signedRequestJwt, string trustedRequestSha256,
+        string trustedVerifierDid, Guid verifierTenantId, string expectedAudience,
+        string expectedNonce, string expectedCredentialType, Uri expectedContextUri,
+        IPresentationChallengeStore challenges, TimeProvider clock,
+        out JsonElement verifiedSubject) =>
+        throw new NotSupportedException("Strict holder-bound request verification has not been implemented.");
 
     /// <summary>
     /// Pre-consumption, no-claim verifier request authentication shared by
