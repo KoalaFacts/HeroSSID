@@ -109,7 +109,8 @@ public sealed class IssuerKeySuccessorAttestationTests
         var clock = TimeProviderForNow();
         var challenges = new InMemoryPresentationChallengeStore(clock);
         var tenant = Guid.NewGuid();
-        var challenge = challenges.Issue(tenant, Audience.AbsoluteUri, previous.Did);
+        var challenge = IssuerKeySuccessorAttestation.IssueChallenge(
+            tenant, Audience, previous.Did, challenges);
         string proof = IssuerKeySuccessorAttestation.Create(
             previous.Did, successor.Did, previous.Seed, successor.Seed,
             Audience, challenge.Nonce, clock);
@@ -134,7 +135,8 @@ public sealed class IssuerKeySuccessorAttestationTests
         var clock = TimeProviderForNow();
         var challenges = new InMemoryPresentationChallengeStore(clock);
         var tenant = Guid.NewGuid();
-        var challenge = challenges.Issue(tenant, Audience.AbsoluteUri, previous.Did);
+        var challenge = IssuerKeySuccessorAttestation.IssueChallenge(
+            tenant, Audience, previous.Did, challenges);
         string proof = IssuerKeySuccessorAttestation.Create(
             previous.Did, successor.Did, previous.Seed, successor.Seed,
             Audience, challenge.Nonce, clock);
@@ -161,7 +163,8 @@ public sealed class IssuerKeySuccessorAttestationTests
         var clock = TimeProviderForNow();
         var challenges = new InMemoryPresentationChallengeStore(clock);
         var tenant = Guid.NewGuid();
-        var challenge = challenges.Issue(tenant, Audience.AbsoluteUri, previous.Did);
+        var challenge = IssuerKeySuccessorAttestation.IssueChallenge(
+            tenant, Audience, previous.Did, challenges);
         string proof = IssuerKeySuccessorAttestation.Create(
             previous.Did, successor.Did, previous.Seed, successor.Seed,
             Audience, challenge.Nonce, clock);
@@ -184,7 +187,8 @@ public sealed class IssuerKeySuccessorAttestationTests
         var clock = TimeProviderForNow();
         var challenges = new InMemoryPresentationChallengeStore(clock);
         var tenant = Guid.NewGuid();
-        var challenge = challenges.Issue(tenant, Audience.AbsoluteUri, previous.Did);
+        var challenge = IssuerKeySuccessorAttestation.IssueChallenge(
+            tenant, Audience, previous.Did, challenges);
         string proof = IssuerKeySuccessorAttestation.Create(
             previous.Did, successor.Did, previous.Seed, successor.Seed,
             Audience, challenge.Nonce, clock);
@@ -201,6 +205,71 @@ public sealed class IssuerKeySuccessorAttestationTests
         });
 
         Assert.Equal(1, accepted);
+    }
+
+    [Fact]
+    public void PresentationChallengeCannotAuthorizeIssuerSuccessorAdmission()
+    {
+        var previous = NewKey();
+        var successor = NewKey();
+        var clock = TimeProviderForNow();
+        var challenges = new InMemoryPresentationChallengeStore(clock);
+        var tenant = Guid.NewGuid();
+        var presentation = challenges.Issue(tenant, Audience.AbsoluteUri, previous.Did);
+        string proof = IssuerKeySuccessorAttestation.Create(
+            previous.Did, successor.Did, previous.Seed, successor.Seed,
+            Audience, presentation.Nonce, clock);
+
+        Assert.False(IssuerKeySuccessorAttestation.TryVerifyAndConsume(
+            proof, previous.Did, Audience, presentation.Nonce,
+            tenant, challenges, clock, out string result));
+        Assert.Equal(string.Empty, result);
+        Assert.NotNull(challenges.Find(tenant, Audience.AbsoluteUri, presentation.Nonce));
+    }
+
+    [Fact]
+    public void ExpiryDuringAtomicConsumptionNeverReleasesSuccessor()
+    {
+        var previous = NewKey();
+        var successor = NewKey();
+        var clock = TimeProviderForNow();
+        var challenges = new ExpiringConsumptionStore(
+            new InMemoryPresentationChallengeStore(clock), clock);
+        var tenant = Guid.NewGuid();
+        var challenge = IssuerKeySuccessorAttestation.IssueChallenge(
+            tenant, Audience, previous.Did, challenges);
+        string proof = IssuerKeySuccessorAttestation.Create(
+            previous.Did, successor.Did, previous.Seed, successor.Seed,
+            Audience, challenge.Nonce, clock);
+
+        Assert.False(IssuerKeySuccessorAttestation.TryVerifyAndConsume(
+            proof, previous.Did, Audience, challenge.Nonce,
+            tenant, challenges, clock, out string result));
+        Assert.Equal(string.Empty, result);
+        Assert.False(IssuerKeySuccessorAttestation.TryVerifyAndConsume(
+            proof, previous.Did, Audience, challenge.Nonce,
+            tenant, challenges, clock, out _));
+    }
+
+    private sealed class ExpiringConsumptionStore(
+        IPresentationChallengeStore inner, FixedClock clock) : IPresentationChallengeStore
+    {
+        public PresentationChallenge Issue(Guid tenant, string audience, string issuer,
+            TimeSpan? lifetime = null) => inner.Issue(tenant, audience, issuer, lifetime);
+
+        public PresentationChallenge? Find(Guid tenant, string audience, string nonce) =>
+            inner.Find(tenant, audience, nonce);
+
+        public bool TryConsume(Guid tenant, string audience, string nonce)
+        {
+            bool accepted = inner.TryConsume(tenant, audience, nonce);
+            if (accepted)
+            {
+                clock.Advance(TimeSpan.FromMinutes(6));
+            }
+
+            return accepted;
+        }
     }
 
     private static string Create((string Did, byte[] Seed) oldKey, (string Did, byte[] Seed) newKey) =>
@@ -225,6 +294,10 @@ public sealed class IssuerKeySuccessorAttestationTests
 
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
     {
-        public override DateTimeOffset GetUtcNow() => now;
+        private DateTimeOffset _now = now;
+
+        public override DateTimeOffset GetUtcNow() => _now;
+
+        public void Advance(TimeSpan elapsed) => _now = _now.Add(elapsed);
     }
 }

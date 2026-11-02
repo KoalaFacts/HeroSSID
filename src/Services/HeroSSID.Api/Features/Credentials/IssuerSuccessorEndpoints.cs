@@ -24,7 +24,7 @@ internal static class IssuerSuccessorEndpoints
 {
     // Separate the challenge-store purpose from VC presentation challenges:
     // a proof from either workflow cannot consume the other's nonce.
-    private const string PurposePrefix = "issuer-successor:";
+    private const string PurposePrefix = IssuerKeySuccessorAttestation.ChallengePurposePrefix;
     private const int MaximumAttestationLength = 16_384;
 
     internal static void Map(RouteGroupBuilder credentials)
@@ -94,9 +94,9 @@ internal static class IssuerSuccessorEndpoints
 
         try
         {
-            var challenge = challenges.Issue(
-                tenantId, StoredAudience(request.Audience!), request.PreviousIssuerDid!,
-                TimeSpan.FromSeconds(request.LifetimeSeconds));
+            var challenge = IssuerKeySuccessorAttestation.IssueChallenge(
+                tenantId, new Uri(request.Audience!), request.PreviousIssuerDid!,
+                challenges, TimeSpan.FromSeconds(request.LifetimeSeconds));
             return Results.Json(new IssueIssuerSuccessorChallengeResponse(
                 request.Audience!, challenge.Nonce, challenge.TrustedIssuerDid,
                 challenge.ExpiresAt), statusCode: StatusCodes.Status201Created);
@@ -178,20 +178,12 @@ internal static class IssuerSuccessorEndpoints
             }
 
             verifierSeed = encryption.Decrypt(verifier.PrivateKeyEd25519Encrypted);
-            var issued = challenges.Issue(
-                tenantId, StoredAudience(request.Audience!), request.PreviousIssuerDid!,
-                TimeSpan.FromSeconds(request.LifetimeSeconds));
-            // StoredAudience has a private domain-separation prefix. Never sign or
-            // publish that internal namespace as a verifier's public HTTPS audience.
-            var publicChallenge = new PresentationChallenge
-            {
-                Audience = request.Audience!,
-                Nonce = issued.Nonce,
-                TrustedIssuerDid = issued.TrustedIssuerDid,
-                ExpiresAt = issued.ExpiresAt
-            };
+            var issued = IssuerKeySuccessorAttestation.IssueChallenge(
+                tenantId, new Uri(request.Audience!), request.PreviousIssuerDid!,
+                challenges, TimeSpan.FromSeconds(request.LifetimeSeconds));
+            // Never sign the internal purpose-prefixed store audience.
             string signed = IssuerSuccessorVerifierRequest.Create(
-                publicChallenge, request.VerifierDid!, verifierSeed, clock);
+                issued, request.VerifierDid!, verifierSeed, clock);
             return Results.Json(new IssueSignedIssuerSuccessorChallengeResponse(
                 signed, request.VerifierDid!, request.Audience!, issued.Nonce,
                 issued.TrustedIssuerDid, issued.ExpiresAt),
@@ -265,10 +257,9 @@ internal static class IssuerSuccessorEndpoints
         {
             var issued = challenges.Find(tenantId, storedAudience, request.Nonce!);
             if (issued is null ||
-                !IssuerKeySuccessorAttestation.TryVerify(
+                !IssuerKeySuccessorAttestation.TryVerifyAndConsume(
                     request.Attestation!, issued.TrustedIssuerDid, new Uri(request.Audience!),
-                    request.Nonce!, clock.GetUtcNow(), out string successorDid) ||
-                !challenges.TryConsume(tenantId, storedAudience, request.Nonce!))
+                    request.Nonce!, tenantId, challenges, clock, out string successorDid))
             {
                 return Results.Ok(new VerifyIssuerSuccessorProofResponse("Invalid", null));
             }

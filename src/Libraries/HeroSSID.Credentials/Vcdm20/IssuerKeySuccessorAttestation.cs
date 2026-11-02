@@ -13,6 +13,8 @@ namespace HeroSSID.Credentials.Vcdm20;
 /// </summary>
 public static class IssuerKeySuccessorAttestation
 {
+    /// <summary>Non-secret purpose boundary for stored verifier challenges.</summary>
+    public const string ChallengePurposePrefix = "issuer-successor:";
     private const string HeaderType = "herossid-issuer-successor+jwt";
     private const int MaximumJwtLength = 4_096;
     private const int MaximumEnvelopeLength = 16_384;
@@ -160,9 +162,38 @@ public static class IssuerKeySuccessorAttestation
     }
 
     /// <summary>
-    /// Verify a verifier-issued issuer-transition challenge from the caller's
-    /// tenant-owned store. The initial implementation does not yet spend the
-    /// challenge; red tests must demonstrate the resulting replay failure.
+    /// Issue a tenant-owned issuer-key-successor challenge in a storage purpose
+    /// namespace distinct from ordinary credential presentation challenges.
+    /// The returned challenge exposes only the public HTTPS audience.
+    /// The caller must independently authenticate the trusted previous issuer.
+    /// </summary>
+    public static PresentationChallenge IssueChallenge(
+        Guid verifierTenantId, Uri verifierAudience,
+        string trustedPreviousIssuerDid, IPresentationChallengeStore challenges,
+        TimeSpan? lifetime = null)
+    {
+        ArgumentNullException.ThrowIfNull(verifierAudience);
+        ArgumentNullException.ThrowIfNull(trustedPreviousIssuerDid);
+        ArgumentNullException.ThrowIfNull(challenges);
+        if (!ValidAudience(verifierAudience) ||
+            verifierAudience.AbsoluteUri.Length > 2_000 ||
+            !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(
+                trustedPreviousIssuerDid, out _))
+        {
+            throw new ArgumentException(
+                "Canonical HTTPS verifier audience and pinned Ed25519 previous issuer are required.");
+        }
+
+        var challenge = challenges.Issue(verifierTenantId,
+            StoreAudience(verifierAudience), trustedPreviousIssuerDid, lifetime);
+        return challenge with { Audience = verifierAudience.AbsoluteUri };
+    }
+
+    /// <summary>
+    /// Validate authentic two-key Ed25519 control evidence and atomically
+    /// consume exactly one verifier-owned issuer-successor challenge.
+    /// Success does NOT enroll any issuer, validate identity or grant authority.
+    /// Multi-replica verifiers must use one shared durable atomic challenge store.
     /// </summary>
     public static bool TryVerifyAndConsume(
         string attestationJson, string trustedPreviousIssuerDid,
@@ -170,23 +201,55 @@ public static class IssuerKeySuccessorAttestation
         Guid verifierTenantId, IPresentationChallengeStore challenges,
         TimeProvider clock, out string successorIssuerDid)
     {
+        ArgumentNullException.ThrowIfNull(attestationJson);
+        ArgumentNullException.ThrowIfNull(trustedPreviousIssuerDid);
         ArgumentNullException.ThrowIfNull(expectedVerifierAudience);
+        ArgumentNullException.ThrowIfNull(expectedNonce);
         ArgumentNullException.ThrowIfNull(challenges);
         ArgumentNullException.ThrowIfNull(clock);
         successorIssuerDid = string.Empty;
-        var retained = challenges.Find(
-            verifierTenantId, expectedVerifierAudience.AbsoluteUri, expectedNonce);
-        if (retained is null ||
-            !string.Equals(retained.TrustedIssuerDid, trustedPreviousIssuerDid,
-                StringComparison.Ordinal))
+
+        if (!ValidAudience(expectedVerifierAudience) ||
+            expectedVerifierAudience.AbsoluteUri.Length > 2_000)
         {
             return false;
         }
 
-        return TryVerify(attestationJson, trustedPreviousIssuerDid,
-            expectedVerifierAudience, expectedNonce, clock.GetUtcNow(),
-            out successorIssuerDid);
+        string audienceInStore = StoreAudience(expectedVerifierAudience);
+        var retained = challenges.Find(verifierTenantId, audienceInStore, expectedNonce);
+        if (retained is null ||
+            !string.Equals(retained.TrustedIssuerDid, trustedPreviousIssuerDid,
+                StringComparison.Ordinal) ||
+            !TryVerify(attestationJson, trustedPreviousIssuerDid,
+                expectedVerifierAudience, expectedNonce, clock.GetUtcNow(), out _))
+        {
+            return false;
+        }
+
+        // The store atomically rechecks tenant, purpose, nonce and expiry.
+        // A competing acceptor or expired challenge fails closed.
+        if (!challenges.TryConsume(verifierTenantId, audienceInStore, expectedNonce))
+        {
+            return false;
+        }
+
+        // Verify again after a potentially blocked remote consume. A proof or
+        // challenge expiring during that wait cannot release the successor.
+        var completedAt = clock.GetUtcNow();
+        if (retained.ExpiresAt <= completedAt ||
+            !TryVerify(attestationJson, trustedPreviousIssuerDid,
+                expectedVerifierAudience, expectedNonce, completedAt,
+                out string authenticatedSuccessor))
+        {
+            return false;
+        }
+
+        successorIssuerDid = authenticatedSuccessor;
+        return true;
     }
+
+    private static string StoreAudience(Uri verifierAudience) =>
+        ChallengePurposePrefix + verifierAudience.AbsoluteUri;
 
     private static string Header(string did) =>
         JsonSerializer.Serialize(new { alg = "EdDSA", typ = HeaderType, kid = KeyId(did) });
