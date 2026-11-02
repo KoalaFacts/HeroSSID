@@ -405,7 +405,7 @@ public sealed class HostPinnedVcdm20VerificationTests
     }
 
     [Theory]
-    [InlineData("MinimumStatusObservedAtUTC")]
+    [InlineData("MinimumStatusObservationUtc")]
     [InlineData("DeniedCredentialsSha256:0")]
     [InlineData("TrustedIssuerDid:0")]
     [InlineData("CredentialType:Unexpected")]
