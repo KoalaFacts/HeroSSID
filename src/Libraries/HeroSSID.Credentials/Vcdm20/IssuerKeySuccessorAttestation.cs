@@ -1,6 +1,7 @@
 using System.Text.Json;
 using HeroSSID.Credentials.CredentialVerification;
 using HeroSSID.Credentials.Utilities;
+using HeroSSID.Credentials.VerifiablePresentations;
 
 namespace HeroSSID.Credentials.Vcdm20;
 
@@ -156,6 +157,34 @@ public static class IssuerKeySuccessorAttestation
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Verify a verifier-issued issuer-transition challenge from the caller's
+    /// tenant-owned store. The initial implementation does not yet spend the
+    /// challenge; red tests must demonstrate the resulting replay failure.
+    /// </summary>
+    public static bool TryVerifyAndConsume(
+        string attestationJson, string trustedPreviousIssuerDid,
+        Uri expectedVerifierAudience, string expectedNonce,
+        Guid verifierTenantId, IPresentationChallengeStore challenges,
+        TimeProvider clock, out string successorIssuerDid)
+    {
+        ArgumentNullException.ThrowIfNull(challenges);
+        ArgumentNullException.ThrowIfNull(clock);
+        successorIssuerDid = string.Empty;
+        var retained = challenges.Find(
+            verifierTenantId, expectedVerifierAudience.AbsoluteUri, expectedNonce);
+        if (retained is null ||
+            !string.Equals(retained.TrustedIssuerDid, trustedPreviousIssuerDid,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return TryVerify(attestationJson, trustedPreviousIssuerDid,
+            expectedVerifierAudience, expectedNonce, clock.GetUtcNow(),
+            out successorIssuerDid);
     }
 
     private static string Header(string did) =>
