@@ -130,6 +130,37 @@ public sealed class HostPinnedIssuerSuccessorHttpIntegrationTests(DatabaseFixtur
     }
 
     [Fact]
+    public async Task LegacyUnpinnedVerifierCannotConsumeHostPinnedSuccessorNonce()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        using var previous = NewKey();
+        using var approved = NewKey();
+        using var rogue = NewKey();
+        await using var host = NewHost(DidFromKey(previous), DidFromKey(approved));
+        using var client = host.CreateClient();
+        string token = await GetTokenAsync(client, "credential:verify").ConfigureAwait(true);
+        string nonce = await IssueNonceAsync(client, token).ConfigureAwait(true);
+        string unauthorizedProof = Proof(previous, rogue, nonce);
+
+        // Even two authentic old/new signatures for a different successor must
+        // never consume the nonce through the legacy key-control-only route.
+        using var legacy = await PostAsync(client,
+            "/api/v1/credentials/issuer-successor/verify",
+            new { audience = Audience, nonce, attestation = unauthorizedProof }, token)
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, legacy.StatusCode);
+        Assert.Equal("Invalid",
+            (await BodyAsync(legacy).ConfigureAwait(true)).GetProperty("status").GetString());
+
+        string approvedProof = Proof(previous, approved, nonce);
+        using var accepted = await PostAsync(client, VerifyRoute,
+            new { policyId = "issuer-migration", nonce, attestation = approvedProof }, token)
+            .ConfigureAwait(true);
+        Assert.Equal("ValidPinnedKeyContinuity",
+            (await BodyAsync(accepted).ConfigureAwait(true)).GetProperty("status").GetString());
+    }
+
+    [Fact]
     public async Task HostPinnedEndpointsRequireAuthenticationAndVerifierScope()
     {
         await EnsureMigratedAsync().ConfigureAwait(true);
