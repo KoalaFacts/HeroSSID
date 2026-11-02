@@ -36,14 +36,20 @@ public sealed class HostPinnedVcdm20VerificationTests
             .SelectMany(static source => source.Endpoints)
             .OfType<RouteEndpoint>().ToArray();
 
-        var route = Assert.Single(routes,
-            endpoint => endpoint.RoutePattern.RawText ==
-                "/api/v1/credentials/vcdm20/verify-host-pinned");
-        Assert.Contains(route.Metadata.GetOrderedMetadata<IAuthorizeData>(),
-            static policy => policy.Policy == "credential:verify");
-        Assert.Null(route.Metadata.GetMetadata<IAllowAnonymous>());
-        Assert.Equal("POST", Assert.Single(route.Metadata
-            .GetMetadata<IHttpMethodMetadata>()!.HttpMethods));
+        foreach (string path in new[]
+        {
+            "/api/v1/credentials/vcdm20/verify-host-pinned",
+            "/api/v1/credentials/vcdm20/verify-host-pinned-with-status"
+        })
+        {
+            var route = Assert.Single(routes,
+                endpoint => endpoint.RoutePattern.RawText == path);
+            Assert.Contains(route.Metadata.GetOrderedMetadata<IAuthorizeData>(),
+                static policy => policy.Policy == "credential:verify");
+            Assert.Null(route.Metadata.GetMetadata<IAllowAnonymous>());
+            Assert.Equal("POST", Assert.Single(route.Metadata
+                .GetMetadata<IHttpMethodMetadata>()!.HttpMethods));
+        }
     }
 
     [Fact]
