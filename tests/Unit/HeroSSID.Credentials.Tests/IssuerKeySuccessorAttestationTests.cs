@@ -1,5 +1,6 @@
 using System.Text.Json;
 using HeroSSID.Credentials.Vcdm20;
+using HeroSSID.Credentials.VerifiablePresentations;
 using NSec.Cryptography;
 
 namespace HeroSSID.Credentials.Tests;
@@ -98,6 +99,108 @@ public sealed class IssuerKeySuccessorAttestationTests
         Assert.False(IssuerKeySuccessorAttestation.TryVerify(
             "{\"previousSignature\":\"x\",\"successorSignature\":\"y\"}",
             oldKey.Did, Audience, Nonce, Now, out _));
+    }
+
+    [Fact]
+    public void SuccessorAdmissionAtomicallyConsumesChallengeAndRejectsReplay()
+    {
+        var previous = NewKey();
+        var successor = NewKey();
+        var clock = TimeProviderForNow();
+        var challenges = new InMemoryPresentationChallengeStore(clock);
+        var tenant = Guid.NewGuid();
+        var challenge = challenges.Issue(tenant, Audience.AbsoluteUri, previous.Did);
+        string proof = IssuerKeySuccessorAttestation.Create(
+            previous.Did, successor.Did, previous.Seed, successor.Seed,
+            Audience, challenge.Nonce, clock);
+
+        Assert.True(IssuerKeySuccessorAttestation.TryVerifyAndConsume(
+            proof, previous.Did, Audience, challenge.Nonce,
+            tenant, challenges, clock, out string admitted));
+        Assert.Equal(successor.Did, admitted);
+
+        Assert.False(IssuerKeySuccessorAttestation.TryVerifyAndConsume(
+            proof, previous.Did, Audience, challenge.Nonce,
+            tenant, challenges, clock, out string replay));
+        Assert.Equal(string.Empty, replay);
+    }
+
+    [Fact]
+    public void SuccessorAdmissionRejectsWrongTenantAndPreviousIssuerWithoutSpendingNonce()
+    {
+        var previous = NewKey();
+        var successor = NewKey();
+        var impostor = NewKey();
+        var clock = TimeProviderForNow();
+        var challenges = new InMemoryPresentationChallengeStore(clock);
+        var tenant = Guid.NewGuid();
+        var challenge = challenges.Issue(tenant, Audience.AbsoluteUri, previous.Did);
+        string proof = IssuerKeySuccessorAttestation.Create(
+            previous.Did, successor.Did, previous.Seed, successor.Seed,
+            Audience, challenge.Nonce, clock);
+
+        Assert.False(IssuerKeySuccessorAttestation.TryVerifyAndConsume(
+            proof, previous.Did, Audience, challenge.Nonce,
+            Guid.NewGuid(), challenges, clock, out string foreignTenant));
+        Assert.Equal(string.Empty, foreignTenant);
+        Assert.False(IssuerKeySuccessorAttestation.TryVerifyAndConsume(
+            proof, impostor.Did, Audience, challenge.Nonce,
+            tenant, challenges, clock, out string foreignIssuer));
+        Assert.Equal(string.Empty, foreignIssuer);
+        Assert.True(IssuerKeySuccessorAttestation.TryVerifyAndConsume(
+            proof, previous.Did, Audience, challenge.Nonce,
+            tenant, challenges, clock, out string admitted));
+        Assert.Equal(successor.Did, admitted);
+    }
+
+    [Fact]
+    public void InvalidSuccessorProofDoesNotSpendValidVerifierChallenge()
+    {
+        var previous = NewKey();
+        var successor = NewKey();
+        var clock = TimeProviderForNow();
+        var challenges = new InMemoryPresentationChallengeStore(clock);
+        var tenant = Guid.NewGuid();
+        var challenge = challenges.Issue(tenant, Audience.AbsoluteUri, previous.Did);
+        string proof = IssuerKeySuccessorAttestation.Create(
+            previous.Did, successor.Did, previous.Seed, successor.Seed,
+            Audience, challenge.Nonce, clock);
+
+        Assert.False(IssuerKeySuccessorAttestation.TryVerifyAndConsume(
+            proof + "tampered", previous.Did, Audience, challenge.Nonce,
+            tenant, challenges, clock, out string forged));
+        Assert.Equal(string.Empty, forged);
+        Assert.True(IssuerKeySuccessorAttestation.TryVerifyAndConsume(
+            proof, previous.Did, Audience, challenge.Nonce,
+            tenant, challenges, clock, out string admitted));
+        Assert.Equal(successor.Did, admitted);
+    }
+
+    [Fact]
+    public void ConcurrentSuccessorAdmissionAllowsExactlyOneVerifierDecision()
+    {
+        var previous = NewKey();
+        var successor = NewKey();
+        var clock = TimeProviderForNow();
+        var challenges = new InMemoryPresentationChallengeStore(clock);
+        var tenant = Guid.NewGuid();
+        var challenge = challenges.Issue(tenant, Audience.AbsoluteUri, previous.Did);
+        string proof = IssuerKeySuccessorAttestation.Create(
+            previous.Did, successor.Did, previous.Seed, successor.Seed,
+            Audience, challenge.Nonce, clock);
+        int accepted = 0;
+        Parallel.For(0, 24, _ =>
+        {
+            if (IssuerKeySuccessorAttestation.TryVerifyAndConsume(
+                proof, previous.Did, Audience, challenge.Nonce,
+                tenant, challenges, clock, out string admitted))
+            {
+                Assert.Equal(successor.Did, admitted);
+                Interlocked.Increment(ref accepted);
+            }
+        });
+
+        Assert.Equal(1, accepted);
     }
 
     private static string Create((string Did, byte[] Seed) oldKey, (string Did, byte[] Seed) newKey) =>
