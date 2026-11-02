@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using HeroSSID.Api.Features.Credentials;
 using HeroSSID.Core.TenantManagement;
@@ -9,6 +12,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
 using NSec.Cryptography;
 
 namespace HeroSSID.Api.Tests;
@@ -155,6 +159,138 @@ public sealed class Vcdm20PresentationEndpointTests
             Assert.Null(route.Metadata.GetMetadata<IAllowAnonymous>());
         }
     }
+
+
+    [Fact]
+    public async Task HostPinnedPresentationAuthenticatesIssuerHolderAndSpendsOnlyAcceptedChallenge()
+    {
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var (challenge, presentation, snapshot) = CreatePresentation(store);
+        var request = HostRequest(challenge, presentation, snapshot);
+        var foreign = NewIdentity();
+        var (_, rejected) = await JsonAsync(Vcdm20PresentationEndpoints.VerifyHostPinned(
+            request, Registry(foreign.Did), store, _tenant, _clock)).ConfigureAwait(true);
+        Assert.Equal("Invalid", rejected.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, rejected.GetProperty("verifiedSubject").ValueKind);
+
+        // An unapproved issuer cannot cause disclosure or spend a legitimate
+        // verifier challenge. Only the server-pinned genuine issuer is accepted.
+        var registry = Registry(_issuer.Did);
+        var (_, accepted) = await JsonAsync(Vcdm20PresentationEndpoints.VerifyHostPinned(
+            request, registry, store, _tenant, _clock)).ConfigureAwait(true);
+        Assert.Equal("SignedNotListed", accepted.GetProperty("status").GetString());
+        Assert.Equal("member", accepted.GetProperty("verifiedSubject").GetProperty("role").GetString());
+        var (_, replay) = await JsonAsync(Vcdm20PresentationEndpoints.VerifyHostPinned(
+            request, registry, store, _tenant, _clock)).ConfigureAwait(true);
+        Assert.Equal("Invalid", replay.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, replay.GetProperty("verifiedSubject").ValueKind);
+    }
+
+    [Fact]
+    public async Task HostOwnedDenialAndVocabularyRefuseAuthenticHolderProofWithoutClaims()
+    {
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var (challenge, presentation, snapshot) = CreatePresentation(store);
+        var request = HostRequest(challenge, presentation, snapshot);
+        var wrongVocabulary = Registry(_issuer.Did, credentialType: "AdministratorCredential");
+        var (_, wrong) = await JsonAsync(Vcdm20PresentationEndpoints.VerifyHostPinned(
+            request, wrongVocabulary, store, _tenant, _clock)).ConfigureAwait(true);
+        Assert.Equal("Invalid", wrong.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, wrong.GetProperty("verifiedSubject").ValueKind);
+
+        // Denial applies to the exact ORIGINAL issuer-signed JWT enclosed
+        // inside the holder-signed VP; callers cannot substitute its digest.
+        string original = EnclosedCredential(presentation);
+        var denied = Registry(_issuer.Did, deniedHash: Digest(original));
+        var (_, refused) = await JsonAsync(Vcdm20PresentationEndpoints.VerifyHostPinned(
+            request, denied, store, _tenant, _clock)).ConfigureAwait(true);
+        Assert.Equal("DeniedByVerifier", refused.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, refused.GetProperty("verifiedSubject").ValueKind);
+    }
+
+    [Fact]
+    public async Task HostOwnedIncidentCutoffRejectsAuthenticOldIssuerStatusAndPreventsReplay()
+    {
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var (challenge, presentation, _) = CreatePresentation(store);
+        string old = Vcdm20RevocationSnapshot.Create(
+            _issuer.Did, [], _issuer.Seed, Epoch.AddSeconds(-25), _clock);
+        var request = HostRequest(challenge, presentation, old);
+        var registry = Registry(_issuer.Did, cutoff: Epoch.AddSeconds(-10));
+        var (_, rejected) = await JsonAsync(Vcdm20PresentationEndpoints.VerifyHostPinned(
+            request, registry, store, _tenant, _clock)).ConfigureAwait(true);
+        Assert.Equal("Invalid", rejected.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, rejected.GetProperty("verifiedSubject").ValueKind);
+
+        string fresh = Vcdm20RevocationSnapshot.Create(
+            _issuer.Did, [], _issuer.Seed, Epoch, _clock);
+        var (_, replay) = await JsonAsync(Vcdm20PresentationEndpoints.VerifyHostPinned(
+            request with { RevocationSnapshot = fresh },
+            registry, store, _tenant, _clock)).ConfigureAwait(true);
+        Assert.Equal("Invalid", replay.GetProperty("status").GetString());
+
+        var (newChallenge, newPresentation, newSnapshot) = CreatePresentation(store);
+        var (_, accepted) = await JsonAsync(Vcdm20PresentationEndpoints.VerifyHostPinned(
+            HostRequest(newChallenge, newPresentation, newSnapshot),
+            registry, store, _tenant, _clock)).ConfigureAwait(true);
+        Assert.Equal("SignedNotListed", accepted.GetProperty("status").GetString());
+        Assert.Equal("member", accepted.GetProperty("verifiedSubject").GetProperty("role").GetString());
+    }
+
+    [Fact]
+    public void HostPinnedHolderRouteIsScopedAndUntrustedPolicyFieldsFailBinding()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
+        using var app = builder.Build();
+        app.MapCredentialEndpoints();
+        var route = Assert.Single(((IEndpointRouteBuilder)app).DataSources
+            .SelectMany(static source => source.Endpoints).OfType<RouteEndpoint>(),
+            endpoint => endpoint.RoutePattern.RawText ==
+                "/api/v1/credentials/vcdm20/verify-host-pinned-presentation");
+        Assert.Equal("POST", Assert.Single(route.Metadata.GetMetadata<IHttpMethodMetadata>()!.HttpMethods));
+        Assert.Contains(route.Metadata.GetOrderedMetadata<IAuthorizeData>(),
+            p => p.Policy == "credential:verify");
+        Assert.Null(route.Metadata.GetMetadata<IAllowAnonymous>());
+
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<VerifyHostPinnedVcdm20PresentationRequest>(
+            "{\"policyId\":\"membership-v1\",\"trustedIssuerDids\":[\"did:key:attacker\"]}",
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+    }
+
+    private HostPinnedVcdm20IssuerRegistry Registry(string issuerDid, string? deniedHash = null,
+        DateTimeOffset? cutoff = null, string credentialType = CredentialType)
+    {
+        var entries = new Dictionary<string, string?>
+        {
+            ["Vcdm20VerifierTrust:Policies:0:TenantId"] = _tenant.Id.ToString("D", CultureInfo.InvariantCulture),
+            ["Vcdm20VerifierTrust:Policies:0:PolicyId"] = "membership-v1",
+            ["Vcdm20VerifierTrust:Policies:0:CredentialType"] = credentialType,
+            ["Vcdm20VerifierTrust:Policies:0:SubjectContextUri"] = Context.AbsoluteUri,
+            ["Vcdm20VerifierTrust:Policies:0:TrustedIssuerDids:0"] = issuerDid
+        };
+        if (deniedHash is not null)
+        {
+            entries["Vcdm20VerifierTrust:Policies:0:DeniedCredentialSha256:0"] = deniedHash;
+        }
+        if (cutoff is DateTimeOffset instant)
+        {
+            entries["Vcdm20VerifierTrust:Policies:0:MinimumStatusObservedAtUtc"] =
+                instant.ToString("O", CultureInfo.InvariantCulture);
+        }
+
+        return new HostPinnedVcdm20IssuerRegistry(
+            new ConfigurationBuilder().AddInMemoryCollection(entries).Build());
+    }
+
+    private static VerifyHostPinnedVcdm20PresentationRequest HostRequest(
+        PresentationChallenge challenge, string presentation, string snapshot) => new()
+    {
+        PolicyId = "membership-v1", Audience = Audience, Nonce = challenge.Nonce,
+        Presentation = presentation, RevocationSnapshot = snapshot
+    };
+
+    private static string Digest(string credential) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(credential)));
 
     private (PresentationChallenge Challenge, string Presentation, string Snapshot) CreatePresentation(
         InMemoryPresentationChallengeStore store)
