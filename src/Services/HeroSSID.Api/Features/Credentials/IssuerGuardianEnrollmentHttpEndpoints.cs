@@ -49,11 +49,13 @@ internal static class IssuerGuardianEnrollmentHttpEndpoints
         [FromBody] IssueExactEnrolledGuardianRecoveryChallengeRequest request,
         [FromServices] IPresentationChallengeStore challenges,
         [FromServices] ITenantContext tenantContext,
+        [FromServices] HostPinnedGuardianEnrollmentRegistry registry,
         [FromServices] TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(challenges);
         ArgumentNullException.ThrowIfNull(tenantContext);
+        ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(clock);
 
         if (!ValidAudience(request.Audience) ||
@@ -68,6 +70,14 @@ internal static class IssuerGuardianEnrollmentHttpEndpoints
         if (tenantId == Guid.Empty)
         {
             return Results.Unauthorized();
+        }
+
+        // A v3 nonce issued by a host-pinned route is also redeemable through
+        // this older caller-supplied adapter. Check the exact operator withdrawal
+        // before issuance: the caller's digest is not permission to override it.
+        if (!registry.IsAllowedFingerprint(request.IndependentlyPinnedSha256!))
+        {
+            return InvalidRequest();
         }
 
         try
@@ -113,11 +123,13 @@ internal static class IssuerGuardianEnrollmentHttpEndpoints
         [FromBody] VerifyExactEnrolledGuardianRecoveryRequest request,
         [FromServices] IPresentationChallengeStore challenges,
         [FromServices] ITenantContext tenantContext,
+        [FromServices] HostPinnedGuardianEnrollmentRegistry registry,
         [FromServices] TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(challenges);
         ArgumentNullException.ThrowIfNull(tenantContext);
+        ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(clock);
 
         if (!ValidAudience(request.Audience) ||
@@ -134,6 +146,13 @@ internal static class IssuerGuardianEnrollmentHttpEndpoints
         if (tenantId == Guid.Empty)
         {
             return Results.Unauthorized();
+        }
+
+        // Deny even an otherwise genuine guardian quorum without spending its
+        // pending nonce; reject malformed live operator configuration as well.
+        if (!registry.IsAllowedFingerprint(request.IndependentlyPinnedSha256!))
+        {
+            return Results.Ok(new VerifyIssuerGuardianRecoveryResponse("Invalid", null));
         }
 
         try
