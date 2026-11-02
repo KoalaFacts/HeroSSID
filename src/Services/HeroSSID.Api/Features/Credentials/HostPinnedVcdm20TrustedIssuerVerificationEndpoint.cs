@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json.Serialization;
 using HeroSSID.Api.Authentication;
 using HeroSSID.Core.TenantManagement;
@@ -81,8 +82,35 @@ internal sealed class HostPinnedVcdm20IssuerRegistry
                 }
             }
 
+            // A host-owned incident boundary must never be supplied by an HTTP
+            // caller. Require canonical UTC round-trip format, reject nested
+            // configuration, and fail startup instead of ignoring bad policy.
+            IConfigurationSection cutoffSection = entry.GetSection("MinimumStatusObservedAtUtc");
+            DateTimeOffset? minimumObservedAt = null;
+            if (cutoffSection.GetChildren().Any())
+            {
+                throw new InvalidOperationException("Invalid host-owned VC2 status observation cutoff.");
+            }
+
+            if (cutoffSection.Value is string cutoffText)
+            {
+                if (!DateTimeOffset.TryParseExact(cutoffText, "O",
+                        CultureInfo.InvariantCulture, DateTimeStyles.None,
+                        out DateTimeOffset parsedCutoff) ||
+                    parsedCutoff.Offset != TimeSpan.Zero ||
+                    parsedCutoff < DateTimeOffset.UnixEpoch ||
+                    !string.Equals(parsedCutoff.ToString("O", CultureInfo.InvariantCulture),
+                        cutoffText, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("Invalid host-owned VC2 status observation cutoff.");
+                }
+
+                minimumObservedAt = parsedCutoff;
+            }
+
             if (!_policies.TryAdd((tenant, policyId!),
-                    new HostPinnedVcdm20IssuerPolicy([.. unique], type!, context!, [.. denied])))
+                    new HostPinnedVcdm20IssuerPolicy(
+                        [.. unique], type!, context!, [.. denied], minimumObservedAt)))
             {
                 throw new InvalidOperationException("Duplicate tenant VC2 issuer trust policy.");
             }
@@ -122,7 +150,7 @@ internal sealed class HostPinnedVcdm20IssuerRegistry
 
 internal sealed record HostPinnedVcdm20IssuerPolicy(
     string[] TrustedIssuerDids, string CredentialType, Uri SubjectContextUri,
-    string[] DeniedCredentialSha256);
+    string[] DeniedCredentialSha256, DateTimeOffset? MinimumStatusObservedAtUtc);
 
 /// <summary>
 /// A verifier host, not an authenticated caller, chooses current/historical VC2
@@ -252,11 +280,26 @@ internal static class HostPinnedVcdm20TrustedIssuerVerificationEndpoint
             return Results.Ok(new VerifyVcdm20TrustedIssuersResponse("Invalid", null, null));
         }
 
-        Vcdm20VerifierPolicyResult status = Vcdm20VerifierDenylist.CheckWithStatus(
-            request.Credential, request.RevocationSnapshot, policy.TrustedIssuerDids,
-            policy.DeniedCredentialSha256, request.ExpectedHolderDid,
-            policy.CredentialType, policy.SubjectContextUri, clock.GetUtcNow(),
-            out string actualIssuer, out var verifiedSubject);
+        Vcdm20VerifierPolicyResult status;
+        string actualIssuer;
+        System.Text.Json.JsonElement verifiedSubject;
+        DateTimeOffset now = clock.GetUtcNow();
+        if (policy.MinimumStatusObservedAtUtc is DateTimeOffset cutoff)
+        {
+            status = Vcdm20VerifierDenylist.CheckWithStatusObservedAfter(
+                request.Credential, request.RevocationSnapshot, policy.TrustedIssuerDids,
+                policy.DeniedCredentialSha256, request.ExpectedHolderDid,
+                policy.CredentialType, policy.SubjectContextUri, now, cutoff,
+                out actualIssuer, out verifiedSubject);
+        }
+        else
+        {
+            status = Vcdm20VerifierDenylist.CheckWithStatus(
+                request.Credential, request.RevocationSnapshot, policy.TrustedIssuerDids,
+                policy.DeniedCredentialSha256, request.ExpectedHolderDid,
+                policy.CredentialType, policy.SubjectContextUri, now,
+                out actualIssuer, out verifiedSubject);
+        }
         if (status != Vcdm20VerifierPolicyResult.SignedNotListed)
         {
             string responseStatus = status switch
