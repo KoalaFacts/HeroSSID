@@ -70,6 +70,45 @@ public sealed class IssuerSigningGrantEndpointFilterTests
         Assert.False(IssuerSigningGrantEndpointFilter.Allows(context, new object()));
     }
 
+    [Fact]
+    public void EveryIssuanceRouteRejectsAForbiddenTypeEvenWithApprovedIssuerDid()
+    {
+        using var key = Key.Create(SignatureAlgorithm.Ed25519);
+        string did = DidFromKey(key);
+        Guid tenant = HeroDbContext.DefaultTenantId;
+        var config = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?>
+            {
+                ["IssuerSigningGrants:EnforcedTenants:0"] = tenant.ToString("D"),
+                ["IssuerSigningGrants:Grants:0:TenantId"] = tenant.ToString("D"),
+                ["IssuerSigningGrants:Grants:0:ClientId"] = "test_client",
+                ["IssuerSigningGrants:Grants:0:IssuerDid"] = did,
+                ["IssuerSigningGrants:Grants:0:CredentialTypes:0"] = "MembershipCredential",
+                ["IssuerSigningGrants:Grants:0:CredentialTypes:1"] =
+                    "https://issuer.example/credentials#MembershipCredential"
+            }).Build();
+        using var services = new ServiceCollection()
+            .AddSingleton(new IssuerSigningGrantRegistry(config)).BuildServiceProvider();
+        var context = new DefaultHttpContext { RequestServices = services };
+        context.User = Principal(tenant, "test_client");
+
+        object[] forbidden =
+        [
+            new IssueCredentialRequest { IssuerDid = did, CredentialType = "AdministratorCredential" },
+            new IssueJwtVcJsonCredentialRequest
+            {
+                IssuerDid = did,
+                CredentialType = "https://issuer.example/credentials#AdministratorCredential"
+            },
+            new IssueVcdm20CredentialRequest { IssuerDid = did, CredentialType = "AdministratorCredential" }
+        ];
+
+        foreach (object request in forbidden)
+        {
+            Assert.False(IssuerSigningGrantEndpointFilter.Allows(context, request));
+        }
+    }
+
     private static ClaimsPrincipal Principal(Guid tenant, string client) =>
         new(new ClaimsIdentity(
         [
