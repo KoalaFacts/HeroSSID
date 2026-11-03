@@ -49,6 +49,104 @@ public sealed class JwtVcJsonCredentialIssuanceHttpTests(AspireWebApplicationFac
     }
 
     [Fact]
+    public async Task AuthenticatedHttpIssueAndVerifyReleaseOnlyAuthenticSignedCredentialIdentifier()
+    {
+        string token = await GetTokenAsync("did:manage credential:issue credential:verify credential:revoke")
+            .ConfigureAwait(true);
+        string issuerDid = await CreateDidAsync(token).ConfigureAwait(true);
+        using var holder = Key.Create(SignatureAlgorithm.Ed25519);
+        string holderDid = DidFromKey(holder.PublicKey.Export(KeyBlobFormat.RawPublicKey));
+        const string credentialId = "https://issuer.example/credentials/member-123";
+
+        using var issued = await PostAsync(Endpoint, new
+        {
+            issuerDid,
+            holderDid,
+            credentialType = CredentialType,
+            subjectContextUri = Vocabulary,
+            credentialSubject = new { id = holderDid, membership = "active" },
+            validUntil = DateTimeOffset.UtcNow.AddMinutes(5),
+            credentialId
+        }, token).ConfigureAwait(true);
+        string jwt = await SetupResponse.ReadRequiredStringAsync(
+            issued, HttpStatusCode.Created, "Issue credential with signed identifier",
+            "credential").ConfigureAwait(true);
+
+        using var payload = JsonDocument.Parse(Ed25519JwtSigner.ExtractPayload(jwt));
+        Assert.Equal(credentialId, payload.RootElement.GetProperty("jti").GetString());
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, issuerDid, holderDid,
+            CredentialType, Vocabulary, DateTimeOffset.UtcNow, out var verifiedSubject,
+            out string? verifiedId));
+        Assert.Equal("active", verifiedSubject.GetProperty("membership").GetString());
+        Assert.Equal(credentialId, verifiedId);
+
+        var verifierPolicy = new
+        {
+            credential = jwt,
+            trustedIssuerDid = issuerDid,
+            expectedHolderDid = holderDid,
+            expectedCredentialType = CredentialType,
+            subjectContextUri = Vocabulary
+        };
+        using var verified = await PostAsync("/api/v1/credentials/jwt-vc-json/verify",
+            verifierPolicy, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, verified.StatusCode);
+        JsonElement body = await verified.Content.ReadFromJsonAsync<JsonElement>()
+            .ConfigureAwait(true);
+        Assert.Equal("SignedButStatusUnchecked", body.GetProperty("status").GetString());
+        Assert.Equal(credentialId, body.GetProperty("verifiedCredentialId").GetString());
+
+        using var exported = await PostAsync(StatusEndpoint, new
+        {
+            issuerDid,
+            observedAt = DateTimeOffset.UtcNow,
+            revokedCredentials = new[] { jwt }
+        }, token).ConfigureAwait(true);
+        string snapshot = await SetupResponse.ReadRequiredStringAsync(
+            exported, HttpStatusCode.Created, "Export signed revoked status",
+            "snapshotJwt").ConfigureAwait(true);
+        using var revoked = await PostAsync("/api/v1/credentials/jwt-vc-json/verify-with-status",
+            new
+            {
+                verifierPolicy.credential,
+                verifierPolicy.trustedIssuerDid,
+                verifierPolicy.expectedHolderDid,
+                verifierPolicy.expectedCredentialType,
+                verifierPolicy.subjectContextUri,
+                revocationSnapshot = snapshot
+            }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, revoked.StatusCode);
+        JsonElement revokedBody = await revoked.Content.ReadFromJsonAsync<JsonElement>()
+            .ConfigureAwait(true);
+        Assert.Equal("Revoked", revokedBody.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, revokedBody.GetProperty("verifiedSubject").ValueKind);
+        Assert.Equal(JsonValueKind.Null, revokedBody.GetProperty("verifiedCredentialId").ValueKind);
+    }
+
+    [Theory]
+    [InlineData("http://issuer.example/credentials/insecure")]
+    [InlineData("https://user:pass@issuer.example/credentials/secret")]
+    public async Task AuthenticatedHttpIssuerRejectsUnsafeCredentialIdentifiers(string credentialId)
+    {
+        string token = await GetTokenAsync("did:manage credential:issue").ConfigureAwait(true);
+        string issuerDid = await CreateDidAsync(token).ConfigureAwait(true);
+        using var holder = Key.Create(SignatureAlgorithm.Ed25519);
+        string holderDid = DidFromKey(holder.PublicKey.Export(KeyBlobFormat.RawPublicKey));
+
+        using var issued = await PostAsync(Endpoint, new
+        {
+            issuerDid,
+            holderDid,
+            credentialType = CredentialType,
+            subjectContextUri = Vocabulary,
+            credentialSubject = new { id = holderDid, membership = "active" },
+            validUntil = DateTimeOffset.UtcNow.AddMinutes(5),
+            credentialId
+        }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, issued.StatusCode);
+    }
+
+    [Fact]
     public async Task AnonymousAndVerifyOnlyClientsCannotIssueAndMissingIssuerCannotSign()
     {
         using var holder = Key.Create(SignatureAlgorithm.Ed25519);
