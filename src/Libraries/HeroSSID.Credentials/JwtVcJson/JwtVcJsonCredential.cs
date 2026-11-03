@@ -104,8 +104,9 @@ public static class JwtVcJsonCredential
     /// <summary>
     /// Independently verify the actual Ed25519 issuer signature and pinned issuer,
     /// holder, type, HTTPS vocabulary and 15-minute validity, before releasing claims.
-    /// Also accepts independently signed VC1.1 JWTs with typ=JWT, bounded HTTPS
-    /// jti and no iat (or iat preceding nbf by at most 15 minutes). Existing
+    /// Also accepts independently signed VC1.1 JWTs with typ=JWT, an omitted
+    /// optional kid, bounded HTTPS jti and no iat (or iat preceding nbf by at
+    /// most 15 minutes). A present kid MUST match the pinned issuer. Existing
     /// HeroSSID typ=vc+jwt credentials remain readable as legacy input only.
     /// Does NOT establish holder possession, consent, revocation or business authority.
     /// </summary>
@@ -123,6 +124,12 @@ public static class JwtVcJsonCredential
             !ValidContext(expectedSubjectContextUri) ||
             !(StrictJwtReader.TryRead(jwt, JwtType, MaximumJwtLength,
                 out var payload, KeyId(trustedIssuerDid)) ||
+              // W3C VC 1.1 REC §6.3.1 permits omitting kid. A missing
+              // kid cannot select a signer: only the independently pinned
+              // issuer did:key supplies the actual Ed25519 verification key.
+              // This two-field header path rejects an explicit wrong kid.
+              StrictJwtReader.TryRead(jwt, JwtType, MaximumJwtLength,
+                out payload) ||
               StrictJwtReader.TryRead(jwt, LegacyJwtType, MaximumJwtLength,
                 out payload, KeyId(trustedIssuerDid))) ||
             !HasSupportedClaims(payload) ||
