@@ -89,7 +89,10 @@ public static class JwtVcJsonCredential
             issued < 0 || expires <= issued ||
             expires - issued > MaximumValiditySeconds ||
             credentialSubject.ValueKind != JsonValueKind.Object ||
-            !HasSubjectId(credentialSubject, holderDid) ||
+            // VC1.1 JWT sub is the authoritative subject ID. Do not invent a
+            // nested id when the issuer intentionally leaves it out; reject
+            // an explicit conflicting value exactly as the verifier does.
+            !HasBoundSubject(credentialSubject, holderDid, isNormativeJwt: true) ||
             StrictJwtReader.HasEmbeddedContext(credentialSubject) ||
             Encoding.UTF8.GetByteCount(credentialSubject.GetRawText()) > MaximumSubjectBytes)
         {

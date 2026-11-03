@@ -10,7 +10,7 @@ This is a **real issuer-signed JWT VC 1.1 credential** intended for the OpenID4V
 
 - Ed25519 JWS `alg=EdDSA`, W3C VC1.1 `typ=JWT`, and the exact `did:key` verification-method `kid` (VC1.1 §6.3.1 requires `JWT` when `typ` is present);
 - signed `iss` as the issuer DID; `sub` as the holder DID; integer-second `iat=nbf` and `exp`;
-- signed `vc.@context=["https://www.w3.org/2018/credentials/v1", pinnedVersionedHttpsVocabulary]` (not `vc.context`), `vc.type=["VerifiableCredential", expectedType]` and `vc.credentialSubject.id=holderDid`;
+- signed `vc.@context=["https://www.w3.org/2018/credentials/v1", pinnedVersionedHttpsVocabulary]` (not `vc.context`), `vc.type=["VerifiableCredential", expectedType]`, and `vc.credentialSubject` with either the exact `id=holderDid` or no nested `id` (the signed JWT `sub` supplies that identifier);
 - a **15-minute maximum** encoded validity interval, a bounded subject and a bounded JWT. Normal `DateTimeOffset` fractional-second arguments are accepted: `iat` and `nbf` round **up** to the next whole second, and `exp` rounds **down**, so the JWT cannot be valid before the requested start or at/after the requested end. An interval that becomes empty, or exceeds 900 encoded seconds, is rejected. Near-second boundaries can shorten the usable interval by up to almost two seconds.
 
 ### Issuer-assigned signed credential identifiers (opt-in)
@@ -110,6 +110,16 @@ original JWT, and every existing type/context/expiry/claim check succeeds.
 The issuer's signed revocation snapshot checks the **original JWT** by its
 digest under the same signer; no synthetic credential or replacement
 signature is created.
+
+The opt-in **issuer** `JwtVcJsonCredential.Create` overloads now also accept a
+`credentialSubject` JSON object with no nested `id`. They sign the explicitly
+provided holder DID in the JWT `sub`, preserve the original subject without
+inventing a nested identifier, and self-verify the genuine signed JWT before
+returning it. Both the default no-`jti` overload and the optional issuer-assigned
+HTTPS `jti` overload support this input. The issuance API continues rejecting
+an explicitly present conflicting, null or empty nested `id` (it is **not**
+normalized or silently discarded). This only changes encoding, not proof of
+holder-key control; the relying party must pin the expected holder independently.
 
 If the nested `id` exists, even as an empty, null or incompatible value, it
 **must exactly match** the issuer-signed `sub` and independently expected
