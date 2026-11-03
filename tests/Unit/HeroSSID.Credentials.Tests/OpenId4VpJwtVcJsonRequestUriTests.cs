@@ -160,14 +160,16 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
         using var handler = OpenId4VpJwtVcJsonRequestUri.CreateIsolatedTransportHandler();
         Assert.False(handler.AllowAutoRedirect);
         Assert.False(handler.UseCookies);
-        Assert.False(handler.UseDefaultCredentials);
         Assert.False(handler.PreAuthenticate);
         Assert.Null(handler.Credentials);
         Assert.False(handler.UseProxy);
         Assert.Null(handler.DefaultProxyCredentials);
-        Assert.Equal(ClientCertificateOption.Manual, handler.ClientCertificateOptions);
-        Assert.Empty(handler.ClientCertificates);
-        Assert.True(handler.CheckCertificateRevocationList);
+        Assert.Null(handler.ActivityHeadersPropagator);
+        Assert.Equal(System.Security.Cryptography.X509Certificates.X509RevocationMode.Online,
+            handler.SslOptions.CertificateRevocationCheckMode);
+        Assert.Null(handler.SslOptions.RemoteCertificateValidationCallback);
+        Assert.Null(handler.SslOptions.ClientCertificates);
+        Assert.Null(handler.SslOptions.LocalCertificateSelectionCallback);
         Assert.Equal(DecompressionMethods.None, handler.AutomaticDecompression);
 
         using var http = new HttpClient(handler);
