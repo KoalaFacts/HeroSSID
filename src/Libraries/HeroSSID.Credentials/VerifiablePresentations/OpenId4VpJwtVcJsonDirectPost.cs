@@ -379,6 +379,21 @@ public static class OpenId4VpJwtVcJsonDirectPost
         }
     }
 
+
+    /// <summary>Opt-in private holder-signed original request binding, not OpenID4VP conformance.</summary>
+    public static string CreateHolderBoundResponseForm(string requestJwt, string expectedVerifierDid,
+        Uri expectedResponseUri, string expectedCredentialType, Uri expectedSubjectContextUri,
+        string credentialJwt, string holderDid, byte[] holderSeed, TimeProvider clock) =>
+        throw new NotSupportedException("Holder request binding has not been implemented.");
+
+    /// <summary>Verify the wallet's signed exact request hash against the verifier's own retained pin.</summary>
+    public static JwtVcJsonPresentationCheckResult CheckHolderBoundResponseForm(string form,
+        string signedRequestJwt, string verifierRetainedRequestSha256, string trustedVerifierDid,
+        Uri expectedResponseUri, Guid verifierTenantId, string expectedClientId,
+        string expectedNonce, string expectedCredentialType, Uri expectedSubjectContextUri,
+        IPresentationChallengeStore challenges, TimeProvider clock, out JsonElement verifiedSubject) =>
+        throw new NotSupportedException("Holder request binding has not been implemented.");
+
     private static bool IsSupportedQuery(JsonElement query, string credentialType)
     {
         if (query.ValueKind != JsonValueKind.Object || query.EnumerateObject().Count() != 1 ||
