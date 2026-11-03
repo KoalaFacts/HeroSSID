@@ -159,6 +159,9 @@ public sealed class JwtVcJsonOpenId4VpHttpIntegrationTests(DatabaseFixture fixtu
         string bound = OpenId4VpJwtVcJsonDirectPost.CreateHolderBoundResponseForm(
             signed, verifierDid, new Uri(ResponseUri), TypeIri, Context, credential,
             holderDid, holderKey.Export(KeyBlobFormat.RawPrivateKey), TimeProvider.System);
+        string legacyUnbound = OpenId4VpJwtVcJsonDirectPost.CreateHolderResponseForm(
+            signed, verifierDid, new Uri(ResponseUri), TypeIri, Context, credential,
+            holderDid, holderKey.Export(KeyBlobFormat.RawPrivateKey), TimeProvider.System);
         string status = JwtVcJsonRevocationSnapshot.Create(issuerDid, [],
             issuerKey.Export(KeyBlobFormat.RawPrivateKey), now, TimeProvider.System);
         var submitted = new
@@ -176,8 +179,11 @@ public sealed class JwtVcJsonOpenId4VpHttpIntegrationTests(DatabaseFixture fixtu
         Assert.Equal(JsonValueKind.Null, deniedBody.GetProperty("verifiedSubject").ValueKind);
 
         // Strict route denial must neither consume nor silently switch policy.
-        using var legacy = await PostAsync(client, VerifyRoute, submitted, token)
-            .ConfigureAwait(true);
+        using var legacy = await PostAsync(client, VerifyRoute, new
+        {
+            verifierDid, nonce, form = legacyUnbound, revocationSnapshot = status,
+            expectedCredentialType = TypeIri, subjectContextUri = Context.AbsoluteUri
+        }, token).ConfigureAwait(true);
         var legacyBody = await legacy.Content.ReadFromJsonAsync<JsonElement>(
             cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
         Assert.Equal("SignedNotListed", legacyBody.GetProperty("status").GetString());
