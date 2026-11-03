@@ -71,6 +71,7 @@ public sealed class JwtVcJsonOpenId4VpHttpIntegrationTests(DatabaseFixture fixtu
             cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
         string original = payload.GetProperty("signedRequestJwt").GetString()!;
         string nonce = payload.GetProperty("nonce").GetString()!;
+        Assert.True(HostedPresentationChallengeNonce.IsHosted(nonce));
         using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
             new { id = holderDid, role = "private-member" }));
         DateTimeOffset now = TimeProvider.System.GetUtcNow();
@@ -161,6 +162,7 @@ public sealed class JwtVcJsonOpenId4VpHttpIntegrationTests(DatabaseFixture fixtu
             cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
         string original = payload.GetProperty("signedRequestJwt").GetString()!;
         string nonce = payload.GetProperty("nonce").GetString()!;
+        Assert.True(HostedPresentationChallengeNonce.IsHosted(nonce));
         using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
             new { id = holderDid, role = "private-member" }));
         DateTimeOffset now = TimeProvider.System.GetUtcNow();

@@ -25,7 +25,7 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
         var tenant = Guid.NewGuid();
         string audience = "decentralized_identifier:" + _verifier.Did;
         var store = new InMemoryPresentationChallengeStore(_clock);
-        var challenge = store.Issue(tenant, audience, _issuer.Did);
+        var challenge = store.IssueHosted(tenant, audience, _issuer.Did);
         string signedRequest = SignedRequest(challenge);
         string invocation = ByReferenceLaunch(signedRequest);
         Assert.DoesNotContain(signedRequest, invocation, StringComparison.Ordinal);
@@ -68,7 +68,7 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
     public async Task NoFetchFromUntrustedOrAlteredLaunchAndForgedPayloadNeverPasses()
     {
         string signed = SignedRequest(new InMemoryPresentationChallengeStore(_clock)
-            .Issue(Guid.NewGuid(), "decentralized_identifier:" + _verifier.Did, _issuer.Did));
+            .IssueHosted(Guid.NewGuid(), "decentralized_identifier:" + _verifier.Did, _issuer.Did));
         string launch = ByReferenceLaunch(signed);
         using var handler = new ProbeHandler(_ => JwtResponse(signed));
         using var http = new HttpClient(handler);
@@ -95,7 +95,7 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
     public async Task RejectsWrongContentTypeRedirectOversizedBodyAndExpiredRequest()
     {
         string signed = SignedRequest(new InMemoryPresentationChallengeStore(_clock)
-            .Issue(Guid.NewGuid(), "decentralized_identifier:" + _verifier.Did, _issuer.Did));
+            .IssueHosted(Guid.NewGuid(), "decentralized_identifier:" + _verifier.Did, _issuer.Did));
         string launch = ByReferenceLaunch(signed);
         using (var handler = new ProbeHandler(_ =>
             new HttpResponseMessage(HttpStatusCode.OK)
@@ -131,7 +131,7 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
     public async Task BoundedDeadlineStopsAStalledBodyWithNoCallerCancellation()
     {
         string signed = SignedRequest(new InMemoryPresentationChallengeStore(_clock)
-            .Issue(Guid.NewGuid(), "decentralized_identifier:" + _verifier.Did, _issuer.Did));
+            .IssueHosted(Guid.NewGuid(), "decentralized_identifier:" + _verifier.Did, _issuer.Did));
         string launch = ByReferenceLaunch(signed);
         using var handler = new ProbeHandler(_ =>
         {
@@ -149,6 +149,24 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
             launch, RequestUri, http, _verifier.Did, Callback, Type, Context,
             _clock, maximumDuration: TimeSpan.FromMilliseconds(75)));
         Assert.Equal(1, handler.Calls);
+    }
+
+    [Fact]
+    public async Task OrdinaryByValueNonceCannotBeLaunchedOrFetchedAsHostedRequest()
+    {
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var ordinary = store.Issue(Guid.NewGuid(),
+            "decentralized_identifier:" + _verifier.Did, _issuer.Did);
+        string signed = SignedRequest(ordinary);
+        Assert.False(HostedPresentationChallengeNonce.IsHosted(ordinary.Nonce));
+        Assert.Throws<ArgumentException>(() => ByReferenceLaunch(signed));
+
+        string forgedLaunch = "openid4vp://?client_id=" +
+            Uri.EscapeDataString("decentralized_identifier:" + _verifier.Did) +
+            "&request_uri=" + Uri.EscapeDataString(RequestUri.OriginalString);
+        using var handler = new ProbeHandler(_ => JwtResponse(signed));
+        using var http = new HttpClient(handler);
+        Assert.Null(await Resolve(forgedLaunch, RequestUri, http));
     }
 
     private string SignedRequest(PresentationChallenge challenge) =>

@@ -1,6 +1,4 @@
 using System.Data;
-using System.Security.Cryptography;
-using HeroSSID.Credentials.Utilities;
 using Npgsql;
 
 namespace HeroSSID.Credentials.VerifiablePresentations;
@@ -11,7 +9,7 @@ namespace HeroSSID.Credentials.VerifiablePresentations;
 /// Operations are synchronous. All replicas must use the same capacity settings and synchronized clocks.
 /// Consumed rows count towards capacity until expiry; database unavailability fails closed.
 /// </remarks>
-public sealed class PostgresPresentationChallengeStore : IPresentationChallengeStore
+public sealed class PostgresPresentationChallengeStore : IHostedPresentationChallengeStore
 {
     private readonly NpgsqlDataSource _dataSource;
     private readonly TimeProvider _timeProvider;
@@ -31,7 +29,14 @@ public sealed class PostgresPresentationChallengeStore : IPresentationChallengeS
     }
 
     /// <inheritdoc />
-    public PresentationChallenge Issue(Guid verifierTenantId, string audience, string trustedIssuerDid, TimeSpan? lifetime = null)
+    public PresentationChallenge Issue(Guid verifierTenantId, string audience, string trustedIssuerDid, TimeSpan? lifetime = null) =>
+        IssueCore(verifierTenantId, audience, trustedIssuerDid, lifetime, hosted: false);
+
+    /// <inheritdoc />
+    public PresentationChallenge IssueHosted(Guid verifierTenantId, string audience, string trustedIssuerDid, TimeSpan? lifetime = null) =>
+        IssueCore(verifierTenantId, audience, trustedIssuerDid, lifetime, hosted: true);
+
+    private PresentationChallenge IssueCore(Guid verifierTenantId, string audience, string trustedIssuerDid, TimeSpan? lifetime, bool hosted)
     {
         var duration = PresentationChallengePolicy.Validate(verifierTenantId, audience, trustedIssuerDid, lifetime);
         using var connection = _dataSource.OpenConnection();
@@ -69,7 +74,7 @@ public sealed class PostgresPresentationChallengeStore : IPresentationChallengeS
         {
             // Cleanup can itself wait for a consuming transaction; do not spend that wait out of the new lifetime.
             var expiry = PresentationChallengePolicy.Expiry(_timeProvider.GetUtcNow(), duration);
-            var nonce = Base64UrlEncoder.Encode(RandomNumberGenerator.GetBytes(32));
+            var nonce = HostedPresentationChallengeNonce.CreateNonce(hosted);
             using var insert = new NpgsqlCommand(
                 """
                 INSERT INTO presentation_challenges

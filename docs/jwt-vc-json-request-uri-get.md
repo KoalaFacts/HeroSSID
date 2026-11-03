@@ -11,9 +11,13 @@ OpenID4VP interoperability or third-party Wallet conformance**.
 
 ## Verifier host contract
 
-1. Issue/retain an independent, tenant-bound, one-use challenge in the existing
-   shared `IPresentationChallengeStore`; create the **original** verifier
+1. Issue/retain an independent, tenant-bound, one-use **hosted-purpose nonce**
+   through `IHostedPresentationChallengeStore.IssueHosted` (implemented by the
+   in-memory and PostgreSQL challenge stores). This nonce carries a reserved,
+   versioned purpose marker with 192 random bits; ordinary `Issue` nonces
+   deliberately exclude that marker. Create the **original** verifier
    Ed25519-signed request using `OpenId4VpJwtVcJsonDirectPost.CreateSignedRequest`.
+   Do not reuse a by-value nonce for by-reference hosting.
 2. Host **those exact JWT bytes** at a public HTTPS `request_uri` (GET, HTTP
    200, `Content-Type: application/oauth-authz-req+jwt`, at most 16,384 bytes).
    For the manual-hosting path, the SDK does *not* create or operate the endpoint,
@@ -197,13 +201,18 @@ that live publication; a properly bound holder proof must use
 `verify-hosted-response`. An independent PostgreSQL/HTTP negative test
 reproduced the original claim disclosure before this guard.
 
-**This is not a durable profile marker.** After a restart or on another API
-replica without the volatile publication, the compatibility route cannot
-distinguish a formerly hosted challenge from an unpublished by-value one.
-Integrators must explicitly disallow legacy fallback for hosted flows at
-their routing/policy boundary. The strict route itself fails closed without
-the original request. It is not a multi-replica hosted verifier: the public
-GET and strict HTTP verifier must reach the **same process**. No public
+**Hosted nonce purpose is now encoded in the original durable challenge.**
+The built-in stores emit a reserved versioned marker for hosted challenges and
+exclude it from ordinary by-value challenges. Every upgraded verifier replica
+rejects marked nonces on the compatibility route even without the hosted-only
+configuration switch, including after losing the volatile original. The SDK
+also refuses to publish or fetch an unmarked by-value challenge as a hosted
+Request Object. Legacy already-issued unmarked references cannot be upgraded.
+Old binaries do not understand the marker and remain a downgrade risk in mixed
+fleets, so roll out all verifier replicas together and retain hosted-only
+enforcement as defence in depth. Strict verification still requires the
+**same process** retaining the original request: this does not make hosting
+distributed or durable. No public
 `direct_post` callback, informed user consent, selective disclosure,
 independent Wallet interoperability, full OpenID4VP conformance, identity
 vetting or business authorization is provided.
@@ -236,7 +245,8 @@ When enabled, the authenticated legacy
 `POST /api/v1/credentials/jwt-vc-json/openid4vp/verify-response`
 returns `{ "status": "Invalid", "verifiedSubject": null }` for *all*
 presentations, independently of any process-local publication and **before
-consuming** the shared challenge. The same server refuses
+consuming** the shared challenge. Even without the flag, upgraded replicas
+reject every hosted-purpose nonce before consuming the shared challenge. The same server refuses
 `publishRequestUri: false` issuance with HTTP 400 to prevent unusable by-value
 requests. Only the strict `verify-hosted-response` route can accept a
 holder's original-request-bound presentation after authenticating the

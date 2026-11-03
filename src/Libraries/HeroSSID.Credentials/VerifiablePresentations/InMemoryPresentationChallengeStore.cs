@@ -1,11 +1,9 @@
-using System.Security.Cryptography;
-using HeroSSID.Credentials.Utilities;
 
 namespace HeroSSID.Credentials.VerifiablePresentations;
 
 /// <summary>Bounded process-local challenge storage for the development presentation profile.</summary>
 /// <remarks>Register as a singleton. Restart invalidates requests. Multiple replicas require a shared atomic store.</remarks>
-public sealed class InMemoryPresentationChallengeStore : IPresentationChallengeStore
+public sealed class InMemoryPresentationChallengeStore : IHostedPresentationChallengeStore
 {
     private readonly object _gate = new();
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
@@ -26,7 +24,14 @@ public sealed class InMemoryPresentationChallengeStore : IPresentationChallengeS
     }
 
     /// <inheritdoc />
-    public PresentationChallenge Issue(Guid verifierTenantId, string audience, string trustedIssuerDid, TimeSpan? lifetime = null)
+    public PresentationChallenge Issue(Guid verifierTenantId, string audience, string trustedIssuerDid, TimeSpan? lifetime = null) =>
+        IssueCore(verifierTenantId, audience, trustedIssuerDid, lifetime, hosted: false);
+
+    /// <inheritdoc />
+    public PresentationChallenge IssueHosted(Guid verifierTenantId, string audience, string trustedIssuerDid, TimeSpan? lifetime = null) =>
+        IssueCore(verifierTenantId, audience, trustedIssuerDid, lifetime, hosted: true);
+
+    private PresentationChallenge IssueCore(Guid verifierTenantId, string audience, string trustedIssuerDid, TimeSpan? lifetime, bool hosted)
     {
         var duration = PresentationChallengePolicy.Validate(verifierTenantId, audience, trustedIssuerDid, lifetime);
         lock (_gate)
@@ -45,7 +50,7 @@ public sealed class InMemoryPresentationChallengeStore : IPresentationChallengeS
             string nonce;
             do
             {
-                nonce = Base64UrlEncoder.Encode(RandomNumberGenerator.GetBytes(32));
+                nonce = HostedPresentationChallengeNonce.CreateNonce(hosted);
             }
             while (_entries.ContainsKey(nonce));
 

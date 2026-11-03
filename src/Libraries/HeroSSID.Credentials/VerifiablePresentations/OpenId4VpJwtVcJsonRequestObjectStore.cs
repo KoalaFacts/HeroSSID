@@ -121,7 +121,8 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStore(
         if (tenantId == Guid.Empty ||
             !OpenId4VpJwtVcJsonDirectPost.TryReadSignedRequest(signedRequestJwt,
                 trustedVerifierDid, expectedResponseUri, expectedCredentialType,
-                expectedSubjectContextUri, clock, out var signed) || signed is null)
+                expectedSubjectContextUri, clock, out var signed) || signed is null ||
+            !HostedPresentationChallengeNonce.IsHosted(signed.Challenge.Nonce))
         {
             throw new ArgumentException(
                 "An authentic live tenant-owned verifier request is required.",

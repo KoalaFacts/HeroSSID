@@ -35,7 +35,8 @@ public static class OpenId4VpJwtVcJsonRequestUri
         if (!IsAllowedRequestUri(requestUri) ||
             !OpenId4VpJwtVcJsonDirectPost.TryReadSignedRequest(
                 requestJwt, expectedVerifierDid, expectedResponseUri,
-                expectedCredentialType, expectedSubjectContextUri, clock, out _))
+                expectedCredentialType, expectedSubjectContextUri, clock, out var signed) ||
+            signed is null || !HostedPresentationChallengeNonce.IsHosted(signed.Challenge.Nonce))
         {
             throw new ArgumentException(
                 "A signed, pinned verifier request and a bounded HTTPS request URI are required.",
@@ -146,7 +147,9 @@ public static class OpenId4VpJwtVcJsonRequestUri
             string jwt = Encoding.ASCII.GetString(bytes, 0, length);
             return OpenId4VpJwtVcJsonDirectPost.TryReadSignedRequest(
                 jwt, expectedVerifierDid, expectedResponseUri,
-                expectedCredentialType, expectedSubjectContextUri, clock, out _)
+                expectedCredentialType, expectedSubjectContextUri, clock, out var signed) &&
+                signed is not null &&
+                HostedPresentationChallengeNonce.IsHosted(signed.Challenge.Nonce)
                     ? jwt : null;
         }
         catch (HttpRequestException)

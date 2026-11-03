@@ -19,7 +19,7 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStoreTests
         var verifier = Identity();
         var issuer = Identity();
         string audience = "decentralized_identifier:" + verifier.Did;
-        var challenge = challenges.Issue(tenant, audience, issuer.Did, TimeSpan.FromMinutes(2));
+        var challenge = challenges.IssueHosted(tenant, audience, issuer.Did, TimeSpan.FromMinutes(2));
         string signed = SignedRequest(challenge, verifier, clock);
         string reference = host.Publish(tenant, signed, verifier.Did,
             Callback, CredentialType, Context);
@@ -69,7 +69,7 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStoreTests
         var verifier = Identity();
         var issuer = Identity();
         string audience = "decentralized_identifier:" + verifier.Did;
-        var challenge = challenges.Issue(tenant, audience, issuer.Did, TimeSpan.FromMinutes(2));
+        var challenge = challenges.IssueHosted(tenant, audience, issuer.Did, TimeSpan.FromMinutes(2));
         string signed = SignedRequest(challenge, verifier, clock);
         var host = new OpenId4VpJwtVcJsonRequestObjectStore(challenges, clock);
 
@@ -96,7 +96,7 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStoreTests
         var verifier = Identity();
         var issuer = Identity();
         var attacker = Identity();
-        var challenge = challenges.Issue(tenant,
+        var challenge = challenges.IssueHosted(tenant,
             "decentralized_identifier:" + verifier.Did, issuer.Did, TimeSpan.FromMinutes(2));
         string signed = SignedRequest(challenge, verifier, clock);
         var host = new OpenId4VpJwtVcJsonRequestObjectStore(challenges, clock);
@@ -156,8 +156,8 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStoreTests
         var issuer = Identity();
         string audience = "decentralized_identifier:" + verifier.Did;
         string otherAudience = "decentralized_identifier:" + otherVerifier.Did;
-        var cancelled = challenges.Issue(tenant, audience, issuer.Did, TimeSpan.FromMinutes(2));
-        var unaffected = challenges.Issue(tenant, otherAudience, issuer.Did, TimeSpan.FromMinutes(2));
+        var cancelled = challenges.IssueHosted(tenant, audience, issuer.Did, TimeSpan.FromMinutes(2));
+        var unaffected = challenges.IssueHosted(tenant, otherAudience, issuer.Did, TimeSpan.FromMinutes(2));
         string cancelledReference = host.Publish(tenant,
             SignedRequest(cancelled, verifier, clock), verifier.Did, Callback, CredentialType, Context);
         string unaffectedReference = host.Publish(tenant,
@@ -183,6 +183,38 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStoreTests
             {
                 host.ReleaseReservation(reservation);
             }
+        }
+    }
+
+    [Fact]
+    public void PurposeTaggedRequestCanBeHostedButOrdinaryNonceCannot()
+    {
+        var clock = new Clock();
+        var challenges = new InMemoryPresentationChallengeStore(clock);
+        var host = new OpenId4VpJwtVcJsonRequestObjectStore(challenges, clock);
+        Guid tenant = Guid.NewGuid();
+        var verifier = Identity();
+        var issuer = Identity();
+        string audience = "decentralized_identifier:" + verifier.Did;
+        var ordinary = challenges.Issue(tenant, audience, issuer.Did);
+        Assert.False(HostedPresentationChallengeNonce.IsHosted(ordinary.Nonce));
+        Assert.Throws<ArgumentException>(() => host.Publish(tenant,
+            SignedRequest(ordinary, verifier, clock), verifier.Did,
+            Callback, CredentialType, Context));
+
+        var hosted = challenges.IssueHosted(tenant, audience, issuer.Did);
+        Assert.True(HostedPresentationChallengeNonce.IsHosted(hosted.Nonce));
+        string reference = host.Publish(tenant, SignedRequest(hosted, verifier, clock),
+            verifier.Did, Callback, CredentialType, Context);
+        Assert.True(host.TryGet(reference, out _));
+        Assert.NotEqual(ordinary.Nonce, hosted.Nonce);
+
+        // Purpose separation is enforced by issuance, not a caller-supplied
+        // HTTP flag. Ordinary issuance never produces a hosted marker.
+        for (int i = 0; i < 64; i++)
+        {
+            var next = challenges.Issue(tenant, audience, issuer.Did);
+            Assert.False(HostedPresentationChallengeNonce.IsHosted(next.Nonce));
         }
     }
 
