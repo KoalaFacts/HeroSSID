@@ -53,6 +53,25 @@ public static class JwtVcJsonDirectPostRevocation
         return status;
     }
 
+
+    /// <summary>
+    /// Strict opt-in: authentic holder-signed original verifier Request Object
+    /// AND the actual issuer's fresh private revocation snapshot are required.
+    /// No claims may escape on a failed policy, signature or status check.
+    /// </summary>
+    public static RevocationSnapshotCheckResult CheckHolderBoundResponseForm(
+        string form, string snapshotJwt, string signedRequestJwt,
+        string verifierRetainedRequestSha256, string trustedVerifierDid,
+        Uri expectedResponseUri, Guid verifierTenantId, string expectedClientId,
+        string expectedNonce, string expectedCredentialType, Uri expectedSubjectContextUri,
+        IPresentationChallengeStore challenges, TimeProvider clock,
+        out JsonElement verifiedSubject)
+    {
+        // Test-first runtime red: no valid response can pass until the bound
+        // request and the issuer status are actually checked.
+        throw new NotSupportedException("Holder-bound direct_post status verification is not implemented.");
+    }
+
     private static bool TryGetCredential(string form, out string credential)
     {
         credential = string.Empty;
