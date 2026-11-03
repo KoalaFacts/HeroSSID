@@ -212,3 +212,50 @@ The real PostgreSQL/HTTP integration suite exercises both success and replay,
 unbound holder proof rejection before spending a challenge, changed policy
 and explicit no-downgrade for an unpublished by-value request. SDK unit tests
 also reject cross-tenant and ambiguous original-request references.
+
+## Operator-enforced hosted-only verifier (opt-in, no new schema)
+
+A published `request_uri` is a **process-local** object, while the one-use
+challenge is shared through PostgreSQL. Without an operator-enforced policy, a
+second API replica (or a restarted process) that has lost the hosted original
+can still accept an authentic but **unbound** response on the legacy
+`verify-response` route. The original instance's local downgrade check does
+not protect another instance. This was reproduced with two independent HTTP
+test hosts, a shared real PostgreSQL challenge and three genuine Ed25519
+signers: the legacy route returned `SignedNotListed` and disclosed claims.
+
+For deployments that require hosted Request Object binding, set the following
+**server-owned configuration on every verifier replica**, before admitting
+hosted traffic:
+
+```text
+OpenId4Vp__RequireHostedResponseBinding=true
+```
+
+When enabled, the authenticated legacy
+`POST /api/v1/credentials/jwt-vc-json/openid4vp/verify-response`
+returns `{ "status": "Invalid", "verifiedSubject": null }` for *all*
+presentations, independently of any process-local publication and **before
+consuming** the shared challenge. The same server refuses
+`publishRequestUri: false` issuance with HTTP 400 to prevent unusable by-value
+requests. Only the strict `verify-hosted-response` route can accept a
+holder's original-request-bound presentation after authenticating the
+server-retained signed JWT, pinned verifier, issuer, policy, signed status,
+holder key and one-use nonce. A missing original (including a restarted
+instance or a different replica) remains `Invalid`.
+
+The setting defaults to `false` for existing by-value integrations. **All
+replicas receiving verifier traffic must be configured consistently**:
+even one legacy-enabled instance remains a downgrade path when it shares
+the challenge database. Enable this as a deliberate verifier deployment
+boundary, and drain or cancel outstanding by-value requests before rollout;
+do not silently switch existing callback integrations. The independent
+public GET and strict verification of a particular request must still route
+to the original publishing process. This mode prevents legacy downgrade;
+it **does not make Request Objects distributed/durable**, nor prove user
+consent, issuer status completeness, actual identity, business authority,
+third-party Wallet interoperability or full OpenID4VP conformance.
+
+The integration regression for the hosted-only mode is
+`HostedOnlyVerifierReplicaRejectsLegacyFallbackWithoutLocalRequestObject`
+in `JwtVcJsonOpenId4VpHttpIntegrationTests`, requiring isolated PostgreSQL.
