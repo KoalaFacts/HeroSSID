@@ -20,6 +20,9 @@ public static class JwtVcJsonDirectPostRevocation
         Uri expectedSubjectContextUri, IPresentationChallengeStore challenges,
         TimeProvider clock, out JsonElement verifiedSubject)
     {
+        // Keep the status-gated parser's null contract explicit even when the
+        // underlying direct_post verifier delegates to a private strict core.
+        ArgumentNullException.ThrowIfNull(form);
         ArgumentNullException.ThrowIfNull(challenges);
         ArgumentNullException.ThrowIfNull(clock);
         verifiedSubject = default;
