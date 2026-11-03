@@ -74,9 +74,16 @@ signatures, issuer/type/callback/context mismatches and expired challenges.
 It returns the **unchanged original compact JWT**, so existing holder
 signatures and verifier-owned request-hash pins are preserved.
 
-**Security deployment boundary:** A caller-provided HttpClient may have an
-automatic-redirect handler, cookies, default credentials, proxies or other
-ambient configuration. The adapter verifies the final response URI but
+**Security deployment boundary:** This SDK now rejects an `HttpClient`
+with **any nonempty `DefaultRequestHeaders` before sending the public GET**.
+A shared application client might otherwise forward bearer tokens, cookies,
+private API keys or custom session headers to the verifier before signature
+verification. Use a dedicated client with empty default headers. A test-only
+commit reproduced real credential-bearing GET acceptance before this guard.
+
+This check does **not** make an arbitrary supplied handler safe: a caller-provided
+HttpClient may still have an automatic-redirect handler, a cookie container,
+handler-injected credentials, proxies or other ambient configuration. The adapter verifies the final response URI but
 cannot prevent an earlier automatically followed redirect. Pass a dedicated
 `HttpClientHandler` with `AllowAutoRedirect=false` and no credentials, and
 independently restrict the host to an approved verifier before triggering a
