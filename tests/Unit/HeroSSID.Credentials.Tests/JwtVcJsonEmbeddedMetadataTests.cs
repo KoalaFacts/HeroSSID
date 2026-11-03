@@ -88,6 +88,40 @@ public sealed class JwtVcJsonEmbeddedMetadataTests
     }
 
     [Fact]
+    public void IndependentIssuerFractionalNumericDatesAreVerifiedAndRevocable()
+    {
+        // RFC 7519 NumericDate explicitly permits non-integer seconds.
+        // Preserve sub-second validity and the original signed JWT in status.
+        string jwt = SignExternal(variant: "fractional-valid");
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out var subject, out var identifier));
+        Assert.Equal("active", subject.GetProperty("membership").GetString());
+        Assert.Equal(CredentialId, identifier);
+
+        string revoked = JwtVcJsonRevocationSnapshot.Create(_issuer.Did, [jwt],
+            _issuer.Seed, Now, new FixedClock(Now));
+        Assert.Equal(RevocationSnapshotCheckResult.Revoked,
+            JwtVcJsonRevocationSnapshot.Check(revoked, jwt, _issuer.Did, Now));
+    }
+
+    [Theory]
+    [InlineData("fractional-embedded-mismatch")]
+    [InlineData("fractional-subtick")]
+    [InlineData("fractional-iat-invalid")]
+    [InlineData("fractional-expired")]
+    public void NonEquivalentOrUnrepresentableFractionalDatesFailClosed(string variant)
+    {
+        string jwt = SignExternal(variant: variant);
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out var subject, out var identifier));
+        Assert.Equal(JsonValueKind.Undefined, subject.ValueKind);
+        Assert.Null(identifier);
+        Assert.Throws<CryptographicException>(() =>
+            JwtVcJsonRevocationSnapshot.Create(_issuer.Did, [jwt],
+                _issuer.Seed, Now, new FixedClock(Now)));
+    }
+
+    [Fact]
     public void TamperedEmbeddedMetadataCannotBeRevalidatedByOriginalSignature()
     {
         string jwt = SignExternal();
@@ -128,6 +162,40 @@ public sealed class JwtVcJsonEmbeddedMetadataTests
         };
         switch (variant)
         {
+            case "fractional-valid":
+            case "fractional-embedded-mismatch":
+            case "fractional-subtick":
+            case "fractional-iat-invalid":
+            case "fractional-expired":
+                payload["nbf"] = notBefore + 0.25m;
+                payload["exp"] = expires + 0.5m;
+                payload["iat"] = notBefore - 1.125m;
+                vc["issuanceDate"] = DateTimeOffset.FromUnixTimeSeconds(notBefore)
+                    .ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture) + ".250Z";
+                vc["expirationDate"] = DateTimeOffset.FromUnixTimeSeconds(expires)
+                    .ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture) + ".500Z";
+                if (variant == "fractional-embedded-mismatch")
+                {
+                    vc["issuanceDate"] = DateTimeOffset.FromUnixTimeSeconds(notBefore)
+                        .ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
+                }
+                else if (variant == "fractional-subtick")
+                {
+                    payload["nbf"] = notBefore + 0.00000001m;
+                    vc["issuanceDate"] = DateTimeOffset.FromUnixTimeSeconds(notBefore)
+                        .ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture) + ".00000001Z";
+                }
+                else if (variant == "fractional-iat-invalid")
+                {
+                    payload["iat"] = notBefore - 901m;
+                }
+                else if (variant == "fractional-expired")
+                {
+                    payload["exp"] = Now.AddSeconds(-1).ToUnixTimeSeconds() + 0.5m;
+                    vc["expirationDate"] = Now.AddSeconds(-1)
+                        .ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture) + ".500Z";
+                }
+                break;
             case "wrong-issuer":
                 vc["issuer"] = _stranger.Did;
                 break;
