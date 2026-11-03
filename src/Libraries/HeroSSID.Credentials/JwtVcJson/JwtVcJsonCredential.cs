@@ -30,7 +30,7 @@ public static class JwtVcJsonCredential
     /// </summary>
     public static string Create(string issuerDid, string holderDid, string credentialType,
         Uri subjectContextUri, JsonElement credentialSubject, byte[] issuerPrivateKey,
-        DateTimeOffset validFrom, DateTimeOffset validUntil, Uri credentialId) =>
+        DateTimeOffset validFrom, DateTimeOffset validUntil, Uri credentialId)
     {
         ArgumentNullException.ThrowIfNull(credentialId);
         return CreateCore(issuerDid, holderDid, credentialType, subjectContextUri,
