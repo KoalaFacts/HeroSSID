@@ -233,6 +233,58 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
 
 
     [Fact]
+    public async Task WalletMustNotPostUnboundOrTamperedProofEvenWhenStateMatches()
+    {
+        var challenge = new InMemoryPresentationChallengeStore(_clock).IssueHosted(
+            Guid.NewGuid(), "decentralized_identifier:" + _verifier.Did, _issuer.Did);
+        string requestJwt = SignedRequest(challenge);
+        using var subject = System.Text.Json.JsonDocument.Parse(
+            System.Text.Json.JsonSerializer.Serialize(new { id = _holder.Did, membership = "active" }));
+        string credential = JwtVcJsonCredential.Create(_issuer.Did, _holder.Did,
+            Type, Context, subject.RootElement, _issuer.Seed,
+            _clock.GetUtcNow().AddSeconds(-5), _clock.GetUtcNow().AddMinutes(5));
+        string unbound = OpenId4VpJwtVcJsonDirectPost.CreateHolderResponseForm(
+            requestJwt, _verifier.Did, Callback, Type, Context,
+            credential, _holder.Did, _holder.Seed, _clock);
+        string bound = HolderBoundForm(requestJwt);
+        string malformed = "vp_token=x" + bound["vp_token=".Length..];
+
+        using var handler = new ProbeHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("{}", Encoding.UTF8, "application/json")
+        });
+        using var http = new HttpClient(handler);
+        foreach (string form in new[] { unbound, malformed })
+        {
+            Assert.False(await OpenId4VpJwtVcJsonWalletResponseTransport.PostResponseFormAsync(
+                requestJwt, form, Callback, http, _verifier.Did, Type, Context, _clock));
+        }
+
+        Assert.Equal(0, handler.Calls);
+    }
+
+    [Fact]
+    public async Task WalletRejectsDifferentGenuinelySignedRequestForSameNonceBeforeDisclosure()
+    {
+        var challenge = new InMemoryPresentationChallengeStore(_clock).IssueHosted(
+            Guid.NewGuid(), "decentralized_identifier:" + _verifier.Did, _issuer.Did);
+        string originalRequest = SignedRequest(challenge);
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        string replacementRequest = SignedRequest(challenge);
+        Assert.NotEqual(originalRequest, replacementRequest);
+        string form = HolderBoundForm(replacementRequest);
+
+        using var handler = new ProbeHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("{}", Encoding.UTF8, "application/json")
+        });
+        using var http = new HttpClient(handler);
+        Assert.False(await OpenId4VpJwtVcJsonWalletResponseTransport.PostResponseFormAsync(
+            originalRequest, form, Callback, http, _verifier.Did, Type, Context, _clock));
+        Assert.Equal(0, handler.Calls);
+    }
+
+    [Fact]
     public async Task WalletPostsExactHolderSignedBodyOnlyToPinnedVerifierCallback()
     {
         var challenge = new InMemoryPresentationChallengeStore(_clock).IssueHosted(
