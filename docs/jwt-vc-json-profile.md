@@ -137,6 +137,31 @@ authorization from an absent nested property. The change remains a narrow
 VC1.1 encoding compatibility path, not evidence of independent third-party
 Wallet interoperability or full standards certification.
 
+### Independently issued singleton `credentialSubject` arrays
+
+[VC Data Model 1.1 §4.4](https://www.w3.org/TR/2021/REC-vc-data-model-20211109/#credential-subject)
+allows the `credentialSubject` member to be an object or an array. HeroSSID's
+**bounded normative VC1.1 JWT verifier** now accepts a **one-element array
+containing one object**, with or without a nested subject `id` according to
+the signed JWT `sub` mapping. The independently pinned issuer's genuine
+Ed25519 signature, holder DID, vocabulary, type and expiry remain mandatory.
+For the existing single-subject `TryVerify(..., out JsonElement verifiedSubject)`
+API, success returns the one **unchanged authenticated object**, not a new
+or re-signed credential. The original compact JWT remains untouched for
+issuer-signed revocation checks and a separate holder-signed presentation;
+the latter still requires an authenticated verifier request, meaningful consent
+in the integrating Wallet, and a one-use challenge.
+
+Zero or multiple subject entries, non-object entries, conflicting explicit
+IDs, nested `@context` shadowing, oversized original arrays and legacy
+`typ=vc+jwt` arrays are rejected. Issuer `Create` continues producing
+the original object form, rather than silently changing existing issuance.
+This is a **single-holder interoperability subset**, not general multi-subject
+VC support, third-party wallet testing, or a credential-status standard.
+The returning subject object is only an authenticated view of a member of
+the issuer's original signed JWT; callers cannot treat a holder DID as proof
+of real-world identity or business authority.
+
 The real xUnit `JwtVcJsonCredentialTests` constructs its own JSON JWT
 payload and compact JWS with NSec rather than calling the HeroSSID credential
 issuer or signing helper. It verifies the standard optional-field variants and

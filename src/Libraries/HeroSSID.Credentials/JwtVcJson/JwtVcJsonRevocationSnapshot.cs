@@ -282,9 +282,8 @@ public static class JwtVcJsonRevocationSnapshot
             vc.ValueKind != JsonValueKind.Object || vc.EnumerateObject().Count() != 3 ||
             !HasBaseArray(vc, "@context", BaseContext) ||
             !HasBaseArray(vc, "type", "VerifiableCredential") ||
-            !vc.TryGetProperty("credentialSubject", out var subject) ||
-            subject.ValueKind != JsonValueKind.Object ||
-            !HasBoundSubject(subject, holderDid, isNormativeJwt))
+            !vc.TryGetProperty("credentialSubject", out var encodedSubject) ||
+            !HasBoundOriginalSubject(encodedSubject, holderDid, isNormativeJwt))
         {
             return false;
         }
@@ -306,6 +305,34 @@ public static class JwtVcJsonRevocationSnapshot
         return isNormativeJwt ||
             StrictJwtReader.TryRead(jwt, LegacyCredentialJwtType, MaximumCredentialLength,
                 out payload, KeyId(issuerDid));
+    }
+
+    private static bool HasBoundOriginalSubject(JsonElement encodedSubject,
+        string holderDid, bool isNormativeJwt)
+    {
+        JsonElement subject;
+        if (encodedSubject.ValueKind == JsonValueKind.Object)
+        {
+            subject = encodedSubject;
+        }
+        else if (isNormativeJwt &&
+            encodedSubject.ValueKind == JsonValueKind.Array &&
+            encodedSubject.GetArrayLength() == 1 &&
+            encodedSubject[0].ValueKind == JsonValueKind.Object)
+        {
+            subject = encodedSubject[0];
+        }
+        else
+        {
+            return false;
+        }
+
+        // An issuer status export must authenticate the original JWT, with
+        // the same bounded single-subject and scoped-context rules as the
+        // corresponding credential verifier. No synthetic JWT is generated.
+        return HasBoundSubject(subject, holderDid, isNormativeJwt) &&
+            !StrictJwtReader.HasEmbeddedContext(encodedSubject) &&
+            Encoding.UTF8.GetByteCount(encodedSubject.GetRawText()) <= 16_384;
     }
 
     private static bool HasBoundSubject(JsonElement subject, string holderDid, bool isNormativeJwt)

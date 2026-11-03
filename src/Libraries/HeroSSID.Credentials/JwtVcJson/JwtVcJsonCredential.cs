@@ -186,11 +186,8 @@ public static class JwtVcJsonCredential
             vc.ValueKind != JsonValueKind.Object || vc.EnumerateObject().Count() != 3 ||
             !HasExactArray(vc, "@context", BaseContext, expectedSubjectContextUri.AbsoluteUri) ||
             !HasExactArray(vc, "type", BaseType, expectedCredentialType) ||
-            !vc.TryGetProperty("credentialSubject", out var subject) ||
-            subject.ValueKind != JsonValueKind.Object ||
-            !HasBoundSubject(subject, expectedHolderDid, isNormativeJwt) ||
-            StrictJwtReader.HasEmbeddedContext(subject) ||
-            Encoding.UTF8.GetByteCount(subject.GetRawText()) > MaximumSubjectBytes)
+            !vc.TryGetProperty("credentialSubject", out var encodedSubject) ||
+            !TryReadVerifiedSubject(encodedSubject, expectedHolderDid, isNormativeJwt, out var subject))
         {
             return false;
         }
@@ -218,6 +215,42 @@ public static class JwtVcJsonCredential
         return isNormativeJwt ||
             StrictJwtReader.TryRead(jwt, LegacyJwtType, MaximumJwtLength,
                 out payload, KeyId(issuerDid));
+    }
+
+    private static bool TryReadVerifiedSubject(JsonElement encodedSubject, string holderDid,
+        bool isNormativeJwt, out JsonElement subject)
+    {
+        subject = default;
+        if (encodedSubject.ValueKind == JsonValueKind.Object)
+        {
+            subject = encodedSubject;
+        }
+        else if (isNormativeJwt &&
+            encodedSubject.ValueKind == JsonValueKind.Array &&
+            encodedSubject.GetArrayLength() == 1 &&
+            encodedSubject[0].ValueKind == JsonValueKind.Object)
+        {
+            // VC1.1 allows array-form subjects. This deliberately supports
+            // exactly one, and returns that unchanged signed object, avoiding
+            // ambiguity for callers of the existing single-subject SDK.
+            subject = encodedSubject[0];
+        }
+        else
+        {
+            return false;
+        }
+
+        // Check the full original encoded subject, not only the selected view,
+        // so an array wrapper cannot evade size or scoped-context restrictions.
+        if (!HasBoundSubject(subject, holderDid, isNormativeJwt) ||
+            StrictJwtReader.HasEmbeddedContext(encodedSubject) ||
+            Encoding.UTF8.GetByteCount(encodedSubject.GetRawText()) > MaximumSubjectBytes)
+        {
+            subject = default;
+            return false;
+        }
+
+        return true;
     }
 
     private static bool HasBoundSubject(JsonElement subject, string holderDid, bool isNormativeJwt)
