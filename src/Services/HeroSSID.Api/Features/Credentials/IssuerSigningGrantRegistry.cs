@@ -12,7 +12,7 @@ namespace HeroSSID.Api.Features.Credentials;
 internal sealed class IssuerSigningGrantRegistry
 {
     private static readonly HashSet<string> AllowedGrantFields =
-        new(StringComparer.OrdinalIgnoreCase) { "TenantId", "ClientId", "IssuerDid" };
+        new(StringComparer.OrdinalIgnoreCase) { "TenantId", "ClientId", "IssuerDid", "CredentialTypes" };
 
     private readonly HashSet<Guid> _enforcedTenants = [];
     private readonly HashSet<(Guid Tenant, string ClientId, string IssuerDid)> _grants = [];
@@ -59,9 +59,11 @@ internal sealed class IssuerSigningGrantRegistry
             }
 
             IConfigurationSection[] fields = [.. entry.GetChildren()];
-            if (fields.Length != 3 || fields.Any(field =>
+            if (fields.Length is not (3 or 4) || fields.Any(field =>
                     !AllowedGrantFields.Contains(field.Key) ||
-                    field.Value is null || field.GetChildren().Any()))
+                    (string.Equals(field.Key, "CredentialTypes", StringComparison.OrdinalIgnoreCase)
+                        ? field.Value is not null
+                        : field.Value is null || field.GetChildren().Any())))
             {
                 throw new InvalidOperationException("Unknown or missing issuer grant field.");
             }
@@ -80,6 +82,12 @@ internal sealed class IssuerSigningGrantRegistry
             }
         }
     }
+
+    // Test-first compatibility seam: the new type restriction is deliberately
+    // not implemented here yet; runtime security regressions must prove it fails.
+    internal bool IsAllowed(Guid tenant, ClaimsPrincipal principal, string? issuerDid,
+        string? credentialType) =>
+        IsAllowed(tenant, principal, issuerDid) && credentialType is not null;
 
     internal bool IsAllowed(Guid tenant, ClaimsPrincipal principal, string? issuerDid)
     {
