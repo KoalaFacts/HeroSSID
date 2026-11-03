@@ -239,6 +239,95 @@ public sealed class JwtVcJsonDirectPostRevocationTests
         Assert.Equal(JsonValueKind.Undefined, replay.ValueKind);
     }
 
+    [Fact]
+    public void IncidentCutoffAcceptsAuthenticAtBoundaryAndRejectsReplay()
+    {
+        Guid tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did);
+        string original = Request(challenge);
+        string form = BoundForm(original, Issue("active"));
+        DateTimeOffset cutoff = _clock.GetUtcNow();
+        string status = Snapshot([]);
+
+        Assert.Equal(RevocationSnapshotCheckResult.NotListed,
+            CheckBoundWithCutoff(form, status, original, Pin(original),
+                tenant, challenge.Nonce, store, cutoff, out var accepted));
+        Assert.Equal("active", accepted.GetProperty("membership").GetString());
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            CheckBoundWithCutoff(form, status, original, Pin(original),
+                tenant, challenge.Nonce, store, cutoff, out var replay));
+        Assert.Equal(JsonValueKind.Undefined, replay.ValueKind);
+    }
+
+    [Fact]
+    public void AuthenticPreIncidentStatusIsDeniedAndSpendsBoundChallenge()
+    {
+        string beforeIncident = Snapshot([]);
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        DateTimeOffset cutoff = _clock.GetUtcNow();
+        Guid tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did);
+        string original = Request(challenge);
+        string form = BoundForm(original, Issue("active"));
+
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            CheckBoundWithCutoff(form, beforeIncident, original, Pin(original),
+                tenant, challenge.Nonce, store, cutoff, out var denied));
+        Assert.Equal(JsonValueKind.Undefined, denied.ValueKind);
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            CheckBoundWithCutoff(form, Snapshot([]), original, Pin(original),
+                tenant, challenge.Nonce, store, cutoff, out var replay));
+        Assert.Equal(JsonValueKind.Undefined, replay.ValueKind);
+    }
+
+    [Fact]
+    public void FutureCutoffIsInvalidWithoutSpendingHolderChallenge()
+    {
+        Guid tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did);
+        string original = Request(challenge);
+        string form = BoundForm(original, Issue("active"));
+        string status = Snapshot([]);
+        DateTimeOffset future = _clock.GetUtcNow().AddSeconds(1);
+
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            CheckBoundWithCutoff(form, status, original, Pin(original),
+                tenant, challenge.Nonce, store, future, out var invalid));
+        Assert.Equal(JsonValueKind.Undefined, invalid.ValueKind);
+        Assert.Equal(RevocationSnapshotCheckResult.NotListed,
+            CheckBoundWithCutoff(form, status, original, Pin(original),
+                tenant, challenge.Nonce, store, _clock.GetUtcNow(), out var accepted));
+        Assert.Equal(_holder.Did, accepted.GetProperty("id").GetString());
+    }
+
+    [Fact]
+    public void IncidentCutoffCannotReleaseAuthenticallyRevokedClaims()
+    {
+        Guid tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did);
+        string original = Request(challenge);
+        string credential = Issue("revoked");
+        string form = BoundForm(original, credential);
+        string status = Snapshot([credential]);
+
+        Assert.Equal(RevocationSnapshotCheckResult.Revoked,
+            CheckBoundWithCutoff(form, status, original, Pin(original),
+                tenant, challenge.Nonce, store, _clock.GetUtcNow(), out var denied));
+        Assert.Equal(JsonValueKind.Undefined, denied.ValueKind);
+    }
+
+    private RevocationSnapshotCheckResult CheckBoundWithCutoff(
+        string form, string status, string request, string pin, Guid tenant,
+        string nonce, IPresentationChallengeStore store, DateTimeOffset cutoff,
+        out JsonElement claims) =>
+        JwtVcJsonDirectPostRevocation.CheckHolderBoundResponseFormWithObservationCutoff(
+            form, status, request, pin, _verifier.Did, Callback, tenant,
+            Audience, nonce, CredentialType, Context, store, _clock, cutoff, out claims);
+
     private RevocationSnapshotCheckResult CheckBound(
         string form, string snapshot, string original, string pin,
         Guid tenant, string nonce, IPresentationChallengeStore store,
