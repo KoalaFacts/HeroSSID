@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using HeroSSID.Credentials.CredentialVerification;
@@ -295,8 +296,55 @@ public static class JwtVcJsonCredential
         }
 
         if (!claims.TryGetProperty(name, out var value) ||
-            value.ValueKind != JsonValueKind.Number ||
-            !value.TryGetDecimal(out seconds) ||
+            value.ValueKind != JsonValueKind.Number)
+        {
+            return false;
+        }
+
+        // JsonElement.TryGetDecimal may round a long JSON coefficient before
+        // we inspect it (e.g. ...00000000000000000001 becomes a whole second).
+        // Check the ORIGINAL signed numeric lexeme for nonzero sub-tick
+        // digits, including scientific notation, BEFORE decimal conversion.
+        string raw = value.GetRawText();
+        if (raw.Length is < 1 or > 80 || raw[0] == '-')
+        {
+            return false;
+        }
+
+        int exponentSeparator = raw.IndexOfAny('e', 'E');
+        string mantissa = exponentSeparator < 0 ? raw : raw[..exponentSeparator];
+        int exponent = 0;
+        if (exponentSeparator >= 0 &&
+            (!int.TryParse(raw.AsSpan(exponentSeparator + 1),
+                NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture,
+                out exponent) || exponent is < -1000 or > 1000))
+        {
+            return false;
+        }
+
+        int point = mantissa.IndexOf('.');
+        int decimalPosition = (point < 0 ? mantissa.Length : point) + exponent;
+        int digitIndex = 0;
+        foreach (char digit in mantissa)
+        {
+            if (digit == '.')
+            {
+                continue;
+            }
+
+            // Decimal position - digit index - 1 is this digit's power of 10.
+            // Any nonzero digit at 10^-8 or smaller is not exactly representable
+            // by a .NET DateTimeOffset; never round it into an accepted instant.
+            if (decimalPosition - digitIndex - 1 < -7 && digit != '0')
+            {
+                return false;
+            }
+
+            digitIndex++;
+        }
+
+        if (!decimal.TryParse(raw, NumberStyles.Float,
+                CultureInfo.InvariantCulture, out seconds) ||
             seconds < 0 || seconds >= 253402300800m)
         {
             return false;
