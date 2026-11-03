@@ -67,9 +67,48 @@ public static class JwtVcJsonDirectPostRevocation
         IPresentationChallengeStore challenges, TimeProvider clock,
         out JsonElement verifiedSubject)
     {
-        // Test-first runtime red: no valid response can pass until the bound
-        // request and the issuer status are actually checked.
-        throw new NotSupportedException("Holder-bound direct_post status verification is not implemented.");
+        ArgumentNullException.ThrowIfNull(form);
+        ArgumentNullException.ThrowIfNull(expectedResponseUri);
+        ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
+        ArgumentNullException.ThrowIfNull(challenges);
+        ArgumentNullException.ThrowIfNull(clock);
+        verifiedSubject = default;
+
+        // Reject absent or oversized status and invalid challenge lookups
+        // without spending a legitimate pending verifier challenge.
+        if (string.IsNullOrWhiteSpace(snapshotJwt) || snapshotJwt.Length > 65_536 ||
+            !PresentationChallengePolicy.IsValidLookup(
+                verifierTenantId, expectedClientId, expectedNonce))
+        {
+            return RevocationSnapshotCheckResult.Invalid;
+        }
+
+        // Only the verifier-owned challenge determines the trusted issuer for
+        // the subsequent status check. Neither the form nor JWT can change it.
+        var challenge = challenges.Find(verifierTenantId, expectedClientId, expectedNonce);
+        if (challenge is null ||
+            OpenId4VpJwtVcJsonDirectPost.CheckHolderBoundResponseForm(
+                form, signedRequestJwt, verifierRetainedRequestSha256,
+                trustedVerifierDid, expectedResponseUri, verifierTenantId,
+                expectedClientId, expectedNonce, expectedCredentialType,
+                expectedSubjectContextUri, challenges, clock, out var claims) !=
+            JwtVcJsonPresentationCheckResult.SignedButStatusUnchecked ||
+            !TryGetCredential(form, out var credential))
+        {
+            return RevocationSnapshotCheckResult.Invalid;
+        }
+
+        // The strict bound proof has already atomically consumed the nonce.
+        // Never expose its claims unless the REAL issuer's short-lived status
+        // authenticates the exact original credential inside that proof.
+        var status = JwtVcJsonRevocationSnapshot.Check(
+            snapshotJwt, credential, challenge.TrustedIssuerDid, clock.GetUtcNow());
+        if (status == RevocationSnapshotCheckResult.NotListed)
+        {
+            verifiedSubject = claims;
+        }
+
+        return status;
     }
 
     private static bool TryGetCredential(string form, out string credential)
