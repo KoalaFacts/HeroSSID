@@ -50,6 +50,16 @@ public sealed class JwtVcJsonOpenId4VpHttpIntegrationTests(DatabaseFixture fixtu
         string issuerDid = DidFromKey(issuerKey);
         string holderDid = DidFromKey(holderKey);
 
+        // A hosted-only verifier must not return a by-value request that its
+        // own verification policy is deliberately unable to accept.
+        using var blockedIssuance = await PostAsync(verifier, IssueRoute, new
+        {
+            verifierDid, responseUri = ResponseUri, trustedIssuerDid = issuerDid,
+            credentialType = TypeIri, subjectContextUri = Context.AbsoluteUri,
+            lifetimeSeconds = 120, publishRequestUri = false
+        }, replicaToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, blockedIssuance.StatusCode);
+
         using var issued = await PostAsync(publisher, IssueRoute, new
         {
             verifierDid, responseUri = ResponseUri, trustedIssuerDid = issuerDid,
@@ -92,6 +102,18 @@ public sealed class JwtVcJsonOpenId4VpHttpIntegrationTests(DatabaseFixture fixtu
             cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
         Assert.Equal("Invalid", deniedBody.GetProperty("status").GetString());
         Assert.Equal(JsonValueKind.Null, deniedBody.GetProperty("verifiedSubject").ValueKind);
+
+        // Strict verification on an unpinned replica must fail closed too,
+        // without relying on a legacy fallback or consuming PostgreSQL state.
+        using var noOriginal = await PostAsync(verifier, HostedVerifyRoute, new
+        {
+            verifierDid, nonce, form = bound, revocationSnapshot = status,
+            expectedCredentialType = TypeIri, subjectContextUri = Context.AbsoluteUri
+        }, replicaToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, noOriginal.StatusCode);
+        var missingOriginalBody = await noOriginal.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal("Invalid", missingOriginalBody.GetProperty("status").GetString());
 
         // The denied downgrade did not spend the shared challenge: only the
         // publishing instance can authenticate the bound original request.
