@@ -389,7 +389,7 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
     {
         // Exercise .NET's actual SocketsHttpHandler diagnostics pipeline, not a
         // fake HttpMessageHandler that would miss injected trace/baggage headers.
-        using var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         int port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -410,6 +410,7 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
         Assert.DoesNotContain("tracestate:", received, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("baggage:", received, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("private-account-identifier", received, StringComparison.Ordinal);
+        listener.Stop();
     }
 
     private static async Task<string> ReadHeadersAndReplyAsync(
@@ -431,10 +432,10 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
         }
 
         byte[] response = Encoding.ASCII.GetBytes(
-            "HTTP/1.1 200 OK\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n");
+            "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
         await stream.WriteAsync(response, cancellationToken);
         await stream.FlushAsync(cancellationToken);
-        return string.Join("\\n", headers);
+        return string.Join("\n", headers);
     }
 
     private string HolderBoundForm(string requestJwt)
