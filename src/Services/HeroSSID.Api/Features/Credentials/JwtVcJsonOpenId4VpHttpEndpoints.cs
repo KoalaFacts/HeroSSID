@@ -130,6 +130,13 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
             return Unavailable();
         }
 
+        if (requestUriBase is not null && challenges is not IHostedPresentationChallengeStore)
+        {
+            // Custom stores must implement purpose-separated issuance explicitly.
+            // Never silently fall back to an unmarked replayable legacy nonce.
+            return Unavailable();
+        }
+
         Guid tenantId = tenantContext.GetCurrentTenantId();
         if (tenantId == Guid.Empty)
         {
@@ -162,8 +169,11 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
             }
 
             string clientId = "decentralized_identifier:" + request.VerifierDid;
-            var challenge = challenges.Issue(tenantId, clientId,
-                request.TrustedIssuerDid!, TimeSpan.FromSeconds(request.LifetimeSeconds));
+            TimeSpan lifetime = TimeSpan.FromSeconds(request.LifetimeSeconds);
+            var challenge = requestUriBase is null
+                ? challenges.Issue(tenantId, clientId, request.TrustedIssuerDid!, lifetime)
+                : ((IHostedPresentationChallengeStore)challenges).IssueHosted(
+                    tenantId, clientId, request.TrustedIssuerDid!, lifetime);
             string signed = OpenId4VpJwtVcJsonDirectPost.CreateSignedRequest(
                 challenge, request.VerifierDid!, verifierSeed, request.ResponseUri!,
                 request.CredentialType!, request.SubjectContextUri!, clock);
@@ -395,8 +405,12 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
             // request_uri. Never expose issuer/subject claims or consume ANY
             // challenge through the unbound compatibility endpoint. All
             // verifier replicas must enable this setting consistently.
-            if (!requireHostedBinding && denyLegacy)
+            if (!requireHostedBinding &&
+                (denyLegacy || HostedPresentationChallengeNonce.IsHosted(request.Nonce)))
             {
+                // Purpose-tagged hosted nonces must never be consumed through
+                // the unbound legacy verifier, even on another default-config
+                // replica that has no process-local original Request Object.
                 return Results.Ok(new VerifyOpenId4VpDirectPostResponse("Invalid", null));
             }
 
