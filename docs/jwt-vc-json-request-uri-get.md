@@ -16,7 +16,8 @@ OpenID4VP interoperability or third-party Wallet conformance**.
    Ed25519-signed request using `OpenId4VpJwtVcJsonDirectPost.CreateSignedRequest`.
 2. Host **those exact JWT bytes** at a public HTTPS `request_uri` (GET, HTTP
    200, `Content-Type: application/oauth-authz-req+jwt`, at most 16,384 bytes).
-   The library does *not* create or operate this endpoint, its storage or TLS.
+   For the manual-hosting path, the SDK does *not* create or operate the endpoint,
+   its storage or TLS; the optional single-process API host below is separate.
 3. Call `OpenId4VpJwtVcJsonRequestUri.CreateWalletInvocation` with the signed
    JWT, actual endpoint, trusted verifier DID, pinned response URI and type and
    context to obtain the compact `openid4vp://?client_id=...&request_uri=...`
@@ -93,9 +94,10 @@ denial. Negative tests cover wrong URI or launch parameters, forged request,
 redirects, HTML response, excessive response size, a body that never finishes
 and an expired request.
 
-No hosted Request URI endpoint, independently tested external Wallet,
-selective disclosure, consent UI, live revocation, legal identity vetting,
-business authorization or standard third-party holder-binding proof is supplied.
+The manual-hosting SDK adapter does not itself provide an HTTP endpoint.
+For the opt-in volatile host see below. Neither path demonstrates independent
+Wallet interoperability, selective disclosure, actual consent, live revocation,
+legal identity vetting, business authority or standard third-party holder binding.
 
 ## Optional SDK/API-hosted GET for a single process
 
