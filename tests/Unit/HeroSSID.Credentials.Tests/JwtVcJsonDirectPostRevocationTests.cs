@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using HeroSSID.Credentials.CredentialRevocation;
 using HeroSSID.Credentials.JwtVcJson;
@@ -111,6 +113,152 @@ public sealed class JwtVcJsonDirectPostRevocationTests
             Check(form, snapshot, tenant, challenge.Nonce, store, out var accepted));
         Assert.Equal(_holder.Did, accepted.GetProperty("id").GetString());
     }
+
+
+    [Fact]
+    public void BoundHolderWithFreshSignedIssuerStatusReleasesClaimsOnce()
+    {
+        Guid tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did);
+        string original = Request(challenge);
+        string credential = Issue("active");
+        string form = BoundForm(original, credential);
+        string pin = Pin(original);
+        string snapshot = Snapshot([]);
+
+        Assert.Equal(RevocationSnapshotCheckResult.NotListed,
+            CheckBound(form, snapshot, original, pin, tenant, challenge.Nonce, store,
+                out var claims));
+        Assert.Equal(_holder.Did, claims.GetProperty("id").GetString());
+        Assert.Equal("active", claims.GetProperty("membership").GetString());
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            CheckBound(form, snapshot, original, pin, tenant, challenge.Nonce, store,
+                out var replay));
+        Assert.Equal(JsonValueKind.Undefined, replay.ValueKind);
+    }
+
+    [Fact]
+    public void BoundStatusRejectsLegacyAndSignedSameNonceReplacementWithoutSpending()
+    {
+        Guid tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did);
+        string original = Request(challenge);
+        string pin = Pin(original);
+        string credential = Issue("active");
+        string snapshot = Snapshot([]);
+        string legacy = OpenId4VpJwtVcJsonDirectPost.CreateHolderResponseForm(
+            original, _verifier.Did, Callback, CredentialType, Context,
+            credential, _holder.Did, _holder.Seed, _clock);
+        string bound = BoundForm(original, credential);
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            CheckBound(legacy, snapshot, original, pin, tenant, challenge.Nonce, store,
+                out var legacyClaims));
+        Assert.Equal(JsonValueKind.Undefined, legacyClaims.ValueKind);
+
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        string replacement = Request(challenge);
+        Assert.NotEqual(original, replacement);
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            CheckBound(bound, snapshot, replacement, pin, tenant, challenge.Nonce, store,
+                out var replacedClaims));
+        Assert.Equal(JsonValueKind.Undefined, replacedClaims.ValueKind);
+
+        Assert.Equal(RevocationSnapshotCheckResult.NotListed,
+            CheckBound(bound, snapshot, original, pin, tenant, challenge.Nonce, store,
+                out var accepted));
+        Assert.Equal("active", accepted.GetProperty("membership").GetString());
+    }
+
+    [Fact]
+    public void BoundRevokedCredentialSpendsNonceButNeverDisclosesClaims()
+    {
+        Guid tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did);
+        string original = Request(challenge);
+        string credential = Issue("revoked");
+        string form = BoundForm(original, credential);
+        string pin = Pin(original);
+        string snapshot = Snapshot([credential]);
+
+        Assert.Equal(RevocationSnapshotCheckResult.Revoked,
+            CheckBound(form, snapshot, original, pin, tenant, challenge.Nonce, store,
+                out var denied));
+        Assert.Equal(JsonValueKind.Undefined, denied.ValueKind);
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            CheckBound(form, snapshot, original, pin, tenant, challenge.Nonce, store,
+                out var replay));
+        Assert.Equal(JsonValueKind.Undefined, replay.ValueKind);
+    }
+
+    [Fact]
+    public void MissingStatusOrForeignTenantCannotConsumeBoundChallenge()
+    {
+        Guid tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did);
+        string original = Request(challenge);
+        string form = BoundForm(original, Issue("active"));
+        string pin = Pin(original);
+        string snapshot = Snapshot([]);
+
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            CheckBound(form, "", original, pin, tenant, challenge.Nonce, store,
+                out var missing));
+        Assert.Equal(JsonValueKind.Undefined, missing.ValueKind);
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            CheckBound(form, snapshot, original, pin, Guid.NewGuid(), challenge.Nonce,
+                store, out var foreign));
+        Assert.Equal(JsonValueKind.Undefined, foreign.ValueKind);
+        Assert.Equal(RevocationSnapshotCheckResult.NotListed,
+            CheckBound(form, snapshot, original, pin, tenant, challenge.Nonce, store,
+                out var accepted));
+        Assert.Equal(_holder.Did, accepted.GetProperty("id").GetString());
+    }
+
+    [Fact]
+    public void AuthenticBoundPresentationWithWrongIssuerStatusNeverReleasesClaims()
+    {
+        Guid tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did);
+        string original = Request(challenge);
+        string form = BoundForm(original, Issue("active"));
+        string foreignSnapshot = JwtVcJsonRevocationSnapshot.Create(
+            _foreign.Did, [], _foreign.Seed, _clock.GetUtcNow(), _clock);
+
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            CheckBound(form, foreignSnapshot, original, Pin(original), tenant,
+                challenge.Nonce, store, out var claims));
+        Assert.Equal(JsonValueKind.Undefined, claims.ValueKind);
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            CheckBound(form, Snapshot([]), original, Pin(original), tenant,
+                challenge.Nonce, store, out var replay));
+        Assert.Equal(JsonValueKind.Undefined, replay.ValueKind);
+    }
+
+    private RevocationSnapshotCheckResult CheckBound(
+        string form, string snapshot, string original, string pin,
+        Guid tenant, string nonce, IPresentationChallengeStore store,
+        out JsonElement claims) =>
+        JwtVcJsonDirectPostRevocation.CheckHolderBoundResponseForm(
+            form, snapshot, original, pin, _verifier.Did, Callback,
+            tenant, Audience, nonce, CredentialType, Context, store, _clock, out claims);
+
+    private string Request(PresentationChallenge challenge) =>
+        OpenId4VpJwtVcJsonDirectPost.CreateSignedRequest(
+            challenge, _verifier.Did, _verifier.Seed, Callback, CredentialType,
+            Context, _clock);
+
+    private string BoundForm(string request, string credential) =>
+        OpenId4VpJwtVcJsonDirectPost.CreateHolderBoundResponseForm(
+            request, _verifier.Did, Callback, CredentialType, Context,
+            credential, _holder.Did, _holder.Seed, _clock);
+
+    private static string Pin(string request) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(request)));
 
     private RevocationSnapshotCheckResult Check(string form, string snapshot, Guid tenant,
         string nonce, IPresentationChallengeStore store, out JsonElement claims) =>
