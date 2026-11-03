@@ -58,6 +58,30 @@ noncanonical Ed25519 JWS. Issuance by `Create` continues to produce the
 original six-field bounded representation without `jti`; existing tokens
 retain their verification result.
 
+### JWT `sub` as the single subject identifier
+
+W3C VC Data Model 1.1 Recommendation §6.3.1 maps
+`credentialSubject.id` to the **signed JWT `sub`** and permits the
+corresponding nested property to be omitted to avoid duplication. An
+independently issued, authentic `typ=JWT` VC1.1 credential may therefore
+omit `vc.credentialSubject.id`, provided the verifier **independently pins
+the expected holder DID**, the pinned issuer `did:key` genuinely signed the
+original JWT, and every existing type/context/expiry/claim check succeeds.
+The issuer's signed revocation snapshot checks the **original JWT** by its
+digest under the same signer; no synthetic credential or replacement
+signature is created.
+
+If the nested `id` exists, even as an empty, null or incompatible value, it
+**must exactly match** the issuer-signed `sub` and independently expected
+holder. Historical `typ=vc+jwt` tokens remain strict about requiring this
+nested field; this is not a legacy downgrade. The verified subject JSON
+continues to reflect the original signed `credentialSubject` without
+inserting a fabricated `id`. Applications know the separately pinned holder
+DID through their verification policy rather than inferring any identity or
+authorization from an absent nested property. The change remains a narrow
+VC1.1 encoding compatibility path, not evidence of independent third-party
+Wallet interoperability or full standards certification.
+
 The real xUnit `JwtVcJsonCredentialTests` constructs its own JSON JWT
 payload and compact JWS with NSec rather than calling the HeroSSID credential
 issuer or signing helper. It verifies the standard optional-field variants and
