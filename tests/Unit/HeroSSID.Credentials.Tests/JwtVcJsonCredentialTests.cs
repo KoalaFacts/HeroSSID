@@ -423,6 +423,31 @@ public sealed class JwtVcJsonCredentialTests
                 _issuer.Seed, Now, new FixedClock(Now)));
     }
 
+    [Fact]
+    public void LegacyVcJwtCannotOmitSubjectIdOrBypassPinnedHolder()
+    {
+        // The sub-only VC1.1 mapping is intentionally limited to typ=JWT.
+        string legacy = SignExternalJwt(null,
+            "https://issuer.example/credentials/legacy-sub-only", "vc+jwt",
+            omitSubjectId: true);
+        Assert.False(JwtVcJsonCredential.TryVerify(legacy, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out _));
+        Assert.Throws<CryptographicException>(() =>
+            JwtVcJsonRevocationSnapshot.Create(_issuer.Did, [legacy],
+                _issuer.Seed, Now, new FixedClock(Now)));
+
+        // Even a correctly signed normative JWT cannot hide a present
+        // but empty nested identifier behind its valid signed sub.
+        string emptyId = SignExternalJwt(null,
+            "https://issuer.example/credentials/empty-sub-id", "JWT",
+            subjectIdOverride: string.Empty);
+        Assert.False(JwtVcJsonCredential.TryVerify(emptyId, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out _));
+        Assert.Throws<CryptographicException>(() =>
+            JwtVcJsonRevocationSnapshot.Create(_issuer.Did, [emptyId],
+                _issuer.Seed, Now, new FixedClock(Now)));
+    }
+
     private string SignExternalJwt(long? signatureIssuedAt, string credentialId,
         string tokenType = "vc+jwt", bool includeKid = true, string? headerKidOverride = null,
         bool omitSubjectId = false, string? subjectIdOverride = null)
