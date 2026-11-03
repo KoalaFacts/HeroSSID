@@ -1,0 +1,82 @@
+name: Publish existing independent PR129 model review artifact
+on:
+  push:
+    branches:
+      - review/pr129-bound-status-publish-20261103
+
+permissions: {}
+
+jobs:
+  publish:
+    name: Publish original two-shard exact-head Qwen COMMENTED review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Download completed original inference artifact, never rerun model
+        uses: actions/download-artifact@v4
+        with:
+          name: independent-pr129-review
+          run-id: 41567545094
+          repository: KoalaFacts/HeroSSID
+          github-token: ${{ github.token }}
+      - name: Verify original raw inference, complete changed-file coverage and current exact PR head
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head="$(gh api repos/KoalaFacts/HeroSSID/pulls/129 --jq '.head.sha')"
+          test "$head" = "62b610cd0c149b8985dd63b45b42f89f25b947be"
+          gh api repos/KoalaFacts/HeroSSID/pulls/129/files --paginate --jq '.[].filename' | sort > /tmp/pr129-paths.txt
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          head = "62b610cd0c149b8985dd63b45b42f89f25b947be"
+          expected = {
+              "docs/jwt-vc-json-holder-bound-status.md",
+              "src/Libraries/HeroSSID.Credentials/JwtVcJson/JwtVcJsonDirectPostRevocation.cs",
+              "tests/Unit/HeroSSID.Credentials.Tests/JwtVcJsonDirectPostRevocationTests.cs",
+          }
+          assert set(Path("/tmp/pr129-paths.txt").read_text().splitlines()) == expected
+          all_files = []
+          for part in (1, 2):
+              data = json.loads(Path(f"review-{part}.json").read_text())
+              raw = json.loads(Path(f"review-model-{part}.json").read_text())
+              assert data["head"] == head and data["part"] == part
+              assert (data["review"]["verdict"] == raw["verdict"] or
+                      (raw["verdict"] == "no_actionable_findings" and
+                       data["review"]["verdict"] == "inconclusive" and
+                       bool(raw["findings"])))
+              assert raw["verdict"] in ("no_actionable_findings", "actionable_findings", "inconclusive")
+              assert len(Path(f"review-{part}.md").read_text()) > 150
+              assert Path(f"review-head-{part}.txt").read_text().strip() == head
+              all_files.extend(data["files"])
+          assert len(all_files) == len(expected) and set(all_files) == expected
+          PY
+      - name: Submit original authentic independent COMMENTED review
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo "Independent Qwen2.5-Coder 7B local model review of all three exact PR #129 patches."
+            echo
+            echo "Source HEAD: 62b610cd0c149b8985dd63b45b42f89f25b947be; base aeeb4b1b86d5159bc9f64b1e34ae8c171b31709f."
+            echo "Original inference artifact: https://github.com/KoalaFacts/HeroSSID/actions/runs/41567545094 ."
+            echo "Automated independent review, NOT human approval, third-party Wallet interoperability, standards certification, external cryptographic audit, human identity validation or business authorization."
+            echo "All raw model conclusions and findings remain unchanged and must be dispositioned individually."
+            echo
+            cat review-1.md
+            echo
+            cat review-2.md
+            echo
+          } >/tmp/pr129-review.md
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/129/reviews \
+            -f event=COMMENT -f commit_id=62b610cd0c149b8985dd63b45b42f89f25b947be \
+            -f body="$(cat /tmp/pr129-review.md)" \
+            --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
