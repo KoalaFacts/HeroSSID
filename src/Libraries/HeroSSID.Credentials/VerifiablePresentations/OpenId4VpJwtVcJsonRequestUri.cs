@@ -177,6 +177,51 @@ public static class OpenId4VpJwtVcJsonRequestUri
         }
     }
 
+    /// <summary>
+    /// Construct an isolated transport for public, unsigned-credential-free
+    /// Request Object GET. No cookies, ambient credentials, proxy or redirects.
+    /// The caller owns and disposes this handler and must not weaken its policy.
+    /// </summary>
+    public static HttpClientHandler CreateIsolatedTransportHandler() => new()
+    {
+        // An OpenID4VP public Request Object GET must never inherit application
+        // session cookies, bearer/proxy credentials, TLS client certificates,
+        // automatic redirects or proxy-defined credential injection.
+        AllowAutoRedirect = false,
+        UseCookies = false,
+        UseDefaultCredentials = false,
+        Credentials = null,
+        PreAuthenticate = false,
+        UseProxy = false,
+        ClientCertificateOptions = ClientCertificateOption.Manual,
+        CheckCertificateRevocationList = true,
+        AutomaticDecompression = DecompressionMethods.None
+    };
+
+    /// <summary>
+    /// Fetch with a new credential-free, cookie-free, proxy-free and
+    /// non-redirecting HTTP handler. Unlike the injected-client overload,
+    /// this safe default cannot inherit an application's ambient handler.
+    /// TLS server validation is not overridden. Hosts that require proxies
+    /// need an explicitly audited client passed to FetchVerifiedRequestAsync.
+    /// Does not grant trust to an unpinned verifier or obtain holder consent.
+    /// </summary>
+    public static async Task<string?> FetchVerifiedRequestWithIsolatedTransportAsync(
+        string invocation, Uri independentlyTrustedRequestUri,
+        string expectedVerifierDid, Uri expectedResponseUri,
+        string expectedCredentialType, Uri expectedSubjectContextUri,
+        TimeProvider clock, TimeSpan? maximumDuration = null,
+        CancellationToken cancellationToken = default)
+    {
+        using var handler = CreateIsolatedTransportHandler();
+        using var http = new HttpClient(handler);
+        return await FetchVerifiedRequestAsync(
+            invocation, independentlyTrustedRequestUri, http,
+            expectedVerifierDid, expectedResponseUri,
+            expectedCredentialType, expectedSubjectContextUri,
+            clock, maximumDuration, cancellationToken).ConfigureAwait(false);
+    }
+
     private static string ExpectedInvocation(Uri requestUri, string verifierDid) =>
         "openid4vp://?client_id=" +
         Uri.EscapeDataString("decentralized_identifier:" + verifierDid) +

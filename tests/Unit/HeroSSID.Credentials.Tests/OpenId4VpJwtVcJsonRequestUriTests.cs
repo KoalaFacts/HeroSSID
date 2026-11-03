@@ -155,6 +155,39 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
     }
 
     [Fact]
+    public void IsolatedRequestObjectHandlerCannotForwardCookiesAmbientCredentialsOrRedirects()
+    {
+        using var handler = OpenId4VpJwtVcJsonRequestUri.CreateIsolatedTransportHandler();
+        Assert.False(handler.AllowAutoRedirect);
+        Assert.False(handler.UseCookies);
+        Assert.False(handler.UseDefaultCredentials);
+        Assert.False(handler.PreAuthenticate);
+        Assert.Null(handler.Credentials);
+        Assert.False(handler.UseProxy);
+        Assert.Null(handler.DefaultProxyCredentials);
+        Assert.Equal(ClientCertificateOption.Manual, handler.ClientCertificateOptions);
+        Assert.Empty(handler.ClientCertificates);
+        Assert.True(handler.CheckCertificateRevocationList);
+        Assert.Equal(DecompressionMethods.None, handler.AutomaticDecompression);
+
+        using var http = new HttpClient(handler);
+        Assert.Empty(http.DefaultRequestHeaders);
+    }
+
+    [Fact]
+    public async Task IsolatedRequestObjectFetchStillRequiresExactTrustedSignedLaunch()
+    {
+        string signed = SignedRequest(new InMemoryPresentationChallengeStore(_clock)
+            .IssueHosted(Guid.NewGuid(), "decentralized_identifier:" + _verifier.Did, _issuer.Did));
+        string launch = ByReferenceLaunch(signed);
+        // URI mismatch must fail before opening any network connection, even
+        // when using the new self-managed credential-free transport.
+        Assert.Null(await OpenId4VpJwtVcJsonRequestUri.FetchVerifiedRequestWithIsolatedTransportAsync(
+            launch, new Uri("https://evil.example/oid4vp/requests/opaque"),
+            _verifier.Did, Callback, Type, Context, _clock));
+    }
+
+    [Fact]
     public async Task BoundedDeadlineStopsAStalledBodyWithNoCallerCancellation()
     {
         string signed = SignedRequest(new InMemoryPresentationChallengeStore(_clock)

@@ -37,20 +37,16 @@ OpenID4VP interoperability or third-party Wallet conformance**.
 The integrating Wallet must independently trust the **exact** HTTPS request
 URI, verifier DID, HTTPS response callback, credential type, subject context
 and issuer; a URI appearing only in a QR/deep link is *not* trusted policy.
-Use a dedicated, unauthenticated, non-redirecting `HttpClient`:
+Prefer the built-in credential-free, non-redirecting isolated transport.
+It does **not** inherit cookies, HTTP credentials, proxy credentials, automatic
+redirects, TLS client certificates or shared application default headers:
 
 ```csharp
 using HeroSSID.Credentials.VerifiablePresentations;
 
-using var handler = new HttpClientHandler
-{
-    AllowAutoRedirect = false,
-    UseCookies = false
-};
-using var http = new HttpClient(handler);
 string? signedRequest = await OpenId4VpJwtVcJsonRequestUri
-    .FetchVerifiedRequestAsync(
-        deepLink, independentlyTrustedRequestUri, http,
+    .FetchVerifiedRequestWithIsolatedTransportAsync(
+        deepLink, independentlyTrustedRequestUri,
         trustedVerifierDid, trustedCallback, trustedType, trustedContext,
         TimeProvider.System, cancellationToken: cancellationToken);
 
@@ -74,14 +70,22 @@ signatures, issuer/type/callback/context mismatches and expired challenges.
 It returns the **unchanged original compact JWT**, so existing holder
 signatures and verifier-owned request-hash pins are preserved.
 
-**Security deployment boundary:** This SDK now rejects an `HttpClient`
+**Security deployment boundary:** The isolated overload creates and disposes
+its own `HttpClientHandler` with no cookies, redirects, credentials, client
+certificate auto-selection or proxy use. It retains normal TLS server certificate
+validation, the exact URI/trust pin and the bounded streaming deadline. Environments
+requiring a corporate proxy must explicitly supply and audit a dedicated HTTP
+client with the existing `FetchVerifiedRequestAsync` overload; the isolated
+path deliberately does not bypass its security policy to accommodate proxies.
+
+The existing injected-client overload rejects an `HttpClient`
 with **any nonempty `DefaultRequestHeaders` before sending the public GET**.
 A shared application client might otherwise forward bearer tokens, cookies,
 private API keys or custom session headers to the verifier before signature
 verification. Use a dedicated client with empty default headers. A test-only
 commit reproduced real credential-bearing GET acceptance before this guard.
 
-This check does **not** make an arbitrary supplied handler safe: a caller-provided
+The injected-client header check does **not** make an arbitrary supplied handler safe: a caller-provided
 HttpClient may still have an automatic-redirect handler, a cookie container,
 handler-injected credentials, proxies or other ambient configuration. The adapter verifies the final response URI but
 cannot prevent an earlier automatically followed redirect. Pass a dedicated
