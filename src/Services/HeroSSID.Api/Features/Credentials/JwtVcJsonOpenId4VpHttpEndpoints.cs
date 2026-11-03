@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using HeroSSID.Api.Authentication;
 using HeroSSID.Core.TenantManagement;
@@ -27,9 +28,15 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
 {
     private const int MaximumFormLength = 180_000;
     private const int MaximumSnapshotLength = 65_536;
+    private const string PublicRequestObjectPath = "/api/v1/credentials/jwt-vc-json/openid4vp/requests/";
 
     internal static void Map(RouteGroupBuilder credentials)
     {
+        credentials.MapGet("/jwt-vc-json/openid4vp/requests/{opaqueReference}", GetHostedRequest)
+            .AllowAnonymous()
+            .WithName("GetPublishedJwtVcJsonOpenId4VpRequestObject")
+            .WithSummary("Fetch a short-lived unchanged Ed25519 signed Request Object by opaque reference");
+
         credentials.MapPost("/jwt-vc-json/openid4vp/signed-request", IssueSignedAsync)
             .RequireAuthorization(OperationScopes.CredentialVerify, OperationScopes.DidManage)
             .WithName("IssueJwtVcJsonOpenId4VpSignedRequest")
@@ -69,6 +76,8 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
         [FromServices] ITenantContext tenantContext,
         [FromServices] HeroDbContext dbContext,
         [FromServices] IKeyEncryptionService encryption,
+        [FromServices] OpenId4VpJwtVcJsonRequestObjectStore requestObjects,
+        [FromServices] IConfiguration configuration,
         [FromServices] TimeProvider clock,
         CancellationToken cancellationToken)
     {
@@ -77,6 +86,8 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
         ArgumentNullException.ThrowIfNull(tenantContext);
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(encryption);
+        ArgumentNullException.ThrowIfNull(requestObjects);
+        ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(clock);
 
         if (!ValidDid(request.VerifierDid) || !ValidDid(request.TrustedIssuerDid) ||
@@ -88,6 +99,16 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
             return InvalidRequest();
         }
 
+        Uri? requestUriBase = null;
+        if (request.PublishRequestUri &&
+            (!Uri.TryCreate(configuration["OpenId4Vp:PublicRequestUriBase"],
+                UriKind.Absolute, out requestUriBase) ||
+            !ValidPublicRequestUriBase(requestUriBase)))
+        {
+            // Never derive this wallet-facing URL from an attacker-controlled Host header.
+            return Unavailable();
+        }
+
         Guid tenantId = tenantContext.GetCurrentTenantId();
         if (tenantId == Guid.Empty)
         {
@@ -95,6 +116,7 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
         }
 
         byte[]? verifierSeed = null;
+        string? reservedReference = null;
         try
         {
             var verifier = await dbContext.Dids.AsNoTracking()
@@ -111,6 +133,13 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
             }
 
             verifierSeed = encryption.Decrypt(verifier.PrivateKeyEd25519Encrypted);
+            // Reserve the single-process host slot BEFORE committing a durable
+            // challenge: a full host cannot drain the independent PG quota.
+            if (requestUriBase is not null)
+            {
+                reservedReference = requestObjects.Reserve();
+            }
+
             string clientId = "decentralized_identifier:" + request.VerifierDid;
             var challenge = challenges.Issue(tenantId, clientId,
                 request.TrustedIssuerDid!, TimeSpan.FromSeconds(request.LifetimeSeconds));
@@ -120,10 +149,24 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
             string walletInvocation = OpenId4VpJwtVcJsonDirectPost.CreateWalletInvocation(
                 signed, request.VerifierDid!, request.ResponseUri!,
                 request.CredentialType!, request.SubjectContextUri!, clock);
+            string? referenceWalletInvocation = null;
+            if (requestUriBase is not null)
+            {
+                // Create the launch before committing the reservation, so a
+                // malformed/expired request cannot leave a published orphan.
+                var publishedUri = new Uri(requestUriBase, reservedReference!);
+                referenceWalletInvocation = OpenId4VpJwtVcJsonRequestUri.CreateWalletInvocation(
+                    signed, publishedUri, request.VerifierDid!, request.ResponseUri!,
+                    request.CredentialType!, request.SubjectContextUri!, clock);
+                requestObjects.PublishReserved(reservedReference!, tenantId, signed,
+                    request.VerifierDid!, request.ResponseUri!, request.CredentialType!,
+                    request.SubjectContextUri!);
+            }
+
             return Results.Json(new IssueOpenId4VpSignedRequestResponse(
                 signed, clientId, request.VerifierDid!, request.ResponseUri!,
                 challenge.Nonce, challenge.TrustedIssuerDid, challenge.ExpiresAt,
-                walletInvocation),
+                walletInvocation, referenceWalletInvocation),
                 statusCode: StatusCodes.Status201Created);
         }
         catch (InvalidOperationException exception) when (
@@ -131,6 +174,13 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
         {
             return Results.Problem(title: "Challenge Capacity Exhausted",
                 detail: "The verifier's retained one-use challenge capacity is exhausted.",
+                statusCode: StatusCodes.Status429TooManyRequests);
+        }
+        catch (InvalidOperationException exception) when (
+            exception.Message.Contains("request object capacity", StringComparison.Ordinal))
+        {
+            return Results.Problem(title: "Request Object Capacity Exhausted",
+                detail: "The single-instance request publication capacity is exhausted.",
                 statusCode: StatusCodes.Status429TooManyRequests);
         }
         catch (NpgsqlException)
@@ -152,10 +202,51 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
         }
         finally
         {
+            if (reservedReference is not null)
+            {
+                requestObjects.ReleaseReservation(reservedReference);
+            }
+
             if (verifierSeed is not null)
             {
                 CryptographicOperations.ZeroMemory(verifierSeed);
             }
+        }
+    }
+
+    /// <summary>
+    /// Public GET presents no credential/subject claims. The opaque reference is
+    /// strong and short-lived, but hosting is VOLATILE and SINGLE-INSTANCE only;
+    /// the shared verifier challenge must still be live at retrieval time.
+    /// </summary>
+    internal static IResult GetHostedRequest(string opaqueReference,
+        [FromServices] OpenId4VpJwtVcJsonRequestObjectStore requestObjects,
+        HttpContext context)
+    {
+        ArgumentNullException.ThrowIfNull(requestObjects);
+        ArgumentNullException.ThrowIfNull(context);
+        context.Response.Headers.CacheControl = "no-store";
+        context.Response.Headers.Pragma = "no-cache";
+        context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+        context.Response.Headers["Referrer-Policy"] = "no-referrer";
+
+        try
+        {
+            if (!requestObjects.TryGet(opaqueReference, out string signedRequest))
+            {
+                return Results.NotFound();
+            }
+
+            return Results.Bytes(Encoding.ASCII.GetBytes(signedRequest),
+                "application/oauth-authz-req+jwt");
+        }
+        catch (NpgsqlException)
+        {
+            return Unavailable();
+        }
+        catch (TimeoutException)
+        {
+            return Unavailable();
         }
     }
 
@@ -268,6 +359,12 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
         }
     }
 
+    private static bool ValidPublicRequestUriBase(Uri? uri) =>
+        ValidHttps(uri) && uri!.OriginalString.Length <= 2_000 &&
+        uri.AbsolutePath == PublicRequestObjectPath &&
+        uri.Query.Length == 0 &&
+        uri.OriginalString.EndsWith('/');
+
     private static bool ValidDid(string? did) =>
         !string.IsNullOrWhiteSpace(did) && did.Length <= 255 &&
         new DidKeyMethod().IsValid(did);
@@ -312,6 +409,7 @@ public sealed class IssueOpenId4VpSignedRequestRequest
     public string? CredentialType { get; init; }
     public Uri? SubjectContextUri { get; init; }
     public int LifetimeSeconds { get; init; } = 120;
+    public bool PublishRequestUri { get; init; }
 }
 
 /// <summary>Untrusted holder must independently pin DID, HTTPS callback, type, context and consent.</summary>
@@ -319,7 +417,9 @@ public sealed record IssueOpenId4VpSignedRequestResponse(
     string SignedRequestJwt, string ClientId, string VerifierDid, Uri ResponseUri,
     string Nonce, string TrustedIssuerDid, DateTimeOffset ExpiresAt,
     [property: System.Text.Json.Serialization.JsonPropertyName("walletInvocationUri")]
-    string WalletInvocation);
+    string WalletInvocation,
+    [property: System.Text.Json.Serialization.JsonPropertyName("referenceWalletInvocationUri")]
+    string? ReferenceWalletInvocation);
 
 /// <summary>
 /// Backend-only cancellation of an outstanding verifier-owned challenge.

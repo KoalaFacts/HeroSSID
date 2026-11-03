@@ -103,6 +103,10 @@ builder.Services.AddSingleton<IPresentationChallengeStore>(services =>
         services.GetRequiredService<NpgsqlDataSource>(),
         services.GetRequiredService<TimeProvider>()));
 
+// Opt-in single-instance public request_uri hosting for signed Request Objects.
+// Entries are volatile and must not be advertised behind a round-robin ingress.
+builder.Services.AddSingleton<OpenId4VpJwtVcJsonRequestObjectStore>();
+
 // Opt-in operator-owned, pre-incident signed guardian enrollment pins.
 // Never accept enrolled trust policy from the claimant's HTTP body.
 builder.Services.AddSingleton<HostPinnedGuardianEnrollmentRegistry>();
