@@ -370,7 +370,7 @@ public static class JwtVcJsonCredential
             dateTime.Length > 64 ||
             // XML Schema permits time zone offsets as well as Z, but an
             // unspecified local zone cannot map unambiguously to JWT NumericDate.
-            !(dateTime.EndsWith("Z", StringComparison.Ordinal) ||
+            !(dateTime.EndsWith('Z') ||
                 (dateTime.Length >= 6 &&
                     (dateTime[^6] == '+' || dateTime[^6] == '-') &&
                     dateTime[^3] == ':')))
