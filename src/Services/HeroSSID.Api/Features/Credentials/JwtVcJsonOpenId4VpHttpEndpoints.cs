@@ -313,11 +313,13 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
     internal static IResult Verify(
         [FromBody] VerifyOpenId4VpDirectPostRequest request,
         [FromServices] IPresentationChallengeStore challenges,
+        [FromServices] OpenId4VpJwtVcJsonRequestObjectStore requestObjects,
         [FromServices] ITenantContext tenantContext,
         [FromServices] TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(challenges);
+        ArgumentNullException.ThrowIfNull(requestObjects);
         ArgumentNullException.ThrowIfNull(tenantContext);
         ArgumentNullException.ThrowIfNull(clock);
 
@@ -347,6 +349,17 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
                 "decentralized_identifier:" + request.VerifierDid,
                 request.Nonce!, request.ExpectedCredentialType!,
                 request.SubjectContextUri!, challenges, clock, out JsonElement subject);
+            if (status is RevocationSnapshotCheckResult.NotListed or
+                RevocationSnapshotCheckResult.Revoked)
+            {
+                // These decisions follow successful holder/issuer proof and
+                // atomic challenge consumption. They must not retain unusable
+                // hosted Request Objects until TTL; invalid attempts do not
+                // retire a still-live challenge.
+                requestObjects.RetireConsumedChallenge(tenantId,
+                    "decentralized_identifier:" + request.VerifierDid, request.Nonce!);
+            }
+
             return status switch
             {
                 RevocationSnapshotCheckResult.NotListed =>
