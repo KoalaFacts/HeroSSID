@@ -154,8 +154,11 @@ GET preserving exact JWT bytes, absent/unknown reference, and cancellation
 against isolated PostgreSQL challenge storage.
 Authorized cancellation now also immediately retires the matching volatile
 Request Object by exact tenant, verifier audience and nonce. This releases
-host capacity without waiting for its JWT expiry; unrelated active requests
-remain available. Recovery applies to the publishing process only. It does
+host capacity without waiting for its JWT expiry; the same applies to an
+accepted holder proof (including a correctly signed but revoked credential)
+after atomic challenge consumption. Malformed presentation attempts must not
+retire a still-live challenge, and unrelated active requests remain available.
+Recovery applies to the publishing process only. It does
 not change the independent PostgreSQL challenge or make the host distributed.
 
 Neither the HTTP integration suite nor this fix establishes independent
