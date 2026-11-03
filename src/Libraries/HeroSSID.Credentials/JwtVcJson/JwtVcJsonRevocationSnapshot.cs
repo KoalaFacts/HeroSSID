@@ -15,7 +15,8 @@ namespace HeroSSID.Credentials.JwtVcJson;
 public static class JwtVcJsonRevocationSnapshot
 {
     private const string SnapshotType = "herossid-jwt-vc-json-revocations+jwt";
-    private const string CredentialJwtType = "vc+jwt";
+    private const string CredentialJwtType = "JWT";
+    private const string LegacyCredentialJwtType = "vc+jwt";
     private const string CredentialFormat = "jwt_vc_json";
     private const string BaseContext = "https://www.w3.org/2018/credentials/v1";
     private const int MaximumCredentialLength = 65_536;
@@ -263,19 +264,23 @@ public static class JwtVcJsonRevocationSnapshot
 
     private static bool IsAuthenticIssuerCredential(string? jwt, string issuerDid, byte[] issuerKey)
     {
-        if (!StrictJwtReader.TryRead(jwt!, CredentialJwtType, MaximumCredentialLength,
+        // Accept the W3C VC1.1 normative JWT typ and historical HeroSSID
+        // vc+jwt credentials. These remain two explicitly bounded input profiles.
+        if (!(StrictJwtReader.TryRead(jwt!, CredentialJwtType, MaximumCredentialLength,
                 out var payload, KeyId(issuerDid)) ||
+              StrictJwtReader.TryRead(jwt!, LegacyCredentialJwtType, MaximumCredentialLength,
+                out payload, KeyId(issuerDid))) ||
             !Ed25519JwtSigner.VerifySignedJwt(jwt!, issuerKey) ||
-            payload.EnumerateObject().Count() != 6 ||
+            !HasSupportedClaims(payload) ||
             !StrictJwtReader.TryGetString(payload, "iss", out var issuer) ||
             !string.Equals(issuer, issuerDid, StringComparison.Ordinal) ||
             !StrictJwtReader.TryGetString(payload, "sub", out var holderDid) ||
             !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(holderDid, out _) ||
-            !StrictJwtReader.TryGetTimestamp(payload, "iat", out long issuedAt) ||
             !StrictJwtReader.TryGetTimestamp(payload, "nbf", out long notBefore) ||
             !StrictJwtReader.TryGetTimestamp(payload, "exp", out long expiresAt) ||
-            notBefore != issuedAt || expiresAt <= issuedAt ||
-            expiresAt - issuedAt > 900 ||
+            !HasValidOptionalIssuedAt(payload, notBefore) ||
+            !HasValidOptionalCredentialId(payload) ||
+            expiresAt <= notBefore || expiresAt - notBefore > 900 ||
             !payload.TryGetProperty("vc", out var vc) ||
             vc.ValueKind != JsonValueKind.Object || vc.EnumerateObject().Count() != 3 ||
             !HasBaseArray(vc, "@context", BaseContext) ||
@@ -289,6 +294,34 @@ public static class JwtVcJsonRevocationSnapshot
         }
 
         return true;
+    }
+
+    // Match the bounded optional VC1.1 JWT claims accepted by the credential
+    // verifier, without requiring a still-current validity window: issuers must
+    // also be able to revoke a credential after its validity has expired.
+    private static bool HasSupportedClaims(JsonElement payload) =>
+        payload.EnumerateObject().Count() == 5 +
+        (payload.TryGetProperty("iat", out _) ? 1 : 0) +
+        (payload.TryGetProperty("jti", out _) ? 1 : 0);
+
+    private static bool HasValidOptionalIssuedAt(JsonElement payload, long notBefore) =>
+        !payload.TryGetProperty("iat", out _) ||
+        (StrictJwtReader.TryGetTimestamp(payload, "iat", out long issued) &&
+            issued <= notBefore && issued >= notBefore - 900);
+
+    private static bool HasValidOptionalCredentialId(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("jti", out _))
+        {
+            return true;
+        }
+
+        return StrictJwtReader.TryGetString(payload, "jti", out string id) &&
+            id.Length <= 2_048 &&
+            Uri.TryCreate(id, UriKind.Absolute, out Uri? uri) &&
+            uri.Scheme == Uri.UriSchemeHttps &&
+            !string.IsNullOrWhiteSpace(uri.Host) &&
+            uri.UserInfo.Length == 0;
     }
 
     private static bool HasBaseArray(JsonElement value, string name, string baseValue)
