@@ -58,6 +58,34 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStore(
     }
 
     /// <summary>
+    /// Reclaim volatile Request Objects for an exact challenge after the authorized
+    /// verifier atomically cancels that challenge in the independent challenge store.
+    /// This is scoped to tenant, client audience and nonce; it cannot release a
+    /// pending request belonging to another challenge. No durable storage changes.
+    /// </summary>
+    public void RetireConsumedChallenge(Guid tenantId, string audience, string nonce)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(audience);
+        ArgumentException.ThrowIfNullOrWhiteSpace(nonce);
+        if (tenantId == Guid.Empty)
+        {
+            throw new ArgumentException("A tenant is required.", nameof(tenantId));
+        }
+
+        lock (_gate)
+        {
+            foreach (string reference in _entries
+                .Where(entry => entry.Value.TenantId == tenantId &&
+                    string.Equals(entry.Value.Audience, audience, StringComparison.Ordinal) &&
+                    string.Equals(entry.Value.Nonce, nonce, StringComparison.Ordinal))
+                .Select(entry => entry.Key).ToArray())
+            {
+                _entries.Remove(reference);
+            }
+        }
+    }
+
+    /// <summary>
     /// Verify the original Ed25519 Request Object and live tenant-owned challenge
     /// before publishing exact JWT bytes behind an unpredictable reference.
     /// This does not establish an application's trusted public HTTPS URL.
