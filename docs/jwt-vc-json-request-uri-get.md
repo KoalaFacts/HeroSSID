@@ -62,7 +62,9 @@ if (signedRequest is null)
 
 The adapter rejects untrusted or noncanonical launches before any GET,
 non-HTTPS endpoints, non-200/redirect responses, wrong content types,
-unexpected/oversized bodies (even absent Content-Length), invalid verifier
+unexpected/oversized bodies (even absent Content-Length), body streams that
+stall past the default **15-second total header-and-body deadline** (with an
+optional caller-selected deadline of at most 30 seconds), invalid verifier
 signatures, issuer/type/callback/context mismatches and expired challenges.
 It returns the **unchanged original compact JWT**, so existing holder
 signatures and verifier-owned request-hash pins are preserved.
@@ -88,7 +90,8 @@ A real mocked HTTP GET and separate Ed25519 issuer/holder/verifier keys
 demonstrate the bounded launch, signed request retrieval, actual holder-signed
 VP, verifier-retained request hash, successful one-use acceptance and replay
 denial. Negative tests cover wrong URI or launch parameters, forged request,
-redirects, HTML response, excessive response size and expired request.
+redirects, HTML response, excessive response size, a body that never finishes
+and an expired request.
 
 No hosted Request URI endpoint, independently tested external Wallet,
 selective disclosure, consent UI, live revocation, legal identity vetting,
