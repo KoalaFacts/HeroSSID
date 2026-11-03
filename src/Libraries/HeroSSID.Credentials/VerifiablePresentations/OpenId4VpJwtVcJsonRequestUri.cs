@@ -56,8 +56,9 @@ public static class OpenId4VpJwtVcJsonRequestUri
     /// <summary>
     /// Fetch the signed Request Object only from an independently trusted exact
     /// HTTPS URI, after comparing it with the canonical by-reference invocation.
-    /// Requires a dedicated, unauthenticated HttpClient whose handler has
-    /// AllowAutoRedirect=false; a caller-supplied redirecting client could send
+    /// Requires a dedicated HttpClient with empty DefaultRequestHeaders and
+    /// a credential-free handler with AllowAutoRedirect=false. Any ambient
+    /// default headers fail closed before GET; a redirecting handler could send
     /// a GET elsewhere before the final-response URI check detects it.
     /// Rejects non-200/redirects, wrong media type, malformed or oversized
     /// bodies, expiry and any invalid verifier Ed25519 signature/policy.
@@ -84,6 +85,16 @@ public static class OpenId4VpJwtVcJsonRequestUri
             !string.Equals(invocation,
                 ExpectedInvocation(independentlyTrustedRequestUri, expectedVerifierDid),
                 StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        // The public Request Object endpoint is unauthenticated. A shared
+        // application HttpClient may carry bearer tokens, cookies or private
+        // custom headers in its defaults; HttpClient merges these into GETs.
+        // Fail closed before network access, even for a correctly pinned URI.
+        // The handler must separately be non-redirecting and credential-free.
+        if (http.DefaultRequestHeaders.Any())
         {
             return null;
         }
