@@ -87,6 +87,70 @@ public sealed class JwtVcJsonEmbeddedMetadataTests
             JwtVcJsonRevocationSnapshot.Check(revoked, jwt, _issuer.Did, Now));
     }
 
+    [Theory]
+    [InlineData("fractional-valid")]
+    [InlineData("fractional-scientific")]
+    public void IndependentIssuerFractionalNumericDatesAreVerifiedAndRevocable(string variant)
+    {
+        // RFC 7519 NumericDate explicitly permits non-integer seconds.
+        // Preserve sub-second validity and the original signed JWT in status.
+        string jwt = SignExternal(variant: variant);
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out var subject, out var identifier));
+        Assert.Equal("active", subject.GetProperty("membership").GetString());
+        Assert.Equal(CredentialId, identifier);
+
+        string revoked = JwtVcJsonRevocationSnapshot.Create(_issuer.Did, [jwt],
+            _issuer.Seed, Now, new FixedClock(Now));
+        Assert.Equal(RevocationSnapshotCheckResult.Revoked,
+            JwtVcJsonRevocationSnapshot.Check(revoked, jwt, _issuer.Did, Now));
+    }
+
+    [Fact]
+    public void FractionalValidityBoundariesAreCheckedAtExactInstant()
+    {
+        string jwt = SignExternal(variant: "fractional-valid");
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now.AddMinutes(-1).AddMilliseconds(249), out _));
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now.AddMinutes(-1).AddMilliseconds(250), out _));
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now.AddMinutes(5).AddMilliseconds(499), out _));
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now.AddMinutes(5).AddMilliseconds(500), out _));
+    }
+
+    [Theory]
+    [InlineData("legacy-fractional")]
+    [InlineData("fractional-hidden-subtick")]
+    [InlineData("fractional-embedded-mismatch")]
+    [InlineData("fractional-subtick")]
+    [InlineData("fractional-iat-invalid")]
+    [InlineData("fractional-expired")]
+    public void NonEquivalentOrUnrepresentableFractionalDatesFailClosed(string variant)
+    {
+        string jwt = SignExternal(variant: variant);
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out var subject, out var identifier));
+        Assert.Equal(JsonValueKind.Undefined, subject.ValueKind);
+        Assert.Null(identifier);
+        if (variant == "fractional-expired")
+        {
+            // Issuer status may legitimately list an expired original VC.
+            // Status authentication does not assert current VC validity.
+            string snapshot = JwtVcJsonRevocationSnapshot.Create(_issuer.Did,
+                [jwt], _issuer.Seed, Now, new FixedClock(Now));
+            Assert.Equal(RevocationSnapshotCheckResult.Revoked,
+                JwtVcJsonRevocationSnapshot.Check(snapshot, jwt, _issuer.Did, Now));
+        }
+        else
+        {
+            Assert.Throws<CryptographicException>(() =>
+                JwtVcJsonRevocationSnapshot.Create(_issuer.Did, [jwt],
+                    _issuer.Seed, Now, new FixedClock(Now)));
+        }
+    }
+
     [Fact]
     public void TamperedEmbeddedMetadataCannotBeRevalidatedByOriginalSignature()
     {
@@ -128,6 +192,50 @@ public sealed class JwtVcJsonEmbeddedMetadataTests
         };
         switch (variant)
         {
+            case "fractional-valid":
+            case "fractional-scientific":
+            case "fractional-hidden-subtick":
+            case "fractional-embedded-mismatch":
+            case "fractional-subtick":
+            case "fractional-iat-invalid":
+            case "fractional-expired":
+                payload["nbf"] = notBefore + 0.25m;
+                payload["exp"] = expires + 0.5m;
+                payload["iat"] = notBefore - 1.125m;
+                vc["issuanceDate"] = DateTimeOffset.FromUnixTimeSeconds(notBefore)
+                    .ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture) + ".250Z";
+                vc["expirationDate"] = DateTimeOffset.FromUnixTimeSeconds(expires)
+                    .ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture) + ".500Z";
+                if (variant == "fractional-embedded-mismatch")
+                {
+                    vc["issuanceDate"] = DateTimeOffset.FromUnixTimeSeconds(notBefore)
+                        .ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
+                }
+                else if (variant == "fractional-subtick")
+                {
+                    payload["nbf"] = notBefore + 0.00000001m;
+                    vc["issuanceDate"] = DateTimeOffset.FromUnixTimeSeconds(notBefore)
+                        .ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture) + ".00000001Z";
+                }
+                else if (variant == "fractional-iat-invalid")
+                {
+                    payload["iat"] = notBefore - 901m;
+                }
+                else if (variant == "fractional-expired")
+                {
+                    payload["exp"] = Now.AddSeconds(-1).ToUnixTimeSeconds() + 0.5m;
+                    vc["expirationDate"] = Now.AddSeconds(-1)
+                        .ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture) + ".500Z";
+                }
+                break;
+            case "legacy-fractional":
+                payload["nbf"] = notBefore + 0.25m;
+                vc.Remove("issuer");
+                vc.Remove("id");
+                vc.Remove("issuanceDate");
+                vc.Remove("expirationDate");
+                vc["credentialSubject"] = new { id = _holder.Did, membership = "active" };
+                break;
             case "wrong-issuer":
                 vc["issuer"] = _stranger.Did;
                 break;
@@ -174,15 +282,31 @@ public sealed class JwtVcJsonEmbeddedMetadataTests
                 break;
         }
 
-        string header = variant == "legacy-header"
+        string header = variant is "legacy-header" or "legacy-fractional"
             ? JsonSerializer.Serialize(new
             {
                 alg = "EdDSA", typ = "vc+jwt",
                 kid = _issuer.Did + "#" + _issuer.Did["did:key:".Length..]
             })
             : JsonSerializer.Serialize(new { alg = "EdDSA", typ = "JWT" });
+        string json = JsonSerializer.Serialize(payload);
+        if (variant is "fractional-scientific" or "fractional-hidden-subtick")
+        {
+            string signedNumber = (notBefore + 0.25m)
+                .ToString(CultureInfo.InvariantCulture);
+            string literal = variant == "fractional-hidden-subtick"
+                ? notBefore.ToString(CultureInfo.InvariantCulture) +
+                    ".2500000000000000000001"
+                : ((notBefore + 0.25m) / 1_000_000_000m)
+                    .ToString(CultureInfo.InvariantCulture) + "e9";
+            string original = "\"nbf\":" + signedNumber;
+            Assert.Contains(original, json, StringComparison.Ordinal);
+            json = json.Replace(original, "\"nbf\":" + literal,
+                StringComparison.Ordinal);
+        }
+
         string message = Base64UrlEncoder.Encode(header) + "." +
-            Base64UrlEncoder.Encode(JsonSerializer.Serialize(payload));
+            Base64UrlEncoder.Encode(json);
         using var signer = Key.Import(SignatureAlgorithm.Ed25519,
             variant == "wrong-signature" ? _stranger.Seed : _issuer.Seed,
             KeyBlobFormat.RawPrivateKey);

@@ -24,6 +24,18 @@ The server verifies the actual Ed25519 issuer signature, any present JOSE `kid` 
 
 For independently issued, **normative VC Data Model 1.1 `typ=JWT` or omitted-`typ`** credentials, the verifier also accepts the W3C §6.3.1 **"in addition to" JWT mapping**: optional redundant `vc.issuer` (matching issuer DID string or an exact `{"id":"did:key:..."}` object), `vc.id` (matching signed `jti`), and XML date-time `vc.issuanceDate`/`vc.expirationDate` (exact instants matching signed `nbf`/`exp`). These signed fields cannot override independently pinned issuer, holder, subject vocabulary, type or dates; conflicts, unknown `vc` members and the historical private `vc+jwt` shape with extra fields fail closed. Issuer status export authenticates **the unchanged original JWT** with the same metadata rules; these internal checks are not independent third-party Wallet interoperability or standard conformance certification.
 
+The VC1.1 normative JWT path also accepts RFC 7519 **fractional NumericDate**
+values in signed `iat`, `nbf` and `exp` when each instant is exactly representable
+at .NET's 100-nanosecond precision. The verifier compares full instants,
+including sub-second not-before and expiry boundaries; it never truncates a
+fraction toward acceptance. Redundant embedded XML Schema date-times, when
+present, must identify exactly those same instants, not merely their integer
+seconds. Invalid, out-of-range or sub-tick values fail closed. Historical
+HeroSSID `typ=vc+jwt` credentials remain integer-only; this does not change
+the fifteen-minute credential limit, issuer/holder trust or status freshness.
+This is format-level cross-issuer compatibility, **not** evidence of independent
+Wallet interoperability or complete standards conformance.
+
 A successful signature verification responds with HTTP **200**:
 
 ```json

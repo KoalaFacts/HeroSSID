@@ -273,9 +273,9 @@ public static class JwtVcJsonRevocationSnapshot
             !string.Equals(issuer, issuerDid, StringComparison.Ordinal) ||
             !StrictJwtReader.TryGetString(payload, "sub", out var holderDid) ||
             !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(holderDid, out _) ||
-            !StrictJwtReader.TryGetTimestamp(payload, "nbf", out long notBefore) ||
-            !StrictJwtReader.TryGetTimestamp(payload, "exp", out long expiresAt) ||
-            !HasValidOptionalIssuedAt(payload, notBefore) ||
+            !JwtVcJsonCredential.TryGetSignedNumericDate(payload, "nbf", isNormativeJwt, out decimal notBefore) ||
+            !JwtVcJsonCredential.TryGetSignedNumericDate(payload, "exp", isNormativeJwt, out decimal expiresAt) ||
+            !JwtVcJsonCredential.HasValidOptionalIssuedAt(payload, notBefore, isNormativeJwt) ||
             !HasValidOptionalCredentialId(payload) ||
             expiresAt <= notBefore || expiresAt - notBefore > 900 ||
             !payload.TryGetProperty("vc", out var vc) ||
@@ -358,11 +358,6 @@ public static class JwtVcJsonRevocationSnapshot
         payload.EnumerateObject().Count() == 5 +
         (payload.TryGetProperty("iat", out _) ? 1 : 0) +
         (payload.TryGetProperty("jti", out _) ? 1 : 0);
-
-    private static bool HasValidOptionalIssuedAt(JsonElement payload, long notBefore) =>
-        !payload.TryGetProperty("iat", out _) ||
-        (StrictJwtReader.TryGetTimestamp(payload, "iat", out long issued) &&
-            issued <= notBefore && issued >= notBefore - 900);
 
     private static bool HasValidOptionalCredentialId(JsonElement payload)
     {

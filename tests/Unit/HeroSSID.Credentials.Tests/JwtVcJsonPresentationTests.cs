@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using HeroSSID.Credentials.JwtVcJson;
@@ -51,6 +52,52 @@ public sealed class JwtVcJsonPresentationTests
                 Type, Vocabulary, store, _clock, out var verified));
         Assert.Equal(_holder.Did, verified.GetProperty("id").GetString());
         Assert.Equal("active", verified.GetProperty("membership").GetString());
+        Assert.Equal(JwtVcJsonPresentationCheckResult.Invalid,
+            JwtVcJsonPresentation.Check(presentation, tenant, Audience, challenge.Nonce,
+                Type, Vocabulary, store, _clock, out var replayClaims));
+        Assert.Equal(JsonValueKind.Undefined, replayClaims.ValueKind);
+    }
+
+    [Fact]
+    public void IndependentlySignedFractionalVcExpiryIsPreservedByHolderVpAndConsumedOnce()
+    {
+        // Distinct genuine issuer and holder Ed25519 signatures, not an SDK
+        // issuer fixture or synthetic status/identity proof.
+        Guid tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did);
+        string request = OfflineSignedPresentationRequest.Create(
+            challenge, _verifier.Did, _verifier.Seed, _clock);
+
+        string original = IssueCredential();
+        JsonNode claims = JsonNode.Parse(Ed25519JwtSigner.ExtractPayload(original))!;
+        DateTimeOffset now = _clock.GetUtcNow();
+        decimal notBefore = now.AddSeconds(-5).ToUnixTimeSeconds() + 0.25m;
+        decimal expiration = now.AddSeconds(20).ToUnixTimeSeconds() + 0.5m;
+        claims["nbf"] = notBefore;
+        claims["iat"] = notBefore - 1.125m;
+        claims["exp"] = expiration;
+        string message = Base64UrlEncoder.Encode(Ed25519JwtSigner.ExtractHeader(original)) +
+            "." + Base64UrlEncoder.Encode(claims.ToJsonString());
+        using var issuer = Key.Import(SignatureAlgorithm.Ed25519, _issuer.Seed,
+            KeyBlobFormat.RawPrivateKey);
+        string credential = message + "." + Base64UrlEncoder.Encode(
+            SignatureAlgorithm.Ed25519.Sign(issuer, Encoding.ASCII.GetBytes(message)));
+
+        Assert.True(JwtVcJsonCredential.TryVerify(credential, _issuer.Did,
+            _holder.Did, Type, Vocabulary, now, out _));
+        string presentation = JwtVcJsonPresentation.Create(
+            request, _verifier.Did, Audience, credential, Type, Vocabulary,
+            _holder.Did, _holder.Seed, _clock);
+        using var decoded = JsonDocument.Parse(Ed25519JwtSigner.ExtractPayload(presentation));
+        Assert.Equal(expiration, decoded.RootElement.GetProperty("exp").GetDecimal());
+        Assert.Equal(credential, decoded.RootElement.GetProperty("vp")
+            .GetProperty("verifiableCredential")[0].GetString());
+
+        Assert.Equal(JwtVcJsonPresentationCheckResult.SignedButStatusUnchecked,
+            JwtVcJsonPresentation.Check(presentation, tenant, Audience, challenge.Nonce,
+                Type, Vocabulary, store, _clock, out var subject));
+        Assert.Equal("active", subject.GetProperty("membership").GetString());
         Assert.Equal(JwtVcJsonPresentationCheckResult.Invalid,
             JwtVcJsonPresentation.Check(presentation, tenant, Audience, challenge.Nonce,
                 Type, Vocabulary, store, _clock, out var replayClaims));
