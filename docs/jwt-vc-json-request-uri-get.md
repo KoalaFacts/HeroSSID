@@ -134,6 +134,10 @@ return 503 without returning JWT bytes. A GET does not itself consume the
 verifier challenge so a Wallet can retry; the final VP remains subject to the
 existing separate, atomic verifier consumption gate. The store holds up to
 256 entries and rejects excess rather than evicting active requests.
+The host reserves an opaque publication slot **before** issuing the durable
+PostgreSQL verifier challenge, so a full host returns 429 without consuming
+the independent challenge quota. Failed signing/issuance releases uncommitted
+slots and abandoned reservations expire after five minutes.
 
 This GET route publishes a signed **verifier request**, not a credential
 or sensitive subject claims. An integrating Wallet still needs to pin the
