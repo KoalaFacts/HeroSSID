@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
 
@@ -81,9 +82,7 @@ public static class OpenId4VpJwtVcJsonWalletResponseTransport
                     independentlyTrustedResponseUri.OriginalString ||
                 (contentType is null || !string.Equals(contentType.MediaType, "application/json",
                     StringComparison.OrdinalIgnoreCase)) ||
-                (contentType.CharSet is not null &&
-                    !string.Equals(contentType.CharSet, "utf-8",
-                        StringComparison.OrdinalIgnoreCase)) ||
+                !IsAllowedCharset(contentType.CharSet) ||
                 contentType.Parameters.Count > (contentType.CharSet is null ? 0 : 1) ||
                 response.Content.Headers.ContentLength > MaximumResponseBytes)
             {
@@ -133,6 +132,41 @@ public static class OpenId4VpJwtVcJsonWalletResponseTransport
         }
     }
 
+    private static bool IsAllowedCharset(string? value)
+    {
+        if (value is null)
+        {
+            return true;
+        }
+
+        // RFC parameter values may be a quoted-string. .NET preserves the
+        // surrounding quotes in MediaTypeHeaderValue.CharSet.
+        string normalized = value.Length >= 2 && value[0] == '"' && value[^1] == '"'
+            ? value[1..^1] : value;
+        return string.Equals(normalized, "utf-8", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Dedicated direct_post handler that cannot inject cookies, redirects,
+    /// ambient credentials, proxy settings or W3C Activity baggage/trace headers.
+    /// Keep ordinary TLS server certificate validation and online CRL checking.
+    /// </summary>
+    public static SocketsHttpHandler CreateIsolatedDirectPostHandler() => new()
+    {
+        AllowAutoRedirect = false,
+        UseCookies = false,
+        UseProxy = false,
+        Credentials = null,
+        DefaultProxyCredentials = null,
+        PreAuthenticate = false,
+        AutomaticDecompression = DecompressionMethods.None,
+        ActivityHeadersPropagator = null,
+        SslOptions = new System.Net.Security.SslClientAuthenticationOptions
+        {
+            CertificateRevocationCheckMode = X509RevocationMode.Online
+        }
+    };
+
     /// <summary>
     /// Safe default for public verifier callbacks: a fresh disposable transport
     /// without redirects, cookies, proxies, ambient credentials or automatic
@@ -146,7 +180,7 @@ public static class OpenId4VpJwtVcJsonWalletResponseTransport
         Uri expectedSubjectContextUri, TimeProvider clock,
         TimeSpan? maximumDuration = null, CancellationToken cancellationToken = default)
     {
-        using var handler = OpenId4VpJwtVcJsonRequestUri.CreateIsolatedTransportHandler();
+        using var handler = CreateIsolatedDirectPostHandler();
         using var http = new HttpClient(handler);
         return await PostResponseFormAsync(
             signedRequestJwt, form, independentlyTrustedResponseUri, http,
