@@ -127,6 +127,30 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
         }
     }
 
+    [Fact]
+    public async Task BoundedDeadlineStopsAStalledBodyWithNoCallerCancellation()
+    {
+        string signed = SignedRequest(new InMemoryPresentationChallengeStore(_clock)
+            .Issue(Guid.NewGuid(), "decentralized_identifier:" + _verifier.Did, _issuer.Did));
+        string launch = ByReferenceLaunch(signed);
+        using var handler = new ProbeHandler(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StreamContent(new NeverEndingStream())
+            };
+            response.Content.Headers.ContentType =
+                new System.Net.Http.Headers.MediaTypeHeaderValue(
+                    "application/oauth-authz-req+jwt");
+            return response;
+        });
+        using var http = new HttpClient(handler);
+        Assert.Null(await OpenId4VpJwtVcJsonRequestUri.FetchVerifiedRequestAsync(
+            launch, RequestUri, http, _verifier.Did, Callback, Type, Context,
+            _clock, maximumDuration: TimeSpan.FromMilliseconds(75)));
+        Assert.Equal(1, handler.Calls);
+    }
+
     private string SignedRequest(PresentationChallenge challenge) =>
         OpenId4VpJwtVcJsonDirectPost.CreateSignedRequest(
             challenge, _verifier.Did, _verifier.Seed, Callback, Type, Context, _clock);
@@ -162,6 +186,35 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
         private DateTimeOffset _now = initial;
         public override DateTimeOffset GetUtcNow() => _now;
         public void Advance(TimeSpan delta) => _now += delta;
+    }
+
+    private sealed class NeverEndingStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush() => throw new NotSupportedException();
+        public override int Read(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) =>
+            throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)
+                .ConfigureAwait(false);
+            return 0;
+        }
     }
 
     private sealed class ProbeHandler(Func<HttpRequestMessage, HttpResponseMessage> respond)
