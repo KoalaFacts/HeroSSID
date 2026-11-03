@@ -241,7 +241,74 @@ public static class OpenId4VpJwtVcJsonRequestUri
         TimeProvider clock, TimeSpan? maximumDuration = null,
         CancellationToken cancellationToken = default)
     {
-        throw new NotSupportedException("Pinned base request_uri resolution is not implemented.");
+        ArgumentNullException.ThrowIfNull(independentlyTrustedRequestBaseUri);
+        ArgumentNullException.ThrowIfNull(http);
+        ArgumentNullException.ThrowIfNull(expectedResponseUri);
+        ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        // The trusted static base is installed by the Wallet operator before
+        // interpreting the untrusted launch. No URL authority or path is
+        // selected from the launch itself; only an opaque last path segment.
+        if (!IsAllowedRequestUri(independentlyTrustedRequestBaseUri) ||
+            independentlyTrustedRequestBaseUri.Query.Length != 0 ||
+            !independentlyTrustedRequestBaseUri.OriginalString.EndsWith('/', StringComparison.Ordinal) ||
+            !string.Equals(independentlyTrustedRequestBaseUri.OriginalString,
+                independentlyTrustedRequestBaseUri.AbsoluteUri, StringComparison.Ordinal) ||
+            independentlyTrustedRequestBaseUri.OriginalString.Length + 43 > MaximumRequestUriLength ||
+            string.IsNullOrWhiteSpace(expectedVerifierDid) ||
+            string.IsNullOrEmpty(invocation) || invocation.Length > MaximumInvocationLength)
+        {
+            return Task.FromResult<string?>(null);
+        }
+
+        string prefix = "openid4vp://?client_id=" +
+            Uri.EscapeDataString("decentralized_identifier:" + expectedVerifierDid) +
+            "&request_uri=" + Uri.EscapeDataString(independentlyTrustedRequestBaseUri.OriginalString);
+        if (!invocation.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return Task.FromResult<string?>(null);
+        }
+
+        string reference = invocation[prefix.Length..];
+        if (reference.Length != 43 ||
+            !reference.All(static character =>
+                char.IsAsciiLetterOrDigit(character) || character is '-' or '_'))
+        {
+            return Task.FromResult<string?>(null);
+        }
+
+        // Uri performs no path traversal for a canonical base plus a base64url
+        // segment. FetchVerifiedRequestAsync enforces exact URI equality,
+        // credential-free defaults, bounded HTTP and the actual Ed25519 request
+        // signature before releasing the unmodified signed Request Object.
+        var requestUri = new Uri(independentlyTrustedRequestBaseUri, reference);
+        return FetchVerifiedRequestAsync(
+            invocation, requestUri, http, expectedVerifierDid, expectedResponseUri,
+            expectedCredentialType, expectedSubjectContextUri, clock,
+            maximumDuration, cancellationToken);
+    }
+
+    /// <summary>
+    /// Resolve a launch using only a pre-trusted HTTPS base, with a new isolated
+    /// transport that has no proxy, cookies, client certificate, credentials,
+    /// redirects or Activity header propagation. The integrating Wallet must
+    /// still pin its verifier, callback and claim vocabulary and get consent.
+    /// </summary>
+    public static async Task<string?> FetchVerifiedRequestFromTrustedBaseWithIsolatedTransportAsync(
+        string invocation, Uri independentlyTrustedRequestBaseUri,
+        string expectedVerifierDid, Uri expectedResponseUri,
+        string expectedCredentialType, Uri expectedSubjectContextUri,
+        TimeProvider clock, TimeSpan? maximumDuration = null,
+        CancellationToken cancellationToken = default)
+    {
+        using var handler = CreateIsolatedTransportHandler();
+        using var http = new HttpClient(handler);
+        return await FetchVerifiedRequestFromTrustedBaseAsync(
+            invocation, independentlyTrustedRequestBaseUri, http,
+            expectedVerifierDid, expectedResponseUri, expectedCredentialType,
+            expectedSubjectContextUri, clock, maximumDuration,
+            cancellationToken).ConfigureAwait(false);
     }
 
     private static string ExpectedInvocation(Uri requestUri, string verifierDid) =>
