@@ -266,15 +266,7 @@ public static class JwtVcJsonRevocationSnapshot
     {
         // Accept the W3C VC1.1 normative JWT typ and historical HeroSSID
         // vc+jwt credentials. These remain two explicitly bounded input profiles.
-        if (!(StrictJwtReader.TryRead(jwt!, CredentialJwtType, MaximumCredentialLength,
-                out var payload, KeyId(issuerDid)) ||
-              // The VC1.1 Recommendation makes kid optional. Without kid,
-              // issuer provenance still comes from the independently pinned
-              // DID public key and the original genuine Ed25519 signature.
-              StrictJwtReader.TryRead(jwt!, CredentialJwtType, MaximumCredentialLength,
-                out payload) ||
-              StrictJwtReader.TryRead(jwt!, LegacyCredentialJwtType, MaximumCredentialLength,
-                out payload, KeyId(issuerDid))) ||
+        if (!TryReadSupportedCredentialJwt(jwt!, issuerDid, out var payload, out bool isNormativeJwt) ||
             !Ed25519JwtSigner.VerifySignedJwt(jwt!, issuerKey) ||
             !HasSupportedClaims(payload) ||
             !StrictJwtReader.TryGetString(payload, "iss", out var issuer) ||
@@ -292,13 +284,39 @@ public static class JwtVcJsonRevocationSnapshot
             !HasBaseArray(vc, "type", "VerifiableCredential") ||
             !vc.TryGetProperty("credentialSubject", out var subject) ||
             subject.ValueKind != JsonValueKind.Object ||
-            !StrictJwtReader.TryGetString(subject, "id", out var subjectDid) ||
-            !string.Equals(subjectDid, holderDid, StringComparison.Ordinal))
+            !HasBoundSubject(subject, holderDid, isNormativeJwt))
         {
             return false;
         }
 
         return true;
+    }
+
+    private static bool TryReadSupportedCredentialJwt(string jwt, string issuerDid,
+        out JsonElement payload, out bool isNormativeJwt)
+    {
+        isNormativeJwt =
+            StrictJwtReader.TryRead(jwt, CredentialJwtType, MaximumCredentialLength,
+                out payload, KeyId(issuerDid)) ||
+            StrictJwtReader.TryRead(jwt, CredentialJwtType, MaximumCredentialLength,
+                out payload);
+        return isNormativeJwt ||
+            StrictJwtReader.TryRead(jwt, LegacyCredentialJwtType, MaximumCredentialLength,
+                out payload, KeyId(issuerDid));
+    }
+
+    private static bool HasBoundSubject(JsonElement subject, string holderDid, bool isNormativeJwt)
+    {
+        // The signed JWT sub stands in for absent credentialSubject.id under
+        // W3C VC1.1. An explicit (even malformed) nested id cannot conflict.
+        // Do not extend the omission rule to historical vc+jwt.
+        if (subject.TryGetProperty("id", out _))
+        {
+            return StrictJwtReader.TryGetString(subject, "id", out string signedSubject) &&
+                string.Equals(signedSubject, holderDid, StringComparison.Ordinal);
+        }
+
+        return isNormativeJwt;
     }
 
     // Match the bounded optional VC1.1 JWT claims accepted by the credential
