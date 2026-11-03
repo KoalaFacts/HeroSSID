@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Claims;
 using HeroSSID.Credentials.CredentialVerification;
 using Microsoft.Extensions.Configuration;
@@ -12,10 +13,10 @@ namespace HeroSSID.Api.Features.Credentials;
 internal sealed class IssuerSigningGrantRegistry
 {
     private static readonly HashSet<string> AllowedGrantFields =
-        new(StringComparer.OrdinalIgnoreCase) { "TenantId", "ClientId", "IssuerDid" };
+        new(StringComparer.OrdinalIgnoreCase) { "TenantId", "ClientId", "IssuerDid", "CredentialTypes" };
 
     private readonly HashSet<Guid> _enforcedTenants = [];
-    private readonly HashSet<(Guid Tenant, string ClientId, string IssuerDid)> _grants = [];
+    private readonly Dictionary<(Guid Tenant, string ClientId, string IssuerDid), HashSet<string>?> _grants = [];
 
     public IssuerSigningGrantRegistry(IConfiguration configuration)
     {
@@ -59,11 +60,43 @@ internal sealed class IssuerSigningGrantRegistry
             }
 
             IConfigurationSection[] fields = [.. entry.GetChildren()];
-            if (fields.Length != 3 || fields.Any(field =>
+            if (fields.Length is not (3 or 4) || fields.Any(field =>
                     !AllowedGrantFields.Contains(field.Key) ||
-                    field.Value is null || field.GetChildren().Any()))
+                    (string.Equals(field.Key, "CredentialTypes", StringComparison.OrdinalIgnoreCase)
+                        ? field.Value is not null
+                        : field.Value is null || field.GetChildren().Any())))
             {
                 throw new InvalidOperationException("Unknown or missing issuer grant field.");
+            }
+
+            // Exact attestation types are an additional, independently enrolled
+            // policy: a key-use grant alone does not authorize every statement.
+            IConfigurationSection? configuredTypes = fields.FirstOrDefault(field =>
+                string.Equals(field.Key, "CredentialTypes", StringComparison.OrdinalIgnoreCase));
+            HashSet<string>? permittedTypes = null;
+            if (configuredTypes is not null)
+            {
+                IConfigurationSection[] values = [.. configuredTypes.GetChildren()];
+                if (values.Length is 0 or > 16)
+                {
+                    throw new InvalidOperationException("Invalid issuer credential type grant capacity.");
+                }
+
+                permittedTypes = new HashSet<string>(StringComparer.Ordinal);
+                for (int index = 0; index < values.Length; index++)
+                {
+                    IConfigurationSection value = values[index];
+                    string? type = value.Value;
+                    if (!string.Equals(value.Key, index.ToString(CultureInfo.InvariantCulture),
+                            StringComparison.Ordinal) ||
+                        value.GetChildren().Any() ||
+                        type is not { Length: > 0 and <= 128 } ||
+                        type.Any(char.IsWhiteSpace) || type.Any(char.IsControl) ||
+                        !permittedTypes.Add(type))
+                    {
+                        throw new InvalidOperationException("Invalid or duplicate issuer credential type grant.");
+                    }
+                }
             }
 
             string? client = entry["ClientId"];
@@ -74,14 +107,19 @@ internal sealed class IssuerSigningGrantRegistry
                 client.Any(char.IsWhiteSpace) || client.Any(char.IsControl) ||
                 issuer is not { Length: > 0 and <= 255 } ||
                 !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(issuer, out _) ||
-                !_grants.Add((tenant, client, issuer)))
+                !_grants.TryAdd((tenant, client, issuer), permittedTypes))
             {
                 throw new InvalidOperationException("Invalid, orphaned or duplicate issuer signing grant.");
             }
         }
     }
 
-    internal bool IsAllowed(Guid tenant, ClaimsPrincipal principal, string? issuerDid)
+    // Callers without a credential type cannot bypass an opt-in type policy.
+    internal bool IsAllowed(Guid tenant, ClaimsPrincipal principal, string? issuerDid) =>
+        IsAllowed(tenant, principal, issuerDid, null);
+
+    internal bool IsAllowed(Guid tenant, ClaimsPrincipal principal, string? issuerDid,
+        string? credentialType)
     {
         ArgumentNullException.ThrowIfNull(principal);
         if (!_enforcedTenants.Contains(tenant))
@@ -100,6 +138,8 @@ internal sealed class IssuerSigningGrantRegistry
         return clients.Length == 1 && subjects.Length == 1 && tenants.Length == 1 &&
             Guid.TryParse(tenants[0].Value, out Guid signedTenant) && signedTenant == tenant &&
             string.Equals(clients[0].Value, subjects[0].Value, StringComparison.Ordinal) &&
-            _grants.Contains((tenant, clients[0].Value, issuerDid));
+            _grants.TryGetValue((tenant, clients[0].Value, issuerDid), out HashSet<string>? allowedTypes) &&
+            (allowedTypes is null ||
+                (credentialType is not null && allowedTypes.Contains(credentialType)));
     }
 }

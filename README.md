@@ -435,7 +435,9 @@ The applicable upstream specifications include [DID Core](https://www.w3.org/TR/
 An operator may independently grant an OAuth client permission to use only specific
 active tenant-owned Ed25519 issuer DIDs. For explicitly enrolled tenants, all
 three authenticated HTTP credential issuance routes fail closed on ungranted
-client/DID pairs before private-key access. Unconfigured tenants retain the
+client/DID pairs before private-key access. Each approved client/DID grant can
+also opt in to an exact, case-sensitive credential-type allowlist, rejecting
+unapproved assertion types before signing. Unconfigured tenants retain the
 existing tenant-wide `credential:issue` scope. This is host-owned signing-key
-access control, not a credential trust decision or business authorization.
+and type access control, not a credential trust decision or business authorization.
 See [configuration, boundaries and rollout](docs/issuer-client-signing-grants.md).
