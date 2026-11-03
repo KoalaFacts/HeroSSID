@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using HeroSSID.Credentials.CredentialRevocation;
 using HeroSSID.Credentials.JwtVcJson;
 using HeroSSID.Credentials.Utilities;
@@ -60,6 +62,66 @@ public sealed class OpenId4VpJwtVcJsonWalletDisclosureTests
         Assert.Equal(JwtVcJsonPresentationCheckResult.Invalid,
             OpenId4VpJwtVcJsonDirectPost.CheckResponseForm(form, tenant, Audience,
                 challenge.Nonce, CredentialType, Context, challenges, _clock, out _));
+    }
+
+    [Fact]
+    public void BoundAfterPreviewAuthenticatesOriginalRequestWithoutConsumingChallenge()
+    {
+        Guid tenant = Guid.NewGuid();
+        var challenges = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = challenges.IssueHosted(tenant, Audience, _issuer.Did);
+        string request = SignRequest(challenge);
+        string credential = IssueCredential("member");
+        Assert.True(Prepare(request, credential, _verifier.Did, Callback,
+            CredentialType, Context, _issuer.Did, _holder.Did, out var preview));
+        Assert.NotNull(preview);
+
+        // Real consent must be collected by the Wallet UI after the preview.
+        string form = OpenId4VpJwtVcJsonWalletDisclosure
+            .CreateHolderBoundResponseFormAfterPreview(
+                preview!, request, credential, _holder.Seed, _clock);
+        string pin = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(request)));
+        Assert.Equal(JwtVcJsonPresentationCheckResult.SignedButStatusUnchecked,
+            OpenId4VpJwtVcJsonDirectPost.CheckHolderBoundResponseForm(
+                form, request, pin, _verifier.Did, Callback, tenant,
+                Audience, challenge.Nonce, CredentialType, Context,
+                challenges, _clock, out var subject));
+        Assert.Equal("member", subject.GetProperty("membership").GetString());
+        Assert.Equal(JwtVcJsonPresentationCheckResult.Invalid,
+            OpenId4VpJwtVcJsonDirectPost.CheckHolderBoundResponseForm(
+                form, request, pin, _verifier.Did, Callback, tenant,
+                Audience, challenge.Nonce, CredentialType, Context,
+                challenges, _clock, out _));
+    }
+
+    [Fact]
+    public void StatusBoundAfterPreviewHonoursIssuerSignedStatusAndRequestHash()
+    {
+        Guid tenant = Guid.NewGuid();
+        var challenges = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = challenges.IssueHosted(tenant, Audience, _issuer.Did);
+        string request = SignRequest(challenge);
+        string credential = IssueCredential("active");
+        string snapshot = SignSnapshot([]);
+        Assert.True(PrepareWithStatus(request, credential, snapshot, out var preview));
+        Assert.NotNull(preview);
+
+        string form = OpenId4VpJwtVcJsonWalletDisclosure
+            .CreateHolderBoundResponseFormAfterStatusPreview(
+                preview!, request, credential, snapshot, _holder.Seed, _clock);
+        string pin = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(request)));
+        Assert.Equal(JwtVcJsonPresentationCheckResult.SignedButStatusUnchecked,
+            OpenId4VpJwtVcJsonDirectPost.CheckHolderBoundResponseForm(
+                form, request, pin, _verifier.Did, Callback, tenant,
+                Audience, challenge.Nonce, CredentialType, Context,
+                challenges, _clock, out var subject));
+        Assert.Equal("active", subject.GetProperty("membership").GetString());
+
+        Assert.Throws<ArgumentException>(() =>
+            OpenId4VpJwtVcJsonWalletDisclosure
+                .CreateHolderBoundResponseFormAfterStatusPreview(
+                    preview!, request, credential, SignSnapshot([credential]),
+                    _holder.Seed, _clock));
     }
 
     [Fact]
