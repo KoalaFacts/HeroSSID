@@ -348,7 +348,7 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
         ValidHttps(uri) && uri!.OriginalString.Length <= 2_000 &&
         uri.AbsolutePath == PublicRequestObjectPath &&
         uri.Query.Length == 0 &&
-        uri.OriginalString.EndsWith('/', StringComparison.Ordinal);
+        uri.OriginalString.EndsWith("/", StringComparison.Ordinal);
 
     private static bool ValidDid(string? did) =>
         !string.IsNullOrWhiteSpace(did) && did.Length <= 255 &&
