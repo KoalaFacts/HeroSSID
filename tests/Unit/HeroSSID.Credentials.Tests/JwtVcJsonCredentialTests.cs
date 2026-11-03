@@ -311,12 +311,67 @@ public sealed class JwtVcJsonCredentialTests
             JwtVcJsonRevocationSnapshot.Check(snapshot, legacy, _issuer.Did, Now));
     }
 
+    [Fact]
+    public void IndependentVc11JwtWithoutOptionalKidRequiresPinnedIssuerAndAuthenticSignature()
+    {
+        // VC Data Model 1.1 REC §6.3.1 allows omitting kid. For did:key
+        // verification, the trust anchor MUST remain the verifier-pinned DID.
+        string jwt = SignExternalJwt(null,
+            "https://issuer.example/credentials/no-kid", "JWT", includeKid: false);
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out var subject));
+        Assert.Equal("active", subject.GetProperty("membership").GetString());
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, _other.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out var foreign));
+        Assert.Equal(JsonValueKind.Undefined, foreign.ValueKind);
+
+        string[] segments = jwt.Split('.');
+        segments[1] = Base64UrlEncoder.Encode(
+            Base64UrlEncoder.DecodeString(segments[1]).Replace(
+                "active", "administrator", StringComparison.Ordinal));
+        Assert.False(JwtVcJsonCredential.TryVerify(string.Join('.', segments),
+            _issuer.Did, _holder.Did, CredentialType, Vocabulary, Now, out _));
+
+        // Omission is an opt-in normative JWT-only profile, not a way to
+        // bypass the legacy issuer kid or accept a mismatched explicit kid.
+        string legacyWithoutKid = SignExternalJwt(null,
+            "https://issuer.example/credentials/legacy-no-kid", "vc+jwt", includeKid: false);
+        Assert.False(JwtVcJsonCredential.TryVerify(legacyWithoutKid,
+            _issuer.Did, _holder.Did, CredentialType, Vocabulary, Now, out _));
+        string wrongKid = SignExternalJwt(null,
+            "https://issuer.example/credentials/wrong-kid", "JWT",
+            headerKidOverride: _other.Did + "#" + _other.Did["did:key:".Length..]);
+        Assert.False(JwtVcJsonCredential.TryVerify(wrongKid,
+            _issuer.Did, _holder.Did, CredentialType, Vocabulary, Now, out _));
+    }
+
+    [Fact]
+    public void IssuerPrivateStatusAcceptsAuthenticNormativeJwtWithoutOptionalKid()
+    {
+        string jwt = SignExternalJwt(null,
+            "https://issuer.example/credentials/status-no-kid", "JWT", includeKid: false);
+        var clock = new FixedClock(Now);
+        string revoked = JwtVcJsonRevocationSnapshot.Create(
+            _issuer.Did, [jwt], _issuer.Seed, Now, clock);
+        Assert.Equal(RevocationSnapshotCheckResult.Revoked,
+            JwtVcJsonRevocationSnapshot.Check(revoked, jwt, _issuer.Did, Now));
+        string clean = JwtVcJsonRevocationSnapshot.Create(
+            _issuer.Did, [], _issuer.Seed, Now, clock);
+        Assert.Equal(RevocationSnapshotCheckResult.NotListed,
+            JwtVcJsonRevocationSnapshot.Check(clean, jwt, _issuer.Did, Now));
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            JwtVcJsonRevocationSnapshot.Check(clean, jwt, _other.Did, Now));
+    }
+
     private string SignExternalJwt(long? signatureIssuedAt, string credentialId,
-        string tokenType = "vc+jwt")
+        string tokenType = "vc+jwt", bool includeKid = true, string? headerKidOverride = null)
     {
         string kid = _issuer.Did + "#" + _issuer.Did["did:key:".Length..];
-        string header = Base64UrlEncoder.Encode(JsonSerializer.Serialize(
-            new { alg = "EdDSA", typ = tokenType, kid }));
+        string header = includeKid
+            ? Base64UrlEncoder.Encode(JsonSerializer.Serialize(
+                new { alg = "EdDSA", typ = tokenType, kid = headerKidOverride ?? kid }))
+            : Base64UrlEncoder.Encode(JsonSerializer.Serialize(
+                new { alg = "EdDSA", typ = tokenType }));
         var claims = new Dictionary<string, object>
         {
             ["iss"] = _issuer.Did,
