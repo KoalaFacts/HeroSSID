@@ -583,6 +583,19 @@ public sealed class JwtVcJsonCredentialTests
         Assert.False(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _other.Did,
             CredentialType, Vocabulary, Now, out _));
 
+        // Omitting typ must not cause an explicitly wrong kid to be ignored,
+        // including by the separate issuer-status ingestion path.
+        string wrongKid = SignExternalJwt(null,
+            "https://issuer.example/credentials/typ-omitted-wrong-kid",
+            "JWT", includeKid: true,
+            headerKidOverride: _other.Did + "#" + _other.Did["did:key:".Length..],
+            omitSubjectId: true, omitTyp: true);
+        Assert.False(JwtVcJsonCredential.TryVerify(wrongKid, _issuer.Did,
+            _holder.Did, CredentialType, Vocabulary, Now, out _));
+        Assert.Throws<CryptographicException>(() =>
+            JwtVcJsonRevocationSnapshot.Create(_issuer.Did, [wrongKid],
+                _issuer.Seed, Now, new FixedClock(Now)));
+
         string revoked = JwtVcJsonRevocationSnapshot.Create(_issuer.Did, [jwt],
             _issuer.Seed, Now, new FixedClock(Now));
         Assert.Equal(RevocationSnapshotCheckResult.Revoked,
