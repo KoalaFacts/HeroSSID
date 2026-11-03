@@ -252,7 +252,7 @@ public static class OpenId4VpJwtVcJsonRequestUri
         // selected from the launch itself; only an opaque last path segment.
         if (!IsAllowedRequestUri(independentlyTrustedRequestBaseUri) ||
             independentlyTrustedRequestBaseUri.Query.Length != 0 ||
-            !independentlyTrustedRequestBaseUri.OriginalString.EndsWith('/', StringComparison.Ordinal) ||
+            !independentlyTrustedRequestBaseUri.OriginalString.EndsWith("/", StringComparison.Ordinal) ||
             !string.Equals(independentlyTrustedRequestBaseUri.OriginalString,
                 independentlyTrustedRequestBaseUri.AbsoluteUri, StringComparison.Ordinal) ||
             independentlyTrustedRequestBaseUri.OriginalString.Length + 43 > MaximumRequestUriLength ||
