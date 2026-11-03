@@ -205,13 +205,16 @@ public static class JwtVcJsonCredential
     private static bool TryReadSupportedCredentialJwt(string jwt, string issuerDid,
         out JsonElement payload, out bool isNormativeJwt)
     {
-        // W3C VC1.1 REC §6.3.1 has optional kid only for typ=JWT. The
+        // W3C VC1.1 REC §6.3.1 makes typ optional (if present, JWT), and
+        // kid optional. Both still require an independently pinned Ed25519
+        // issuer; the legacy vc+jwt form keeps its mandatory kid and typ. The
         // verifier-supplied did:key always supplies the signature key.
         // Legacy vc+jwt MUST continue to have the exact issuer kid.
         isNormativeJwt =
             StrictJwtReader.TryRead(jwt, JwtType, MaximumJwtLength,
-                out payload, KeyId(issuerDid)) ||
-            StrictJwtReader.TryRead(jwt, JwtType, MaximumJwtLength, out payload);
+                out payload, KeyId(issuerDid), allowMissingType: true) ||
+            StrictJwtReader.TryRead(jwt, JwtType, MaximumJwtLength,
+                out payload, allowMissingType: true);
         return isNormativeJwt ||
             StrictJwtReader.TryRead(jwt, LegacyJwtType, MaximumJwtLength,
                 out payload, KeyId(issuerDid));
