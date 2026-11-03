@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using NSec.Cryptography;
 
 namespace HeroSSID.Integration.Tests;
@@ -127,6 +128,135 @@ public sealed class JwtVcJsonOpenId4VpHttpIntegrationTests(DatabaseFixture fixtu
             "/api/v1/credentials/jwt-vc-json/openid4vp/requests/" + new string('A', 43),
             TestContext.Current.CancellationToken).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+    }
+
+    [Fact]
+    public async Task CancelledPublishedRequestImmediatelyReturnsItsBoundedHostCapacity()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        await using var host = NewHost();
+        using var client = host.CreateClient();
+        string token = await GetTokenAsync(client, "credential:verify did:manage").ConfigureAwait(true);
+        string verifierDid = await CreateDidAsync(client, token).ConfigureAwait(true);
+        using var issuerKey = NewKey();
+        string issuerDid = DidFromKey(issuerKey);
+
+        var requestObjects = host.Services
+            .GetRequiredService<OpenId4VpJwtVcJsonRequestObjectStore>();
+        // Reservations never issue a persistent challenge. Fill the remaining
+        // 255 slots to expose stale published-entry capacity leaks, not PG quota.
+        var reservations = Enumerable.Range(0, 255)
+            .Select(_ => requestObjects.Reserve()).ToArray();
+        try
+        {
+            var input = new
+            {
+                verifierDid, responseUri = ResponseUri, trustedIssuerDid = issuerDid,
+                credentialType = TypeIri, subjectContextUri = Context.AbsoluteUri,
+                lifetimeSeconds = 120, publishRequestUri = true
+            };
+            using var issued = await PostAsync(client, IssueRoute, input, token)
+                .ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.Created, issued.StatusCode);
+            var details = await issued.Content.ReadFromJsonAsync<JsonElement>(
+                cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+            string nonce = details.GetProperty("nonce").GetString()!;
+
+            using var full = await PostAsync(client, IssueRoute, input, token)
+                .ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.TooManyRequests, full.StatusCode);
+
+            using var cancelled = await PostAsync(client, CancelRoute,
+                new { verifierDid, nonce }, token).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.NoContent, cancelled.StatusCode);
+
+            // A cancelled, no-longer-retrievable Request Object must not
+            // occupy a volatile publication slot until its original expiry.
+            using var replacement = await PostAsync(client, IssueRoute, input, token)
+                .ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.Created, replacement.StatusCode);
+        }
+        finally
+        {
+            foreach (string reference in reservations)
+            {
+                requestObjects.ReleaseReservation(reference);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task AcceptedPublishedHolderProofReclaimsTheHostSlotWithoutDroppingOtherReservations()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        await using var host = NewHost();
+        using var client = host.CreateClient();
+        string token = await GetTokenAsync(client, "credential:verify did:manage").ConfigureAwait(true);
+        string verifierDid = await CreateDidAsync(client, token).ConfigureAwait(true);
+        using var issuerKey = NewKey();
+        using var holderKey = NewKey();
+        string issuerDid = DidFromKey(issuerKey);
+        string holderDid = DidFromKey(holderKey);
+        var input = new
+        {
+            verifierDid, responseUri = ResponseUri, trustedIssuerDid = issuerDid,
+            credentialType = TypeIri, subjectContextUri = Context.AbsoluteUri,
+            lifetimeSeconds = 120, publishRequestUri = true
+        };
+        using var issued = await PostAsync(client, IssueRoute, input, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Created, issued.StatusCode);
+        var issuedBody = await issued.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        string jwt = issuedBody.GetProperty("signedRequestJwt").GetString()!;
+        string nonce = issuedBody.GetProperty("nonce").GetString()!;
+        string launch = issuedBody.GetProperty("referenceWalletInvocationUri").GetString()!;
+        int offset = launch.IndexOf("&request_uri=", StringComparison.Ordinal);
+        Assert.True(offset > 0);
+        string url = Uri.UnescapeDataString(launch[(offset + "&request_uri=".Length)..]);
+        var published = new Uri(url);
+
+        using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
+            new { id = holderDid, role = "member" }));
+        DateTimeOffset now = TimeProvider.System.GetUtcNow();
+        string credential = JwtVcJsonCredential.Create(issuerDid, holderDid, TypeIri,
+            Context, subject.RootElement, issuerKey.Export(KeyBlobFormat.RawPrivateKey),
+            now.AddMinutes(-1), now.AddMinutes(10));
+        string form = OpenId4VpJwtVcJsonDirectPost.CreateHolderResponseForm(
+            jwt, verifierDid, new Uri(ResponseUri), TypeIri, Context, credential, holderDid,
+            holderKey.Export(KeyBlobFormat.RawPrivateKey), TimeProvider.System);
+        string status = JwtVcJsonRevocationSnapshot.Create(issuerDid, [],
+            issuerKey.Export(KeyBlobFormat.RawPrivateKey), now, TimeProvider.System);
+        var requestObjects = host.Services
+            .GetRequiredService<OpenId4VpJwtVcJsonRequestObjectStore>();
+        string[] reservations = Enumerable.Range(0, 255)
+            .Select(_ => requestObjects.Reserve()).ToArray();
+        try
+        {
+            using var full = await PostAsync(client, IssueRoute, input, token).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.TooManyRequests, full.StatusCode);
+            using var accepted = await PostAsync(client, VerifyRoute, new
+            {
+                verifierDid, nonce, form, revocationSnapshot = status,
+                expectedCredentialType = TypeIri, subjectContextUri = Context.AbsoluteUri
+            }, token).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+            var result = await accepted.Content.ReadFromJsonAsync<JsonElement>(
+                cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+            Assert.Equal("SignedNotListed", result.GetProperty("status").GetString());
+            using var retired = await client.GetAsync(published.PathAndQuery,
+                TestContext.Current.CancellationToken).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.NotFound, retired.StatusCode);
+            using var replacement = await PostAsync(client, IssueRoute, input, token)
+                .ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.Created, replacement.StatusCode);
+        }
+        finally
+        {
+            foreach (string reservation in reservations)
+            {
+                requestObjects.ReleaseReservation(reservation);
+            }
+        }
     }
 
     [Fact]

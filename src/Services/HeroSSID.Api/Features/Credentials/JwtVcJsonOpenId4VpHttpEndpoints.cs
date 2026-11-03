@@ -259,10 +259,12 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
     internal static IResult Cancel(
         [FromBody] CancelOpenId4VpSignedRequestRequest request,
         [FromServices] IPresentationChallengeStore challenges,
+        [FromServices] OpenId4VpJwtVcJsonRequestObjectStore requestObjects,
         [FromServices] ITenantContext tenantContext)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(challenges);
+        ArgumentNullException.ThrowIfNull(requestObjects);
         ArgumentNullException.ThrowIfNull(tenantContext);
 
         if (!ValidDid(request.VerifierDid) ||
@@ -283,8 +285,13 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
         {
             // The retained challenge is bound to tenant, verifier client ID and nonce.
             // Atomic consumption also prevents a future valid holder response.
-            _ = challenges.TryConsume(tenantId,
-                "decentralized_identifier:" + request.VerifierDid, request.Nonce);
+            string audience = "decentralized_identifier:" + request.VerifierDid;
+            _ = challenges.TryConsume(tenantId, audience, request.Nonce);
+            // A successfully cancelled (or already-spent) nonce cannot produce
+            // a valid holder response. Immediately free its single-process
+            // publication slot; otherwise cancelled requests exhaust the host
+            // for their full lifetime even though public GET already returns 404.
+            requestObjects.RetireConsumedChallenge(tenantId, audience, request.Nonce);
             return Results.NoContent();
         }
         catch (NpgsqlException)
@@ -306,11 +313,13 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
     internal static IResult Verify(
         [FromBody] VerifyOpenId4VpDirectPostRequest request,
         [FromServices] IPresentationChallengeStore challenges,
+        [FromServices] OpenId4VpJwtVcJsonRequestObjectStore requestObjects,
         [FromServices] ITenantContext tenantContext,
         [FromServices] TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(challenges);
+        ArgumentNullException.ThrowIfNull(requestObjects);
         ArgumentNullException.ThrowIfNull(tenantContext);
         ArgumentNullException.ThrowIfNull(clock);
 
@@ -340,6 +349,17 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
                 "decentralized_identifier:" + request.VerifierDid,
                 request.Nonce!, request.ExpectedCredentialType!,
                 request.SubjectContextUri!, challenges, clock, out JsonElement subject);
+            if (status is RevocationSnapshotCheckResult.NotListed or
+                RevocationSnapshotCheckResult.Revoked)
+            {
+                // These decisions follow successful holder/issuer proof and
+                // atomic challenge consumption. They must not retain unusable
+                // hosted Request Objects until TTL; invalid attempts do not
+                // retire a still-live challenge.
+                requestObjects.RetireConsumedChallenge(tenantId,
+                    "decentralized_identifier:" + request.VerifierDid, request.Nonce!);
+            }
+
             return status switch
             {
                 RevocationSnapshotCheckResult.NotListed =>
