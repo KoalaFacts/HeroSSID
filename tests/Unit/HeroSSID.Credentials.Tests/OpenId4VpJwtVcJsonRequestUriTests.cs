@@ -245,7 +245,10 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
             Assert.Equal("application/x-www-form-urlencoded",
                 request.Content?.Headers.ContentType?.MediaType);
             Assert.Equal(body, request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
-            return new HttpResponseMessage(HttpStatusCode.OK);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{}", Encoding.UTF8, "application/json")
+            };
         });
         using var http = new HttpClient(handler);
         Assert.True(await OpenId4VpJwtVcJsonWalletResponseTransport.PostResponseFormAsync(
@@ -294,6 +297,37 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
         }
 
         using (var handler = new ProbeHandler(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)))
+        using (var http = new HttpClient(handler))
+        {
+            Assert.False(await OpenId4VpJwtVcJsonWalletResponseTransport.PostResponseFormAsync(
+                requestJwt, body, Callback, http, _verifier.Did, Type, Context, _clock));
+        }
+    }
+
+
+    [Fact]
+    public async Task WalletRejectsHtmlOrMalformedJsonReceiptAfterPosting()
+    {
+        var challenge = new InMemoryPresentationChallengeStore(_clock).IssueHosted(
+            Guid.NewGuid(), "decentralized_identifier:" + _verifier.Did, _issuer.Did);
+        string requestJwt = SignedRequest(challenge);
+        string body = HolderBoundForm(requestJwt);
+        using (var handler = new ProbeHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("<html>ok</html>", Encoding.UTF8, "text/html")
+            }))
+        using (var http = new HttpClient(handler))
+        {
+            Assert.False(await OpenId4VpJwtVcJsonWalletResponseTransport.PostResponseFormAsync(
+                requestJwt, body, Callback, http, _verifier.Did, Type, Context, _clock));
+        }
+
+        using (var handler = new ProbeHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{", Encoding.UTF8, "application/json")
+            }))
         using (var http = new HttpClient(handler))
         {
             Assert.False(await OpenId4VpJwtVcJsonWalletResponseTransport.PostResponseFormAsync(
