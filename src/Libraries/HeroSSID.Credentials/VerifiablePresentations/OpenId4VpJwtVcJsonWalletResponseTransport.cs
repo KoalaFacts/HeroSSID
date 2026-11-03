@@ -49,8 +49,8 @@ public static class OpenId4VpJwtVcJsonWalletResponseTransport
             !form.StartsWith("vp_token=", StringComparison.Ordinal) ||
             !form.EndsWith("&state=" + Uri.EscapeDataString(signed.Challenge.Nonce),
                 StringComparison.Ordinal) ||
-            form.IndexOf('&') != form.LastIndexOf('&') ||
-            form.IndexOf('&') <= "vp_token=".Length ||
+            form.IndexOf('&', StringComparison.Ordinal) != form.LastIndexOf('&') ||
+            form.IndexOf('&', StringComparison.Ordinal) <= "vp_token=".Length ||
             !form.All(static character => character is >= '!' and <= '~') ||
             http.DefaultRequestHeaders.Any())
         {
@@ -79,8 +79,8 @@ public static class OpenId4VpJwtVcJsonWalletResponseTransport
             if (response.StatusCode != HttpStatusCode.OK ||
                 response.RequestMessage?.RequestUri?.OriginalString !=
                     independentlyTrustedResponseUri.OriginalString ||
-                !string.Equals(contentType?.MediaType, "application/json",
-                    StringComparison.OrdinalIgnoreCase) ||
+                (contentType is null || !string.Equals(contentType.MediaType, "application/json",
+                    StringComparison.OrdinalIgnoreCase)) ||
                 (contentType.CharSet is not null &&
                     !string.Equals(contentType.CharSet, "utf-8",
                         StringComparison.OrdinalIgnoreCase)) ||
