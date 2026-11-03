@@ -448,6 +448,79 @@ public sealed class JwtVcJsonCredentialTests
                 _issuer.Seed, Now, new FixedClock(Now)));
     }
 
+    [Fact]
+    public void IssuerCanSignPortableCredentialIdWithOriginalCredentialAndStatusSignature()
+    {
+        var id = new Uri("https://issuer.example/credentials/membership-123");
+        using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
+            new { id = _holder.Did, membership = "active" }));
+        string jwt = JwtVcJsonCredential.Create(_issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, subject.RootElement, _issuer.Seed,
+            Now.AddMinutes(-1), Now.AddMinutes(10), id);
+
+        using var signed = JsonDocument.Parse(Ed25519JwtSigner.ExtractPayload(jwt));
+        Assert.Equal(id.AbsoluteUri, signed.RootElement.GetProperty("jti").GetString());
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out var verified, out string? verifiedId));
+        Assert.Equal(id.AbsoluteUri, verifiedId);
+        Assert.Equal("active", verified.GetProperty("membership").GetString());
+        string status = JwtVcJsonRevocationSnapshot.Create(_issuer.Did, [jwt],
+            _issuer.Seed, Now, new FixedClock(Now));
+        Assert.Equal(RevocationSnapshotCheckResult.Revoked,
+            JwtVcJsonRevocationSnapshot.Check(status, jwt, _issuer.Did, Now));
+    }
+
+    [Fact]
+    public void IndependentSignedJtiIsReturnedOnlyAfterIssuerHolderAndSignatureValidation()
+    {
+        const string expectedId = "https://issuer.example/credentials/independent-id";
+        string jwt = SignExternalJwt(null, expectedId, "JWT", includeKid: false);
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out var subject, out string? identifier));
+        Assert.Equal(expectedId, identifier);
+        Assert.Equal("active", subject.GetProperty("membership").GetString());
+
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _other.Did,
+            CredentialType, Vocabulary, Now, out var foreign, out string? foreignId));
+        Assert.Equal(JsonValueKind.Undefined, foreign.ValueKind);
+        Assert.Null(foreignId);
+
+        string[] parts = jwt.Split('.');
+        parts[1] = Base64UrlEncoder.Encode(
+            Base64UrlEncoder.DecodeString(parts[1]).Replace(
+                "independent-id", "changed-id", StringComparison.Ordinal));
+        Assert.False(JwtVcJsonCredential.TryVerify(string.Join('.', parts),
+            _issuer.Did, _holder.Did, CredentialType, Vocabulary,
+            Now, out var tampered, out string? tamperedId));
+        Assert.Equal(JsonValueKind.Undefined, tampered.ValueKind);
+        Assert.Null(tamperedId);
+
+        string withoutId = Issue();
+        Assert.True(JwtVcJsonCredential.TryVerify(withoutId,
+            _issuer.Did, _holder.Did, CredentialType, Vocabulary,
+            Now, out _, out string? absentId));
+        Assert.Null(absentId);
+    }
+
+    [Fact]
+    public void CredentialIdIssuanceRejectsUntrustedOrUnsupportedIdentifiers()
+    {
+        using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
+            new { id = _holder.Did, membership = "active" }));
+        foreach (string rejected in new[]
+        {
+            "http://issuer.example/credentials/123",
+            "https://user:pass@issuer.example/credentials/123",
+            "https://issuer.example/credentials/" + new string('x', 2048)
+        })
+        {
+            Assert.Throws<ArgumentException>(() => JwtVcJsonCredential.Create(
+                _issuer.Did, _holder.Did, CredentialType, Vocabulary,
+                subject.RootElement, _issuer.Seed,
+                Now.AddMinutes(-1), Now.AddMinutes(10), new Uri(rejected)));
+        }
+    }
+
     private string SignExternalJwt(long? signatureIssuedAt, string credentialId,
         string tokenType = "vc+jwt", bool includeKid = true, string? headerKidOverride = null,
         bool omitSubjectId = false, string? subjectIdOverride = null)
