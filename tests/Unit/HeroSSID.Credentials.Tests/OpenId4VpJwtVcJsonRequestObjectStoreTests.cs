@@ -24,6 +24,14 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStoreTests
         string reference = host.Publish(tenant, signed, verifier.Did,
             Callback, CredentialType, Context);
 
+        // Legacy downgrade prevention detects a hosted original even if
+        // selecting one exact original becomes ambiguous.
+        Assert.True(host.HasPublishedChallenge(tenant, audience, challenge.Nonce));
+        Assert.False(host.HasPublishedChallenge(Guid.NewGuid(), audience, challenge.Nonce));
+        Assert.False(host.HasPublishedChallenge(
+            tenant, "decentralized_identifier:" + issuer.Did, challenge.Nonce));
+        Assert.False(host.HasPublishedChallenge(tenant, audience, new string('A', 43)));
+
         Assert.False(host.TryFindPublishedChallenge(
             Guid.NewGuid(), audience, challenge.Nonce, out _));
         Assert.False(host.TryFindPublishedChallenge(
@@ -45,6 +53,7 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStoreTests
         Assert.NotEqual(reference, duplicate);
         Assert.False(host.TryFindPublishedChallenge(
             tenant, audience, challenge.Nonce, out _));
+        Assert.True(host.HasPublishedChallenge(tenant, audience, challenge.Nonce));
 
         Assert.True(challenges.TryConsume(tenant, audience, challenge.Nonce));
         Assert.False(host.TryFindPublishedChallenge(
@@ -99,6 +108,8 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStoreTests
         Assert.False(host.TryGet(new string('A', 43), out _));
         string reference = host.Publish(tenant, signed, verifier.Did, Callback, CredentialType, Context);
         clock.Advance(TimeSpan.FromMinutes(3));
+        Assert.False(host.HasPublishedChallenge(tenant,
+            "decentralized_identifier:" + verifier.Did, challenge.Nonce));
         Assert.False(host.TryGet(reference, out string expired));
         Assert.Equal(string.Empty, expired);
     }

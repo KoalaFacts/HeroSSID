@@ -187,17 +187,26 @@ fresh issuer status `SignedNotListed` releases verified subject claims.
 Correctly signed but revoked credentials release no subject data. It never
 trusts a request hash or response URI forwarded by the holder.
 
-This is **opt-in**: the existing `verify-response` route preserves its older
-non-original-bound behavior for by-value clients. Integrators requiring
-original-request binding must consistently use the new strict route and must
-not route failed strict validations to that compatibility endpoint. The strict
-route deliberately fails closed following process restart, load-balancer
-routing to a different process or loss of the volatile original request.
-It is not a multi-replica hosted verifier; the reference and HTTP verifier
-must reach the **same process**. This improvement does not implement a
-public `direct_post` callback, informed user consent, selective disclosure,
+This is **opt-in**: the older authenticated `verify-response` route
+continues to accept **unpublished** by-value requests. It now returns
+`Invalid`, reveals no claims and **does not consume the challenge** when
+the same process retains a live, published original Request Object for the
+tenant, verifier audience and nonce. This prevents a genuine but unbound
+holder response from bypassing the strict hosted verification route during
+that live publication; a properly bound holder proof must use
+`verify-hosted-response`. An independent PostgreSQL/HTTP negative test
+reproduced the original claim disclosure before this guard.
+
+**This is not a durable profile marker.** After a restart or on another API
+replica without the volatile publication, the compatibility route cannot
+distinguish a formerly hosted challenge from an unpublished by-value one.
+Integrators must explicitly disallow legacy fallback for hosted flows at
+their routing/policy boundary. The strict route itself fails closed without
+the original request. It is not a multi-replica hosted verifier: the public
+GET and strict HTTP verifier must reach the **same process**. No public
+`direct_post` callback, informed user consent, selective disclosure,
 independent Wallet interoperability, full OpenID4VP conformance, identity
-vetting or business authorization.
+vetting or business authorization is provided.
 
 The real PostgreSQL/HTTP integration suite exercises both success and replay,
 unbound holder proof rejection before spending a challenge, changed policy

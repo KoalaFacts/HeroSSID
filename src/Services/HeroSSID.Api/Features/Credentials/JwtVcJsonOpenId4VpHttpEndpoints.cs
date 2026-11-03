@@ -407,8 +407,21 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
             }
             else
             {
-                // Legacy by-value compatibility route is explicitly not
-                // server-retained original Request Object binding.
+                // A published original Request Object requires holder proof
+                // bound to its exact signed bytes. Never allow the older
+                // unbound compatibility route to accept (or consume) that
+                // same live tenant/verifier/nonce challenge. Otherwise the
+                // caller could bypass the strict verifier by changing routes.
+                // This guard covers this process's live published requests;
+                // volatile references are not persisted across replicas/restarts.
+                if (requestObjects.HasPublishedChallenge(
+                        tenantId, audience, request.Nonce!))
+                {
+                    return Results.Ok(new VerifyOpenId4VpDirectPostResponse("Invalid", null));
+                }
+
+                // Unpublished by-value compatibility requests retain their
+                // existing verifier semantics.
                 status = JwtVcJsonDirectPostRevocation.CheckResponseForm(
                     request.Form!, request.RevocationSnapshot!, tenantId, audience,
                     request.Nonce!, request.ExpectedCredentialType!,

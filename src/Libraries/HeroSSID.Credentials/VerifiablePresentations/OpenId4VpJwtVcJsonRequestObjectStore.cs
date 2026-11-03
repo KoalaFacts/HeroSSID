@@ -208,6 +208,30 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStore(
     }
 
     /// <summary>
+    /// Detect any matching retained publication, including duplicate/ambiguous
+    /// originals. The legacy unbound verifier must reject such challenges
+    /// rather than interpreting strict lookup failure as a license to downgrade.
+    /// This conservative guard does not depend on a potentially already-spent
+    /// challenge row. Volatile single-process only.
+    /// </summary>
+    public bool HasPublishedChallenge(Guid tenantId, string audience, string nonce)
+    {
+        if (!PresentationChallengePolicy.IsValidLookup(tenantId, audience, nonce))
+        {
+            return false;
+        }
+
+        lock (_gate)
+        {
+            RemoveExpired(clock.GetUtcNow());
+            return _entries.Values.Any(entry =>
+                entry.TenantId == tenantId &&
+                string.Equals(entry.Audience, audience, StringComparison.Ordinal) &&
+                string.Equals(entry.Nonce, nonce, StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>
     /// Locate the original *server-published* verifier request by its exact
     /// tenant/client/nonce, for a strict authenticated verification route.
     /// No reference, request hash, callback or policy comes from the holder.
