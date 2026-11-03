@@ -83,12 +83,17 @@ credential's actual validity remains controlled by signed `nbf` and `exp`
 with a maximum 15-minute interval.
 
 This remains a **deliberately constrained, fail-closed verifier**, not general
-JWT-VC conformance. It accepts genuine W3C VC1.1 `typ=JWT` signed by the pinned
-Ed25519 issuer and keeps older HeroSSID `typ=vc+jwt` JWTs valid as **legacy
+JWT-VC conformance. It accepts genuine W3C VC1.1 JWTs signed by the independently
+pinned Ed25519 issuer with either **`typ=JWT` or no `typ` at all**, because
+VC Data Model 1.1 §6.3.1 says `typ` is optional, but must equal `JWT` **if
+present**. Independently signed NSec test vectors cover omission both with and
+without the optional `kid`, genuine signature, holder binding and issuer-signed
+original-JWT revocation. The library still emits `typ=JWT` when issuing new
+credentials, and keeps older HeroSSID `typ=vc+jwt` JWTs valid as **legacy
 inputs**; that older header is not represented as conforming to VC1.1 §6.3.1.
 This is a deliberate on-wire change to new `Create` output: integrations
 hardcoded to `typ=vc+jwt` must update their verifiers. `typ=vp+jwt`, arbitrary
-types, **wrong explicit** DID key IDs and forged or foreign signatures remain rejected. For a W3C VC1.1 `typ=JWT` only, the Recommendation makes `kid` optional: a JWT omitting it is verified against the verifier's independently pinned Ed25519 `did:key`, **never** a key selected by token contents. Legacy `typ=vc+jwt` still requires exact `kid`. Optional `jti` must be a bounded absolute HTTPS URI without
+types, **wrong explicit** DID key IDs and forged or foreign signatures remain rejected. For a W3C VC1.1 JWT with `typ=JWT` or no `typ`, the Recommendation makes `kid` optional: a JWT omitting it is verified against the verifier's independently pinned Ed25519 `did:key`, **never** a key selected by token contents. Legacy `typ=vc+jwt` still requires exact `kid`. Optional `jti` must be a bounded absolute HTTPS URI without
 userinfo and is not fetched or treated as issuer trust, holder-key proof,
 identity, authorization or evidence of historical issuance. Every other
 JWT payload member outside the five required fields and the optional
