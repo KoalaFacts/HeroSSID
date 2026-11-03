@@ -81,7 +81,7 @@ public static class JwtVcJsonPresentation
             !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(holderDid, out var holderPublicKey) ||
             !JwtVcJsonCredential.TryVerify(credentialJwt, challenge.TrustedIssuerDid,
                 holderDid, expectedCredentialType, expectedSubjectContextUri, now, out _) ||
-            !TryReadCredentialExpiry(credentialJwt, out long credentialExpires))
+            !TryReadCredentialExpiry(credentialJwt, out decimal credentialExpires))
         {
             throw new ArgumentException("An authentic issuer credential and an actual holder signing key are required.",
                 nameof(credentialJwt));
@@ -262,7 +262,7 @@ public static class JwtVcJsonPresentation
             expiresAt > PresentationChallengePolicy.NumericDate(challenge.ExpiresAt) ||
             !JwtVcJsonCredential.TryVerify(credentialJwt, challenge.TrustedIssuerDid,
                 holderDid, expectedCredentialType, expectedSubjectContextUri, now, out var subject) ||
-            !TryReadCredentialExpiry(credentialJwt, out long credentialExpires) ||
+            !TryReadCredentialExpiry(credentialJwt, out decimal credentialExpires) ||
             expiresAt > credentialExpires)
         {
             return JwtVcJsonPresentationCheckResult.Invalid;
@@ -345,7 +345,7 @@ public static class JwtVcJsonPresentation
         }
     }
 
-    private static bool TryReadCredentialExpiry(string credentialJwt, out long expiresAt)
+    private static bool TryReadCredentialExpiry(string credentialJwt, out decimal expiresAt)
     {
         expiresAt = 0;
         if (!StrictJwtReader.IsCanonicalCompact(credentialJwt, MaximumCredentialLength))
@@ -357,7 +357,12 @@ public static class JwtVcJsonPresentation
         {
             using var document = JsonDocument.Parse(Base64UrlEncoder.DecodeBytes(credentialJwt.Split('.')[1]),
                 new JsonDocumentOptions { MaxDepth = 16 });
-            return StrictJwtReader.TryGetTimestamp(document.RootElement, "exp", out expiresAt);
+            // The issuer JWT was already verified above, with its exact type,
+            // signature and canonical payload. Preserve fractional NumericDate
+            // for presentation expiry rather than rejecting a valid VC1.1 JWT.
+            // Historical vc+jwt fractional inputs fail in that prior verifier.
+            return JwtVcJsonCredential.TryGetSignedNumericDate(
+                document.RootElement, "exp", normative: true, out expiresAt);
         }
         catch (JsonException)
         {
