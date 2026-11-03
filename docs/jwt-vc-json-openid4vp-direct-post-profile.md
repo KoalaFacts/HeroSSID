@@ -47,6 +47,13 @@ string form = OpenId4VpJwtVcJsonDirectPost.CreateHolderBoundResponseForm(
     signedRequestJwt, trustedVerifierDid, independentlyPinnedResponseUri,
     credentialType, subjectContextUri, credentialJwt, holderDid, holderSeed, clock);
 
+// Alternatively, after a real full-disclosure consent interaction, use
+// OpenId4VpJwtVcJsonWalletDisclosure.CreateHolderBoundResponseFormAfterPreview
+// (or CreateHolderBoundResponseFormAfterStatusPreview with a genuine signed
+// issuer status snapshot). These revalidate the displayed original request,
+// issuer credential and optional status before signing the holder-bound form.
+// Legacy non-bound preview form APIs remain for non-HTTP compatibility paths.
+
 bool httpDelivered =
     await OpenId4VpJwtVcJsonWalletResponseTransport
         .PostResponseFormWithIsolatedTransportAsync(
