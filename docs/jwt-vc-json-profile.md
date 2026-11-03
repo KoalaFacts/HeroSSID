@@ -31,6 +31,34 @@ General JSON-LD consumers that require such contexts need their own
 validated semantic profile and trust policy. HeroSSID does not dereference,
 integrity-protect, or expand even the pinned HTTPS vocabulary URI.
 
+## Externally serialized VC1.1 JWTs (bounded verifier subset)
+
+A verifier can now accept a **separately encoded and genuinely issuer-signed**
+VC1.1 `jwt_vc_json` with an optional credential identifier in JWT `jti`,
+even when JWT `iat` is absent. This is consistent with the
+[OpenID4VP 1.0 final Appendix B.1.3.1 example](https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html#name-vc-signed-as-a-jwt-not-usi)
+and the [W3C VC1.1 JWT mapping](https://www.w3.org/TR/vc-data-model/#jwt-encoding).
+If `iat` is present it may precede `nbf` by up to 15 minutes; the
+credential's actual validity remains controlled by signed `nbf` and `exp`
+with a maximum 15-minute interval.
+
+This remains a **deliberately constrained, fail-closed verifier**, not general
+JWT-VC conformance. Optional `jti` must be a bounded absolute HTTPS URI without
+userinfo and is not fetched or treated as issuer trust, holder-key proof,
+identity, authorization or evidence of historical issuance. Every other
+JWT payload member outside the five required fields and the optional
+`iat`/`jti` remains rejected, as do untrusted issuers, altered JWTs, ambiguous
+JSON properties, non-pinned vocabularies, premature/expired claims and
+noncanonical Ed25519 JWS. Issuance by `Create` continues to produce the
+original six-field bounded representation without `jti`; existing tokens
+retain their verification result.
+
+The real xUnit `JwtVcJsonCredentialTests` constructs its own JSON JWT
+payload and compact JWS with NSec rather than calling the HeroSSID credential
+issuer or signing helper. It verifies the standard optional-field variants and
+negative signature/trust/id/timing cases. This **does not constitute an
+independent third-party issuer, Wallet or OpenID4VP exchange test**.
+
 ## Example
 
 ```csharp
