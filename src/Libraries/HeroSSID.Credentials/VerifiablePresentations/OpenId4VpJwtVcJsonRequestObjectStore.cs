@@ -93,16 +93,71 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStore(
     public string Publish(Guid tenantId, string signedRequestJwt, string trustedVerifierDid,
         Uri expectedResponseUri, string expectedCredentialType, Uri expectedSubjectContextUri)
     {
-        string reference = Reserve();
-        try
+        ArgumentNullException.ThrowIfNull(signedRequestJwt);
+        ArgumentNullException.ThrowIfNull(expectedResponseUri);
+        ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
+
+        // Validate the original request and independently retained challenge even
+        // on a retry. A consumed or expired nonce must never recover a reference.
+        if (tenantId == Guid.Empty ||
+            !OpenId4VpJwtVcJsonDirectPost.TryReadSignedRequest(signedRequestJwt,
+                trustedVerifierDid, expectedResponseUri, expectedCredentialType,
+                expectedSubjectContextUri, clock, out var signed) || signed is null ||
+            !HostedPresentationChallengeNonce.IsHosted(signed.Challenge.Nonce))
         {
-            PublishReserved(reference, tenantId, signedRequestJwt, trustedVerifierDid,
-                expectedResponseUri, expectedCredentialType, expectedSubjectContextUri);
-            return reference;
+            throw new ArgumentException(
+                "An authentic live tenant-owned verifier request is required.",
+                nameof(signedRequestJwt));
         }
-        finally
+
+        // Serialize the entire duplicate check and publication, so concurrent
+        // HTTP/SDK retries cannot create two originals for the same challenge.
+        // This lock is deliberately local: hosting remains single-process only.
+        lock (_gate)
         {
-            ReleaseReservation(reference);
+            PresentationChallenge? retained = challenges.Find(
+                tenantId, signed.ClientId, signed.Challenge.Nonce);
+            if (retained is null ||
+                retained.ExpiresAt != signed.Challenge.ExpiresAt ||
+                !string.Equals(retained.TrustedIssuerDid,
+                    signed.Challenge.TrustedIssuerDid, StringComparison.Ordinal))
+            {
+                throw new ArgumentException(
+                    "The signed verifier request does not match an outstanding tenant challenge.",
+                    nameof(signedRequestJwt));
+            }
+
+            RemoveExpired(clock.GetUtcNow());
+            var existing = _entries
+                .Where(entry => entry.Value.TenantId == tenantId &&
+                    string.Equals(entry.Value.Audience, signed.ClientId, StringComparison.Ordinal) &&
+                    string.Equals(entry.Value.Nonce, signed.Challenge.Nonce, StringComparison.Ordinal))
+                .Take(2).ToArray();
+
+            if (existing.Length != 0)
+            {
+                if (existing.Length == 1 &&
+                    string.Equals(existing[0].Value.SignedRequestJwt,
+                        signedRequestJwt, StringComparison.Ordinal))
+                {
+                    return existing[0].Key;
+                }
+
+                throw new InvalidOperationException(
+                    "A different or ambiguous original Request Object already exists for this challenge.");
+            }
+
+            string reference = Reserve();
+            try
+            {
+                PublishReserved(reference, tenantId, signedRequestJwt, trustedVerifierDid,
+                    expectedResponseUri, expectedCredentialType, expectedSubjectContextUri);
+                return reference;
+            }
+            finally
+            {
+                ReleaseReservation(reference);
+            }
         }
     }
 
@@ -143,6 +198,19 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStore(
 
         lock (_gate)
         {
+            // Explicit-reservation publication (used by HTTP issuance) must not
+            // create a second, possibly differently signed original for one
+            // tenant/verifier/nonce. Otherwise strict verification is poisoned
+            // by ambiguous originals and legitimate holder proof is unusable.
+            if (_entries.Values.Any(entry =>
+                entry.TenantId == tenantId &&
+                string.Equals(entry.Audience, signed.ClientId, StringComparison.Ordinal) &&
+                string.Equals(entry.Nonce, signed.Challenge.Nonce, StringComparison.Ordinal)))
+            {
+                throw new InvalidOperationException(
+                    "A verifier challenge already has a published original Request Object.");
+            }
+
             if (!_reservations.TryGetValue(opaqueReference, out DateTimeOffset reservationExpiry) ||
                 reservationExpiry <= clock.GetUtcNow())
             {

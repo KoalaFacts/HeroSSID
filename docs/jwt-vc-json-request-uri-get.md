@@ -140,6 +140,15 @@ return 503 without returning JWT bytes. A GET does not itself consume the
 verifier challenge so a Wallet can retry; the final VP remains subject to the
 existing separate, atomic verifier consumption gate. The store holds up to
 256 entries and rejects excess rather than evicting active requests.
+SDK publication retries for the **identical signed JWT** and still-live
+tenant/verifier/nonce return the **same opaque reference**, including when all
+256 volatile slots are occupied. Concurrent retries are serialized locally;
+an authentic but differently signed Request Object for the same challenge is
+rejected before it can corrupt strict original-request lookup. An expired or
+consumed challenge is never revived. The authenticated HTTP issuance endpoint
+still creates a fresh one-use challenge per new issue request; it is **not** a
+distributed, HTTP-level idempotency service.
+
 The host reserves an opaque publication slot **before** issuing the durable
 PostgreSQL verifier challenge, so a full host returns 429 without consuming
 the independent challenge quota. Failed signing/issuance releases uncommitted
