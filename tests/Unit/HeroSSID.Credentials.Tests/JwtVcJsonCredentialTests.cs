@@ -609,9 +609,77 @@ public sealed class JwtVcJsonCredentialTests
             _issuer.Did, _holder.Did, CredentialType, Vocabulary, Now, out _));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void IndependentlySignedVc11SingleElementSubjectArrayKeepsIssuerAndHolderBinding(bool omitSubjectId)
+    {
+        // A real independent Ed25519 issuer signs VC1.1's valid array form.
+        // The bounded verifier must disclose only the single authenticated object.
+        object subject = omitSubjectId
+            ? new { membership = "active" }
+            : new { id = _holder.Did, membership = "active" };
+        string jwt = SignExternalJwt(null,
+            "https://issuer.example/credentials/array-single", "JWT",
+            includeKid: false, credentialSubjectOverride: new[] { subject });
+
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out var verified));
+        Assert.Equal(JsonValueKind.Object, verified.ValueKind);
+        Assert.Equal("active", verified.GetProperty("membership").GetString());
+        Assert.Equal(!omitSubjectId, verified.TryGetProperty("id", out _));
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, _other.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out var foreign));
+        Assert.Equal(JsonValueKind.Undefined, foreign.ValueKind);
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _other.Did,
+            CredentialType, Vocabulary, Now, out _));
+
+        // Status still hashes the exact original issuer-signed JWT.
+        string revoked = JwtVcJsonRevocationSnapshot.Create(
+            _issuer.Did, [jwt], _issuer.Seed, Now, new FixedClock(Now));
+        Assert.Equal(RevocationSnapshotCheckResult.Revoked,
+            JwtVcJsonRevocationSnapshot.Check(revoked, jwt, _issuer.Did, Now));
+    }
+
+    [Fact]
+    public void SubjectArrayRejectsMultipleOrConflictingHolderClaimsAndLegacyDowngrade()
+    {
+        object valid = new { id = _holder.Did, membership = "active" };
+        object other = new { id = _other.Did, membership = "admin" };
+        object[] invalidSubjects =
+        [
+            Array.Empty<object>(),
+            new[] { valid, other },
+            new[] { other },
+            new object[] { new { id = "", membership = "active" } },
+            new object[] { new { id = _holder.Did, membership = "active",
+                nested = new Dictionary<string, object> { ["@context"] = "https://evil.example/context" } } }
+        ];
+
+        foreach (object subject in invalidSubjects)
+        {
+            string jwt = SignExternalJwt(null,
+                "https://issuer.example/credentials/array-rejected", "JWT",
+                includeKid: false, credentialSubjectOverride: subject);
+            Assert.False(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+                CredentialType, Vocabulary, Now, out var claims));
+            Assert.Equal(JsonValueKind.Undefined, claims.ValueKind);
+            Assert.Throws<CryptographicException>(() =>
+                JwtVcJsonRevocationSnapshot.Create(_issuer.Did, [jwt],
+                    _issuer.Seed, Now, new FixedClock(Now)));
+        }
+
+        string legacy = SignExternalJwt(null,
+            "https://issuer.example/credentials/array-legacy", "vc+jwt",
+            credentialSubjectOverride: new[] { valid });
+        Assert.False(JwtVcJsonCredential.TryVerify(legacy, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out _));
+    }
+
     private string SignExternalJwt(long? signatureIssuedAt, string credentialId,
         string tokenType = "vc+jwt", bool includeKid = true, string? headerKidOverride = null,
-        bool omitSubjectId = false, string? subjectIdOverride = null, bool omitTyp = false)
+        bool omitSubjectId = false, string? subjectIdOverride = null, bool omitTyp = false,
+        object? credentialSubjectOverride = null)
     {
         string kid = _issuer.Did + "#" + _issuer.Did["did:key:".Length..];
         string header = omitTyp
@@ -636,9 +704,9 @@ public sealed class JwtVcJsonCredentialTests
                 ["@context"] = new[] { "https://www.w3.org/2018/credentials/v1",
                     Vocabulary.AbsoluteUri },
                 ["type"] = new[] { "VerifiableCredential", CredentialType },
-                ["credentialSubject"] = omitSubjectId
-                    ? new { membership = "active" }
-                    : (object)new { id = subjectIdOverride ?? _holder.Did, membership = "active" }
+                ["credentialSubject"] = credentialSubjectOverride ?? (omitSubjectId
+                    ? (object)new { membership = "active" }
+                    : new { id = subjectIdOverride ?? _holder.Did, membership = "active" })
             }
         };
         if (signatureIssuedAt is long issued)
