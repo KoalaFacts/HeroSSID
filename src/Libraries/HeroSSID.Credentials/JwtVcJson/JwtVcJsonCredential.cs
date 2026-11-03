@@ -24,6 +24,29 @@ public static class JwtVcJsonCredential
     private const long MaximumValiditySeconds = 900;
 
     /// <summary>
+    /// Opt-in issuance of a VC Data Model 1.1 credential with an issuer-assigned
+    /// HTTPS identifier in the signed JWT jti claim. This identifier is not
+    /// an authorization or identity attestation and is never dereferenced.
+    /// </summary>
+    public static string Create(string issuerDid, string holderDid, string credentialType,
+        Uri subjectContextUri, JsonElement credentialSubject, byte[] issuerPrivateKey,
+        DateTimeOffset validFrom, DateTimeOffset validUntil, Uri credentialId) =>
+        throw new NotSupportedException("The signed credential-ID issuance path is not implemented.");
+
+    /// <summary>
+    /// Verify issuer-signed claims and expose the exact authenticated JWT jti
+    /// only after every verification condition succeeds, or null on failure.
+    /// </summary>
+    public static bool TryVerify(string jwt, string trustedIssuerDid, string expectedHolderDid,
+        string expectedCredentialType, Uri expectedSubjectContextUri,
+        DateTimeOffset now, out JsonElement verifiedSubject, out string? verifiedCredentialId)
+    {
+        verifiedSubject = default;
+        verifiedCredentialId = null;
+        throw new NotSupportedException("Authenticated credential-ID verification is not implemented.");
+    }
+
+    /// <summary>
     /// Sign a short-lived, fully disclosed JWT VC 1.1 with the issuer's own Ed25519 seed.
     /// Subject vocabulary is controlled by a versioned HTTPS context pinned by the verifier.
     /// A signature proves issuer-key control, NOT real-world identity, authorization or
