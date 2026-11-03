@@ -69,6 +69,12 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
             context.Scheme != Uri.UriSchemeHttps ||
             context.Host.Length == 0 || context.UserInfo.Length != 0 ||
             context.Fragment.Length != 0 || context.AbsoluteUri.Length > 2048 ||
+            (request.CredentialId is Uri identifier &&
+                (!identifier.IsAbsoluteUri ||
+                 identifier.Scheme != Uri.UriSchemeHttps ||
+                 string.IsNullOrWhiteSpace(identifier.Host) ||
+                 identifier.UserInfo.Length != 0 ||
+                 identifier.AbsoluteUri.Length > 2048)) ||
             request.CredentialSubject.ValueKind != JsonValueKind.Object ||
             validUntil == DateTimeOffset.MinValue)
         {
@@ -122,9 +128,13 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
                 // to prevent accidental backdating of requested constraints.
                 DateTimeOffset signingStart =
                     DateTimeOffset.FromUnixTimeSeconds(now.ToUnixTimeSeconds());
-                string jwt = JwtVcJsonCredential.Create(issuerDid, holderDid,
-                    credentialType, context, request.CredentialSubject, seed,
-                    signingStart, validUntil);
+                string jwt = request.CredentialId is Uri credentialId
+                    ? JwtVcJsonCredential.Create(issuerDid, holderDid,
+                        credentialType, context, request.CredentialSubject, seed,
+                        signingStart, validUntil, credentialId)
+                    : JwtVcJsonCredential.Create(issuerDid, holderDid,
+                        credentialType, context, request.CredentialSubject, seed,
+                        signingStart, validUntil);
 
                 if (clock.GetUtcNow() >= validUntil)
                 {
@@ -162,7 +172,7 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
 
     private static IResult InvalidRequest() => Results.Problem(
         title: "Invalid Request",
-        detail: "An active tenant-owned issuer, external did:key holder, HTTPS credential type and vocabulary, matching subject id and expiry within 15 minutes are required.",
+        detail: "An active tenant-owned issuer, external did:key holder, HTTPS credential type and vocabulary, optional bounded HTTPS credential ID, matching subject id and expiry within 15 minutes are required.",
         statusCode: StatusCodes.Status400BadRequest);
 }
 
@@ -173,6 +183,8 @@ public sealed class IssueJwtVcJsonCredentialRequest
     public string? HolderDid { get; init; }
     public string? CredentialType { get; init; }
     public Uri? SubjectContextUri { get; init; }
+    /// <summary>Optional issuer-assigned HTTPS credential identifier, signed as JWT jti.</summary>
+    public Uri? CredentialId { get; init; }
     public JsonElement CredentialSubject { get; init; }
     public DateTimeOffset? ValidUntil { get; init; }
 }

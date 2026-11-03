@@ -61,9 +61,9 @@ internal static class JwtVcJsonCredentialVerificationEndpoint
         bool valid = JwtVcJsonCredential.TryVerify(request.Credential!,
             request.TrustedIssuerDid!, request.ExpectedHolderDid!,
             request.ExpectedCredentialType!, request.SubjectContextUri!,
-            clock.GetUtcNow(), out var subject);
+            clock.GetUtcNow(), out var subject, out string? credentialId);
         return Results.Ok(valid
-            ? new VerifyJwtVcJsonCredentialResponse("SignedButStatusUnchecked", subject)
+            ? new VerifyJwtVcJsonCredentialResponse("SignedButStatusUnchecked", subject, credentialId)
             : new VerifyJwtVcJsonCredentialResponse("Invalid", null));
     }
 
@@ -95,7 +95,7 @@ internal static class JwtVcJsonCredentialVerificationEndpoint
         if (!JwtVcJsonCredential.TryVerify(request.Credential!,
             request.TrustedIssuerDid!, request.ExpectedHolderDid!,
             request.ExpectedCredentialType!, request.SubjectContextUri!,
-            now, out var subject))
+            now, out var subject, out string? credentialId))
         {
             return Results.Ok(new VerifyJwtVcJsonCredentialResponse("Invalid", null));
         }
@@ -111,7 +111,8 @@ internal static class JwtVcJsonCredentialVerificationEndpoint
         return status switch
         {
             RevocationSnapshotCheckResult.NotListed =>
-                Results.Ok(new VerifyJwtVcJsonCredentialResponse("SignedNotListed", subject)),
+                Results.Ok(new VerifyJwtVcJsonCredentialResponse(
+                    "SignedNotListed", subject, credentialId)),
             RevocationSnapshotCheckResult.Revoked =>
                 Results.Ok(new VerifyJwtVcJsonCredentialResponse("Revoked", null)),
             _ => Results.Ok(new VerifyJwtVcJsonCredentialResponse("Invalid", null))
@@ -175,5 +176,6 @@ public sealed class VerifyJwtVcJsonCredentialWithStatusRequest
     public DateTimeOffset? MinimumStatusObservedAt { get; init; }
 }
 
-/// <summary>VerifiedSubject is null whenever validation or status fails.</summary>
-public sealed record VerifyJwtVcJsonCredentialResponse(string Status, JsonElement? VerifiedSubject);
+/// <summary>VerifiedSubject and VerifiedCredentialId are null on failure or revoked status.</summary>
+public sealed record VerifyJwtVcJsonCredentialResponse(
+    string Status, JsonElement? VerifiedSubject, string? VerifiedCredentialId = null);
