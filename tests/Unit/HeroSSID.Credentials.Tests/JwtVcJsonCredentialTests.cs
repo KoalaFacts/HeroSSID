@@ -23,7 +23,7 @@ public sealed class JwtVcJsonCredentialTests
         using var header = JsonDocument.Parse(Ed25519JwtSigner.ExtractHeader(jwt));
         using var document = JsonDocument.Parse(Ed25519JwtSigner.ExtractPayload(jwt));
         var payload = document.RootElement;
-        Assert.Equal("vc+jwt", header.RootElement.GetProperty("typ").GetString());
+        Assert.Equal("JWT", header.RootElement.GetProperty("typ").GetString());
         Assert.Equal(_issuer.Did + "#" + _issuer.Did["did:key:".Length..],
             header.RootElement.GetProperty("kid").GetString());
         Assert.Equal(_issuer.Did, payload.GetProperty("iss").GetString());
@@ -213,6 +213,11 @@ public sealed class JwtVcJsonCredentialTests
         Assert.False(JwtVcJsonCredential.TryVerify(jwt, _other.Did, _holder.Did,
             CredentialType, Vocabulary, Now, out var wrongIssuer));
         Assert.Equal(JsonValueKind.Undefined, wrongIssuer.ValueKind);
+        string mismatchedHeaderType = SignExternalJwt(null,
+            "https://issuer.example/credentials/rec-11-unknown-header", "vp+jwt");
+        Assert.False(JwtVcJsonCredential.TryVerify(mismatchedHeaderType, _issuer.Did,
+            _holder.Did, CredentialType, Vocabulary, Now, out var wrongType));
+        Assert.Equal(JsonValueKind.Undefined, wrongType.ValueKind);
     }
 
     [Fact]
