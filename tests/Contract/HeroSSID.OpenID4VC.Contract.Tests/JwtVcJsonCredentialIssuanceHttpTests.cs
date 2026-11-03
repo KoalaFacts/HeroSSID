@@ -48,6 +48,51 @@ public sealed class JwtVcJsonCredentialIssuanceHttpTests(AspireWebApplicationFac
         Assert.Equal("active", subject.GetProperty("membership").GetString());
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AuthenticatedHttpIssuerCanSignStandardSubOnlySubject(bool includeJti)
+    {
+        // Exercise the authenticated tenant-owned HTTP entry point, not merely
+        // the library issuer. A remote holder is not enrolled in HeroSSID.
+        string token = await GetTokenAsync("did:manage credential:issue").ConfigureAwait(true);
+        string issuerDid = await CreateDidAsync(token).ConfigureAwait(true);
+        using var holder = Key.Create(SignatureAlgorithm.Ed25519);
+        string holderDid = DidFromKey(holder.PublicKey.Export(KeyBlobFormat.RawPublicKey));
+        const string credentialId = "https://issuer.example/credentials/http-sub-only";
+
+        using var issued = await PostAsync(Endpoint, new
+        {
+            issuerDid,
+            holderDid,
+            credentialType = CredentialType,
+            subjectContextUri = Vocabulary,
+            credentialSubject = new { membership = "active" },
+            validUntil = DateTimeOffset.UtcNow.AddMinutes(5),
+            credentialId = includeJti ? credentialId : null
+        }, token).ConfigureAwait(true);
+        string jwt = await SetupResponse.ReadRequiredStringAsync(
+            issued, HttpStatusCode.Created, "Issue sub-only VC1.1 JWT",
+            "credential").ConfigureAwait(true);
+
+        using var signed = JsonDocument.Parse(Ed25519JwtSigner.ExtractPayload(jwt));
+        Assert.Equal(holderDid, signed.RootElement.GetProperty("sub").GetString());
+        Assert.False(signed.RootElement.GetProperty("vc")
+            .GetProperty("credentialSubject").TryGetProperty("id", out _));
+        Assert.Equal(includeJti, signed.RootElement.TryGetProperty("jti", out _));
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, issuerDid, holderDid,
+            CredentialType, Vocabulary, DateTimeOffset.UtcNow,
+            out var claims, out string? signedId));
+        Assert.False(claims.TryGetProperty("id", out _));
+        Assert.Equal("active", claims.GetProperty("membership").GetString());
+        Assert.Equal(includeJti ? credentialId : null, signedId);
+
+        using var other = Key.Create(SignatureAlgorithm.Ed25519);
+        string otherDid = DidFromKey(other.PublicKey.Export(KeyBlobFormat.RawPublicKey));
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, issuerDid, otherDid,
+            CredentialType, Vocabulary, DateTimeOffset.UtcNow, out _));
+    }
+
     [Fact]
     public async Task AuthenticatedHttpIssueAndVerifyReleaseOnlyAuthenticSignedCredentialIdentifier()
     {
