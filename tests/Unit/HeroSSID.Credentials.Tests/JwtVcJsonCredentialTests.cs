@@ -1,5 +1,7 @@
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using HeroSSID.Credentials.CredentialRevocation;
 using HeroSSID.Credentials.JwtVcJson;
 using HeroSSID.Credentials.Utilities;
 using HeroSSID.Credentials.Vcdm20;
@@ -256,6 +258,59 @@ public sealed class JwtVcJsonCredentialTests
             _holder.Did, CredentialType, Vocabulary, Now, out _));
     }
 
+
+    [Fact]
+    public void IndependentNormativeJwtCanBeRevokedWithoutLosingIssuerProvenance()
+    {
+        // NSec signs a VC1.1 JWT with no iat and an HTTPS jti, independently
+        // of HeroSSID's issuer. The issuer's private status export must accept
+        // it without relaxing the exact issuer signature or bounded JWT rules.
+        string external = SignExternalJwt(null,
+            "https://issuer.example/credentials/externally-issued", "JWT");
+        var clock = new FixedClock(Now);
+        string revoked = JwtVcJsonRevocationSnapshot.Create(_issuer.Did,
+            [external], _issuer.Seed, Now, clock);
+        Assert.Equal(RevocationSnapshotCheckResult.Revoked,
+            JwtVcJsonRevocationSnapshot.Check(revoked, external, _issuer.Did, Now));
+        string clean = JwtVcJsonRevocationSnapshot.Create(_issuer.Did,
+            [], _issuer.Seed, Now, clock);
+        Assert.Equal(RevocationSnapshotCheckResult.NotListed,
+            JwtVcJsonRevocationSnapshot.Check(clean, external, _issuer.Did, Now));
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            JwtVcJsonRevocationSnapshot.Check(clean, external, _other.Did, Now));
+
+        string[] parts = external.Split('.');
+        parts[1] = Base64UrlEncoder.Encode(
+            Base64UrlEncoder.DecodeString(parts[1]).Replace(
+                "active", "admin", StringComparison.Ordinal));
+        string tampered = string.Join('.', parts);
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            JwtVcJsonRevocationSnapshot.Check(clean, tampered, _issuer.Did, Now));
+        Assert.Throws<CryptographicException>(() =>
+            JwtVcJsonRevocationSnapshot.Create(_issuer.Did,
+                [tampered], _issuer.Seed, Now, clock));
+
+        string wrongHeader = SignExternalJwt(null,
+            "https://issuer.example/credentials/wrong-typ", "vp+jwt");
+        Assert.Throws<CryptographicException>(() =>
+            JwtVcJsonRevocationSnapshot.Create(_issuer.Did,
+                [wrongHeader], _issuer.Seed, Now, clock));
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            JwtVcJsonRevocationSnapshot.Check(clean, wrongHeader, _issuer.Did, Now));
+    }
+
+    [Fact]
+    public void HistoricalPrivateJwtTypeRemainsRevocable()
+    {
+        string legacy = SignExternalJwt(null,
+            "https://issuer.example/credentials/legacy-header", "vc+jwt");
+        var clock = new FixedClock(Now);
+        string snapshot = JwtVcJsonRevocationSnapshot.Create(_issuer.Did,
+            [legacy], _issuer.Seed, Now, clock);
+        Assert.Equal(RevocationSnapshotCheckResult.Revoked,
+            JwtVcJsonRevocationSnapshot.Check(snapshot, legacy, _issuer.Did, Now));
+    }
+
     private string SignExternalJwt(long? signatureIssuedAt, string credentialId,
         string tokenType = "vc+jwt")
     {
@@ -306,6 +361,11 @@ public sealed class JwtVcJsonCredentialTests
         return Ed25519JwtSigner.CreateSignedJwt(JsonSerializer.Serialize(
             new { alg = "EdDSA", typ = "vc+jwt", kid }),
             JsonSerializer.Serialize(payload), _issuer.Seed);
+    }
+
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 
     private static (byte[] Seed, string Did) NewIdentity()
