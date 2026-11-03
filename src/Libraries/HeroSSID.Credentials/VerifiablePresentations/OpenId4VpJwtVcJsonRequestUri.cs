@@ -123,9 +123,10 @@ public static class OpenId4VpJwtVcJsonRequestUri
             if (response.StatusCode != HttpStatusCode.OK ||
                 response.RequestMessage?.RequestUri?.OriginalString !=
                     independentlyTrustedRequestUri.OriginalString ||
-                contentType?.MediaType != RequestObjectMediaType ||
-                (contentType.CharSet is not null &&
-                    !string.Equals(contentType.CharSet, "utf-8", StringComparison.OrdinalIgnoreCase)) ||
+                (contentType is null || !string.Equals(
+                    contentType.MediaType, RequestObjectMediaType,
+                    StringComparison.OrdinalIgnoreCase)) ||
+                !IsAllowedCharset(contentType.CharSet) ||
                 contentType.Parameters.Count > (contentType.CharSet is null ? 0 : 1) ||
                 response.Content.Headers.ContentLength > MaximumSignedRequestBytes)
             {
@@ -309,6 +310,21 @@ public static class OpenId4VpJwtVcJsonRequestUri
             expectedVerifierDid, expectedResponseUri, expectedCredentialType,
             expectedSubjectContextUri, clock, maximumDuration,
             cancellationToken).ConfigureAwait(false);
+    }
+
+    private static bool IsAllowedCharset(string? value)
+    {
+        if (value is null)
+        {
+            return true;
+        }
+
+        // An HTTP Content-Type parameter may be a quoted-string. Preserve
+        // strict UTF-8/ASCII JWT decoding while accepting RFC 9110-equivalent
+        // casing and quoted charset spelling from independent verifier hosts.
+        string normalized = value.Length >= 2 && value[0] == '"' && value[^1] == '"'
+            ? value[1..^1] : value;
+        return string.Equals(normalized, "utf-8", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ExpectedInvocation(Uri requestUri, string verifierDid) =>
