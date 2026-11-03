@@ -87,12 +87,14 @@ public sealed class JwtVcJsonEmbeddedMetadataTests
             JwtVcJsonRevocationSnapshot.Check(revoked, jwt, _issuer.Did, Now));
     }
 
-    [Fact]
-    public void IndependentIssuerFractionalNumericDatesAreVerifiedAndRevocable()
+    [Theory]
+    [InlineData("fractional-valid")]
+    [InlineData("fractional-scientific")]
+    public void IndependentIssuerFractionalNumericDatesAreVerifiedAndRevocable(string variant)
     {
         // RFC 7519 NumericDate explicitly permits non-integer seconds.
         // Preserve sub-second validity and the original signed JWT in status.
-        string jwt = SignExternal(variant: "fractional-valid");
+        string jwt = SignExternal(variant: variant);
         Assert.True(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
             CredentialType, Vocabulary, Now, out var subject, out var identifier));
         Assert.Equal("active", subject.GetProperty("membership").GetString());
@@ -120,6 +122,7 @@ public sealed class JwtVcJsonEmbeddedMetadataTests
 
     [Theory]
     [InlineData("legacy-fractional")]
+    [InlineData("fractional-hidden-subtick")]
     [InlineData("fractional-embedded-mismatch")]
     [InlineData("fractional-subtick")]
     [InlineData("fractional-iat-invalid")]
@@ -190,6 +193,8 @@ public sealed class JwtVcJsonEmbeddedMetadataTests
         switch (variant)
         {
             case "fractional-valid":
+            case "fractional-scientific":
+            case "fractional-hidden-subtick":
             case "fractional-embedded-mismatch":
             case "fractional-subtick":
             case "fractional-iat-invalid":
@@ -284,8 +289,24 @@ public sealed class JwtVcJsonEmbeddedMetadataTests
                 kid = _issuer.Did + "#" + _issuer.Did["did:key:".Length..]
             })
             : JsonSerializer.Serialize(new { alg = "EdDSA", typ = "JWT" });
+        string json = JsonSerializer.Serialize(payload);
+        if (variant is "fractional-scientific" or "fractional-hidden-subtick")
+        {
+            string signedNumber = (notBefore + 0.25m)
+                .ToString(CultureInfo.InvariantCulture);
+            string literal = variant == "fractional-hidden-subtick"
+                ? notBefore.ToString(CultureInfo.InvariantCulture) +
+                    ".2500000000000000000001"
+                : ((notBefore + 0.25m) / 1_000_000_000m)
+                    .ToString(CultureInfo.InvariantCulture) + "e9";
+            string original = "\"nbf\":" + signedNumber;
+            Assert.Contains(original, json, StringComparison.Ordinal);
+            json = json.Replace(original, "\"nbf\":" + literal,
+                StringComparison.Ordinal);
+        }
+
         string message = Base64UrlEncoder.Encode(header) + "." +
-            Base64UrlEncoder.Encode(JsonSerializer.Serialize(payload));
+            Base64UrlEncoder.Encode(json);
         using var signer = Key.Import(SignatureAlgorithm.Ed25519,
             variant == "wrong-signature" ? _stranger.Seed : _issuer.Seed,
             KeyBlobFormat.RawPrivateKey);
