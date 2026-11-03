@@ -164,6 +164,10 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
         Assert.False(handler.PreAuthenticate);
         Assert.Null(handler.Credentials);
         Assert.False(handler.UseProxy);
+        Assert.Null(handler.DefaultProxyCredentials);
+        Assert.Equal(ClientCertificateOption.Manual, handler.ClientCertificateOptions);
+        Assert.Empty(handler.ClientCertificates);
+        Assert.Equal(DecompressionMethods.None, handler.AutomaticDecompression);
 
         using var http = new HttpClient(handler);
         Assert.Empty(http.DefaultRequestHeaders);
