@@ -1,0 +1,95 @@
+# VC1.1 OpenID4VP request_uri GET transport (opt-in .NET 10 SDK)
+
+This is the **by-reference request retrieval** portion of OpenID4VP 1.0
+[`request_uri`](https://openid.net/specs/openid-4-verifiable-presentations-1_0.html).
+It improves practical QR/deep-link size for HeroSSID's existing signed
+`jwt_vc_json` + `direct_post` library profile. The retrieval mechanism is
+standard GET with `Accept: application/oauth-authz-req+jwt`, but the signed
+Request Object contains HeroSSID-specific trust-policy extensions and the
+holder-bound VP uses private request-hash binding. There is **no claim of full
+OpenID4VP interoperability or third-party Wallet conformance**.
+
+## Verifier host contract
+
+1. Issue/retain an independent, tenant-bound, one-use challenge in the existing
+   shared `IPresentationChallengeStore`; create the **original** verifier
+   Ed25519-signed request using `OpenId4VpJwtVcJsonDirectPost.CreateSignedRequest`.
+2. Host **those exact JWT bytes** at a public HTTPS `request_uri` (GET, HTTP
+   200, `Content-Type: application/oauth-authz-req+jwt`, at most 16,384 bytes).
+   The library does *not* create or operate this endpoint, its storage or TLS.
+3. Call `OpenId4VpJwtVcJsonRequestUri.CreateWalletInvocation` with the signed
+   JWT, actual endpoint, trusted verifier DID, pinned response URI and type and
+   context to obtain the compact `openid4vp://?client_id=...&request_uri=...`
+   invocation. A successful call verifies the genuine signed request; it does
+   **not** prove the hosted content is configured, reachable or still current.
+4. Independently retain the original signed JWT and its lowercase SHA-256
+   digest so the stricter holder-bound verifier can authenticate the final
+   response and atomically consume the original nonce. Do not trust a
+   presenter-supplied replacement hash or snapshot.
+
+## Wallet consumption
+
+The integrating Wallet must independently trust the **exact** HTTPS request
+URI, verifier DID, HTTPS response callback, credential type, subject context
+and issuer; a URI appearing only in a QR/deep link is *not* trusted policy.
+Use a dedicated, unauthenticated, non-redirecting `HttpClient`:
+
+```csharp
+using HeroSSID.Credentials.VerifiablePresentations;
+
+using var handler = new HttpClientHandler
+{
+    AllowAutoRedirect = false,
+    UseCookies = false
+};
+using var http = new HttpClient(handler);
+string? signedRequest = await OpenId4VpJwtVcJsonRequestUri
+    .FetchVerifiedRequestAsync(
+        deepLink, independentlyTrustedRequestUri, http,
+        trustedVerifierDid, trustedCallback, trustedType, trustedContext,
+        TimeProvider.System, cancellationToken);
+
+if (signedRequest is null)
+{
+    return; // No credential claims released or holder key used.
+}
+
+// Continue with an authenticated Wallet preview (optionally the incident-aware
+// signed-status gate), show ALL claims, and obtain actual user consent.
+// Only then call CreateHolderBoundResponseFormAfterPreview or the stricter
+// incident-aware holder-signing method and POST to the pinned HTTPS callback.
+```
+
+The adapter rejects untrusted or noncanonical launches before any GET,
+non-HTTPS endpoints, non-200/redirect responses, wrong content types,
+unexpected/oversized bodies (even absent Content-Length), invalid verifier
+signatures, issuer/type/callback/context mismatches and expired challenges.
+It returns the **unchanged original compact JWT**, so existing holder
+signatures and verifier-owned request-hash pins are preserved.
+
+**Security deployment boundary:** A caller-provided HttpClient may have an
+automatic-redirect handler, cookies, default credentials, proxies or other
+ambient configuration. The adapter verifies the final response URI but
+cannot prevent an earlier automatically followed redirect. Pass a dedicated
+`HttpClientHandler` with `AllowAutoRedirect=false` and no credentials, and
+independently restrict the host to an approved verifier before triggering a
+network request. DNS, TLS, proxy and SSRF policy remain the application host's
+responsibility.
+
+Run focused acceptance:
+
+```bash
+dotnet test tests/Unit/HeroSSID.Credentials.Tests/HeroSSID.Credentials.Tests.csproj \
+  --configuration Release \
+  --filter FullyQualifiedName~OpenId4VpJwtVcJsonRequestUriTests
+```
+
+A real mocked HTTP GET and separate Ed25519 issuer/holder/verifier keys
+demonstrate the bounded launch, signed request retrieval, actual holder-signed
+VP, verifier-retained request hash, successful one-use acceptance and replay
+denial. Negative tests cover wrong URI or launch parameters, forged request,
+redirects, HTML response, excessive response size and expired request.
+
+No hosted Request URI endpoint, independently tested external Wallet,
+selective disclosure, consent UI, live revocation, legal identity vetting,
+business authorization or standard third-party holder-binding proof is supplied.
