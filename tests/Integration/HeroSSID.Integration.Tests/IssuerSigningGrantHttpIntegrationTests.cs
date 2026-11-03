@@ -44,41 +44,58 @@ public sealed class IssuerSigningGrantHttpIntegrationTests(DatabaseFixture fixtu
         using var client = enforcingHost.CreateClient();
         string token = await TokenAsync(client).ConfigureAwait(true);
 
-        static object Legacy(string issuer, string holder) => new
+        static object Legacy(string issuer, string holder, string type) => new
         {
             issuerDid = issuer, holderDid = holder,
-            credentialType = "MembershipCredential",
+            credentialType = type,
             claims = new { membership = "active" }
         };
-        object Vc11(string issuer) => new
+        object Vc11(string issuer, string type) => new
         {
             issuerDid = issuer, holderDid,
-            credentialType = "https://issuer.example/credentials#MembershipCredential",
+            credentialType = type,
             subjectContextUri = Vocabulary,
             credentialSubject = new { id = holderDid, membership = "active" },
             validUntil = DateTimeOffset.UtcNow.AddMinutes(5)
         };
-        object Vc20(string issuer) => new
+        object Vc20(string issuer, string type) => new
         {
             issuerDid = issuer, holderDid,
-            credentialType = "MembershipCredential",
+            credentialType = type,
             subjectContextUri = Vocabulary,
             credentialSubject = new { id = holderDid, membership = "active" },
             validUntil = DateTimeOffset.UtcNow.AddMinutes(5)
         };
 
-        (string Path, object Denied, object Allowed)[] formats =
+        const string memberType = "MembershipCredential";
+        const string adminType = "AdministratorCredential";
+        const string memberIri = "https://issuer.example/credentials#MembershipCredential";
+        const string adminIri = "https://issuer.example/credentials#AdministratorCredential";
+        (string Path, object DeniedIssuer, object DeniedType, object Allowed)[] formats =
         [
-            ("/api/v1/credentials/issue", Legacy(ungrantedDid, holderDid), Legacy(grantedDid, holderDid)),
-            ("/api/v1/credentials/jwt-vc-json/issue", Vc11(ungrantedDid), Vc11(grantedDid)),
-            ("/api/v1/credentials/vcdm20/issue", Vc20(ungrantedDid), Vc20(grantedDid))
+            ("/api/v1/credentials/issue",
+                Legacy(ungrantedDid, holderDid, memberType),
+                Legacy(grantedDid, holderDid, adminType),
+                Legacy(grantedDid, holderDid, memberType)),
+            ("/api/v1/credentials/jwt-vc-json/issue",
+                Vc11(ungrantedDid, memberIri),
+                Vc11(grantedDid, adminIri),
+                Vc11(grantedDid, memberIri)),
+            ("/api/v1/credentials/vcdm20/issue",
+                Vc20(ungrantedDid, memberType),
+                Vc20(grantedDid, adminType),
+                Vc20(grantedDid, memberType))
         ];
 
         foreach (var format in formats)
         {
-            using var denied = await PostAsync(client, format.Path, format.Denied, token)
+            using var deniedIssuer = await PostAsync(client, format.Path, format.DeniedIssuer, token)
                 .ConfigureAwait(true);
-            Assert.Equal(HttpStatusCode.NotFound, denied.StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, deniedIssuer.StatusCode);
+
+            using var deniedType = await PostAsync(client, format.Path, format.DeniedType, token)
+                .ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.NotFound, deniedType.StatusCode);
         }
 
         await using (var db = _fixture.CreateDbContext<HeroDbContext>())
@@ -128,6 +145,10 @@ public sealed class IssuerSigningGrantHttpIntegrationTests(DatabaseFixture fixtu
                         HeroDbContext.DefaultTenantId.ToString("D");
                     values["IssuerSigningGrants:Grants:0:ClientId"] = "test_client";
                     values["IssuerSigningGrants:Grants:0:IssuerDid"] = grantedDid;
+                    values["IssuerSigningGrants:Grants:0:CredentialTypes:0"] =
+                        "MembershipCredential";
+                    values["IssuerSigningGrants:Grants:0:CredentialTypes:1"] =
+                        "https://issuer.example/credentials#MembershipCredential";
                 }
 
                 configuration.AddInMemoryCollection(values);
