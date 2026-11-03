@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 
 namespace HeroSSID.Credentials.VerifiablePresentations;
@@ -179,29 +181,32 @@ public static class OpenId4VpJwtVcJsonRequestUri
 
     /// <summary>
     /// Construct an isolated transport for public, unsigned-credential-free
-    /// Request Object GET. No cookies, ambient credentials, proxy or redirects.
+    /// Request Object GET. No cookies, ambient credentials, Activity tracing, proxy or redirects.
     /// The caller owns and disposes this handler and must not weaken its policy.
     /// </summary>
-    public static HttpClientHandler CreateIsolatedTransportHandler() => new()
+    public static SocketsHttpHandler CreateIsolatedTransportHandler() => new()
     {
-        // An OpenID4VP public Request Object GET must never inherit application
-        // session cookies, bearer/proxy credentials, TLS client certificates,
-        // automatic redirects or proxy-defined credential injection.
+        // Request Objects are fetched from public verifier endpoints. Never send
+        // the Wallet application's W3C Activity traceparent/tracestate/baggage,
+        // which HttpClientHandler otherwise propagates even without default headers.
         AllowAutoRedirect = false,
         UseCookies = false,
-        UseDefaultCredentials = false,
-        Credentials = null,
-        PreAuthenticate = false,
         UseProxy = false,
-        ClientCertificateOptions = ClientCertificateOption.Manual,
-        CheckCertificateRevocationList = true,
-        AutomaticDecompression = DecompressionMethods.None
+        Credentials = null,
+        DefaultProxyCredentials = null,
+        PreAuthenticate = false,
+        AutomaticDecompression = DecompressionMethods.None,
+        ActivityHeadersPropagator = null,
+        SslOptions = new SslClientAuthenticationOptions
+        {
+            CertificateRevocationCheckMode = X509RevocationMode.Online
+        }
     };
 
     /// <summary>
     /// Fetch with a new credential-free, cookie-free, proxy-free and
     /// non-redirecting HTTP handler. Unlike the injected-client overload,
-    /// this safe default cannot inherit an application's ambient handler.
+    /// this safe default cannot inherit an application's ambient handler or Activity headers.
     /// TLS server validation is not overridden. Hosts that require proxies
     /// need an explicitly audited client passed to FetchVerifiedRequestAsync.
     /// Does not grant trust to an unpinned verifier or obtain holder consent.

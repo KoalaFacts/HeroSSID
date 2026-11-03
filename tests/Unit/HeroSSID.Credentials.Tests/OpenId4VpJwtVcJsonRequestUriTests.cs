@@ -160,14 +160,16 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
         using var handler = OpenId4VpJwtVcJsonRequestUri.CreateIsolatedTransportHandler();
         Assert.False(handler.AllowAutoRedirect);
         Assert.False(handler.UseCookies);
-        Assert.False(handler.UseDefaultCredentials);
         Assert.False(handler.PreAuthenticate);
         Assert.Null(handler.Credentials);
         Assert.False(handler.UseProxy);
         Assert.Null(handler.DefaultProxyCredentials);
-        Assert.Equal(ClientCertificateOption.Manual, handler.ClientCertificateOptions);
-        Assert.Empty(handler.ClientCertificates);
-        Assert.True(handler.CheckCertificateRevocationList);
+        Assert.Null(handler.ActivityHeadersPropagator);
+        Assert.Equal(System.Security.Cryptography.X509Certificates.X509RevocationMode.Online,
+            handler.SslOptions.CertificateRevocationCheckMode);
+        Assert.Null(handler.SslOptions.RemoteCertificateValidationCallback);
+        Assert.Null(handler.SslOptions.ClientCertificates);
+        Assert.Null(handler.SslOptions.LocalCertificateSelectionCallback);
         Assert.Equal(DecompressionMethods.None, handler.AutomaticDecompression);
 
         using var http = new HttpClient(handler);
@@ -413,6 +415,36 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
         Assert.DoesNotContain("tracestate:", received, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("baggage:", received, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("private-account-identifier", received, StringComparison.Ordinal);
+        listener.Stop();
+    }
+
+    [Fact]
+    public async Task IsolatedRequestObjectGetNeverLeaksWalletActivityHeaders()
+    {
+        // Exercise the actual .NET HTTP pipeline over loopback. A fake
+        // HttpMessageHandler cannot observe automatic trace/baggage propagation.
+        using var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        using var activity = new System.Diagnostics.Activity("wallet-request-uri");
+        activity.SetIdFormat(System.Diagnostics.ActivityIdFormat.W3C);
+        activity.AddBaggage("wallet-account", "private-wallet-tenant");
+        activity.Start();
+
+        using var handler = OpenId4VpJwtVcJsonRequestUri.CreateIsolatedTransportHandler();
+        using var http = new HttpClient(handler);
+        Task<HttpResponseMessage> requestTask = http.GetAsync(
+            new Uri($"http://127.0.0.1:{port}/request-object"), cancellation.Token);
+        string received = await ReadHeadersAndReplyAsync(listener, cancellation.Token)
+            .ConfigureAwait(true);
+        using var response = await requestTask.ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.DoesNotContain("traceparent:", received, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("tracestate:", received, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("baggage:", received, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("private-wallet-tenant", received, StringComparison.Ordinal);
         listener.Stop();
     }
 
