@@ -31,7 +31,11 @@ public static class JwtVcJsonCredential
     public static string Create(string issuerDid, string holderDid, string credentialType,
         Uri subjectContextUri, JsonElement credentialSubject, byte[] issuerPrivateKey,
         DateTimeOffset validFrom, DateTimeOffset validUntil, Uri credentialId) =>
-        throw new NotSupportedException("The signed credential-ID issuance path is not implemented.");
+    {
+        ArgumentNullException.ThrowIfNull(credentialId);
+        return CreateCore(issuerDid, holderDid, credentialType, subjectContextUri,
+            credentialSubject, issuerPrivateKey, validFrom, validUntil, credentialId);
+    }
 
     /// <summary>
     /// Verify issuer-signed claims and expose the exact authenticated JWT jti
@@ -40,11 +44,8 @@ public static class JwtVcJsonCredential
     public static bool TryVerify(string jwt, string trustedIssuerDid, string expectedHolderDid,
         string expectedCredentialType, Uri expectedSubjectContextUri,
         DateTimeOffset now, out JsonElement verifiedSubject, out string? verifiedCredentialId)
-    {
-        verifiedSubject = default;
-        verifiedCredentialId = null;
-        throw new NotSupportedException("Authenticated credential-ID verification is not implemented.");
-    }
+        => TryVerifyCore(jwt, trustedIssuerDid, expectedHolderDid, expectedCredentialType,
+            expectedSubjectContextUri, now, out verifiedSubject, out verifiedCredentialId);
 
     /// <summary>
     /// Sign a short-lived, fully disclosed JWT VC 1.1 with the issuer's own Ed25519 seed.
@@ -54,7 +55,13 @@ public static class JwtVcJsonCredential
     /// </summary>
     public static string Create(string issuerDid, string holderDid, string credentialType,
         Uri subjectContextUri, JsonElement credentialSubject, byte[] issuerPrivateKey,
-        DateTimeOffset validFrom, DateTimeOffset validUntil)
+        DateTimeOffset validFrom, DateTimeOffset validUntil) =>
+        CreateCore(issuerDid, holderDid, credentialType, subjectContextUri,
+            credentialSubject, issuerPrivateKey, validFrom, validUntil, null);
+
+    private static string CreateCore(string issuerDid, string holderDid, string credentialType,
+        Uri subjectContextUri, JsonElement credentialSubject, byte[] issuerPrivateKey,
+        DateTimeOffset validFrom, DateTimeOffset validUntil, Uri? credentialId)
     {
         ArgumentNullException.ThrowIfNull(issuerDid);
         ArgumentNullException.ThrowIfNull(holderDid);
@@ -76,6 +83,7 @@ public static class JwtVcJsonCredential
             !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(holderDid, out _) ||
             !ValidType(credentialType) ||
             !ValidContext(subjectContextUri) ||
+            (credentialId is not null && !ValidCredentialId(credentialId)) ||
             issuerPrivateKey.Length != 32 ||
             issuerPrivateKey.All(static b => b == 0) ||
             issued < 0 || expires <= issued ||
@@ -94,20 +102,26 @@ public static class JwtVcJsonCredential
             typ = JwtType,
             kid = KeyId(issuerDid)
         });
-        string payload = JsonSerializer.Serialize(new
+        var payloadClaims = new Dictionary<string, object>(StringComparer.Ordinal)
         {
-            iss = issuerDid,
-            sub = holderDid,
-            iat = issued,
-            nbf = issued,
-            exp = expires,
-            vc = new Dictionary<string, object>(StringComparer.Ordinal)
-            {
-                ["@context"] = new[] { BaseContext, subjectContextUri.AbsoluteUri },
-                ["type"] = new[] { BaseType, credentialType },
-                ["credentialSubject"] = credentialSubject
-            }
-        });
+            ["iss"] = issuerDid,
+            ["sub"] = holderDid,
+            ["iat"] = issued,
+            ["nbf"] = issued,
+            ["exp"] = expires
+        };
+        if (credentialId is not null)
+        {
+            payloadClaims["jti"] = credentialId.AbsoluteUri;
+        }
+
+        payloadClaims["vc"] = new Dictionary<string, object>(StringComparer.Ordinal)
+        {
+            ["@context"] = new[] { BaseContext, subjectContextUri.AbsoluteUri },
+            ["type"] = new[] { BaseType, credentialType },
+            ["credentialSubject"] = credentialSubject
+        };
+        string payload = JsonSerializer.Serialize(payloadClaims);
         string signed = Ed25519JwtSigner.CreateSignedJwt(header, payload, issuerPrivateKey);
 
         // Check the actual cryptographic result against the self-certifying issuer DID,
@@ -135,11 +149,18 @@ public static class JwtVcJsonCredential
     /// </summary>
     public static bool TryVerify(string jwt, string trustedIssuerDid, string expectedHolderDid,
         string expectedCredentialType, Uri expectedSubjectContextUri,
-        DateTimeOffset now, out JsonElement verifiedSubject)
+        DateTimeOffset now, out JsonElement verifiedSubject) =>
+        TryVerifyCore(jwt, trustedIssuerDid, expectedHolderDid, expectedCredentialType,
+            expectedSubjectContextUri, now, out verifiedSubject, out _);
+
+    private static bool TryVerifyCore(string jwt, string trustedIssuerDid, string expectedHolderDid,
+        string expectedCredentialType, Uri expectedSubjectContextUri,
+        DateTimeOffset now, out JsonElement verifiedSubject, out string? verifiedCredentialId)
     {
         ArgumentNullException.ThrowIfNull(jwt);
         ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
         verifiedSubject = default;
+        verifiedCredentialId = null;
 
         if (!OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(trustedIssuerDid, out var issuerPublicKey) ||
             !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(expectedHolderDid, out _) ||
@@ -172,6 +193,9 @@ public static class JwtVcJsonCredential
         }
 
         verifiedSubject = subject.Clone();
+        verifiedCredentialId = payload.TryGetProperty("jti", out var identifier)
+            ? identifier.GetString()
+            : null;
         return true;
     }
 
@@ -229,15 +253,19 @@ public static class JwtVcJsonCredential
             return true;
         }
 
-        // Deliberately supported URI subset, not a dereference instruction:
-        // callers must not promote this issuer-signed identifier to trust.
+        // Signed identifiers are never dereferenced or treated as authority.
         return StrictJwtReader.TryGetString(payload, "jti", out string id) &&
             id.Length <= 2_048 &&
             Uri.TryCreate(id, UriKind.Absolute, out Uri? uri) &&
-            uri.Scheme == Uri.UriSchemeHttps &&
-            !string.IsNullOrWhiteSpace(uri.Host) &&
-            uri.UserInfo.Length == 0;
+            ValidCredentialId(uri);
     }
+
+    private static bool ValidCredentialId(Uri uri) =>
+        uri.IsAbsoluteUri &&
+        string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) &&
+        !string.IsNullOrWhiteSpace(uri.Host) &&
+        uri.UserInfo.Length == 0 &&
+        uri.AbsoluteUri.Length <= 2_048;
 
     private static bool HasExactArray(JsonElement element, string name, string first, string second)
     {
