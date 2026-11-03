@@ -13,6 +13,49 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStore(
     private const int MaximumEntries = 256;
     private readonly object _gate = new();
     private readonly Dictionary<string, HostedRequest> _entries = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, DateTimeOffset> _reservations = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Reserve an opaque reference before issuing a durable verifier challenge.
+    /// A full volatile host rejects the request without using any PostgreSQL
+    /// challenge rows. A 5-minute lease prevents indefinite abandoned slots.
+    /// </summary>
+    public string Reserve()
+    {
+        lock (_gate)
+        {
+            RemoveExpired(clock.GetUtcNow());
+            if (_entries.Count + _reservations.Count >= MaximumEntries)
+            {
+                throw new InvalidOperationException(
+                    "The volatile request object capacity has been reached.");
+            }
+
+            string token;
+            do
+            {
+                byte[] random = RandomNumberGenerator.GetBytes(32);
+                token = Convert.ToBase64String(random).TrimEnd('=')
+                    .Replace('+', '-').Replace('/', '_');
+            }
+            while (_entries.ContainsKey(token) || _reservations.ContainsKey(token));
+
+            _reservations.Add(token, clock.GetUtcNow().AddMinutes(5));
+            return token;
+        }
+    }
+
+    /// <summary>
+    /// Release an uncommitted reservation after an issuance/signing failure.
+    /// Already published entries are deliberately not removed.
+    /// </summary>
+    public void ReleaseReservation(string opaqueReference)
+    {
+        lock (_gate)
+        {
+            _reservations.Remove(opaqueReference);
+        }
+    }
 
     /// <summary>
     /// Verify the original Ed25519 Request Object and live tenant-owned challenge
@@ -21,6 +64,27 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStore(
     /// </summary>
     public string Publish(Guid tenantId, string signedRequestJwt, string trustedVerifierDid,
         Uri expectedResponseUri, string expectedCredentialType, Uri expectedSubjectContextUri)
+    {
+        string reference = Reserve();
+        try
+        {
+            PublishReserved(reference, tenantId, signedRequestJwt, trustedVerifierDid,
+                expectedResponseUri, expectedCredentialType, expectedSubjectContextUri);
+            return reference;
+        }
+        finally
+        {
+            ReleaseReservation(reference);
+        }
+    }
+
+    /// <summary>
+    /// Commit an already reserved reference after signing and original challenge
+    /// validation. Only the owner of this single-process store may publish.
+    /// </summary>
+    public void PublishReserved(string opaqueReference, Guid tenantId,
+        string signedRequestJwt, string trustedVerifierDid, Uri expectedResponseUri,
+        string expectedCredentialType, Uri expectedSubjectContextUri)
     {
         ArgumentNullException.ThrowIfNull(signedRequestJwt);
         ArgumentNullException.ThrowIfNull(expectedResponseUri);
@@ -50,26 +114,17 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStore(
 
         lock (_gate)
         {
-            RemoveExpired(clock.GetUtcNow());
-            if (_entries.Count >= MaximumEntries)
+            if (!_reservations.TryGetValue(opaqueReference, out DateTimeOffset reservationExpiry) ||
+                reservationExpiry <= clock.GetUtcNow())
             {
                 throw new InvalidOperationException(
-                    "The volatile request object capacity has been reached.");
+                    "The request object reservation expired before publication.");
             }
 
-            string token;
-            do
-            {
-                byte[] random = RandomNumberGenerator.GetBytes(32);
-                token = Convert.ToBase64String(random).TrimEnd('=')
-                    .Replace('+', '-').Replace('/', '_');
-            }
-            while (_entries.ContainsKey(token));
-
-            _entries.Add(token, new HostedRequest(tenantId, signed.ClientId,
+            _reservations.Remove(opaqueReference);
+            _entries.Add(opaqueReference, new HostedRequest(tenantId, signed.ClientId,
                 signed.Challenge.Nonce, signed.Challenge.TrustedIssuerDid,
                 signed.Challenge.ExpiresAt, signedRequestJwt));
-            return token;
         }
     }
 
@@ -130,6 +185,13 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStore(
             .Select(entry => entry.Key).ToArray())
         {
             _entries.Remove(token);
+        }
+
+        foreach (string token in _reservations
+            .Where(entry => entry.Value <= now)
+            .Select(entry => entry.Key).ToArray())
+        {
+            _reservations.Remove(token);
         }
     }
 
