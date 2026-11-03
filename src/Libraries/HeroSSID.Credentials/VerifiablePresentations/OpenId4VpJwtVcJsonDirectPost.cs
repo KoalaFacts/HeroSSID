@@ -326,6 +326,76 @@ public static class OpenId4VpJwtVcJsonDirectPost
     }
 
     /// <summary>
+    /// Verify that an outgoing Wallet form contains an authentic holder Ed25519
+    /// signature over the exact original verifier Request Object SHA-256 and an
+    /// unchanged, independently signed issuer credential. The authenticated
+    /// request supplies issuer/audience/nonce policy; no challenge is consumed
+    /// and no subject claims are disclosed to the caller.
+    /// </summary>
+    internal static bool IsAuthenticHolderBoundWalletForm(
+        string requestJwt, string form, string expectedVerifierDid,
+        Uri expectedResponseUri, string expectedCredentialType,
+        Uri expectedSubjectContextUri, TimeProvider clock)
+    {
+        if (string.IsNullOrEmpty(form) || form.Length > MaximumResponseLength ||
+            !TryReadSignedRequest(requestJwt, expectedVerifierDid, expectedResponseUri,
+                expectedCredentialType, expectedSubjectContextUri, clock, out var request) ||
+            request is null)
+        {
+            return false;
+        }
+
+        // Accept only the exact two-field canonical form produced by this SDK.
+        // A matching state alone never authorizes leaking an arbitrary vp_token.
+        int delimiter = form.IndexOf('&', StringComparison.Ordinal);
+        if (!form.StartsWith("vp_token=", StringComparison.Ordinal) ||
+            delimiter <= "vp_token=".Length ||
+            delimiter != form.LastIndexOf('&') ||
+            !string.Equals(form[(delimiter + 1)..],
+                "state=" + Uri.EscapeDataString(request.Challenge.Nonce),
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        string encodedToken = form["vp_token=".Length..delimiter];
+        string? token = WebUtility.UrlDecode(encodedToken);
+        if (string.IsNullOrEmpty(token) || token.Length > MaximumResponseLength ||
+            !string.Equals(Uri.EscapeDataString(token), encodedToken,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(token,
+                new JsonDocumentOptions { MaxDepth = 8 });
+            JsonElement root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                root.EnumerateObject().Count() != 1 ||
+                !root.TryGetProperty(CredentialQueryId, out var entries) ||
+                entries.ValueKind != JsonValueKind.Array || entries.GetArrayLength() != 1 ||
+                entries[0].ValueKind != JsonValueKind.String)
+            {
+                return false;
+            }
+
+            string? presentation = entries[0].GetString();
+            return presentation is not null &&
+                JwtVcJsonPresentation.IsAuthenticHolderBoundProofForWalletTransport(
+                    presentation, request.Challenge, expectedCredentialType,
+                    expectedSubjectContextUri,
+                    Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(requestJwt))),
+                    clock);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Validate a bounded direct_post body against verifier-owned tenant,
     /// policy, single-use nonce and real issuer/holder Ed25519 signatures.
     /// SignedButStatusUnchecked is not current non-revocation, identity
