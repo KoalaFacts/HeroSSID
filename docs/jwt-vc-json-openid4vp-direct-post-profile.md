@@ -34,3 +34,56 @@ dotnet test tests/Unit/HeroSSID.Credentials.Tests/HeroSSID.Credentials.Tests.csp
 ```
 
 No new database schema or migration is introduced. Production PostgreSQL, publishing and deployment are outside this delivery.
+
+## Wallet HTTP delivery of an already approved holder form
+
+The opt-in `OpenId4VpJwtVcJsonWalletResponseTransport` adapter completes the
+**Wallet's network POST**, not the verifier's hosted callback. After the app
+displays the exact issuer claims and signed verifier request, obtains real
+informed consent, and creates the genuine holder-bound form:
+
+```csharp
+string form = OpenId4VpJwtVcJsonDirectPost.CreateHolderBoundResponseForm(
+    signedRequestJwt, trustedVerifierDid, independentlyPinnedResponseUri,
+    credentialType, subjectContextUri, credentialJwt, holderDid, holderSeed, clock);
+
+bool httpDelivered =
+    await OpenId4VpJwtVcJsonWalletResponseTransport
+        .PostResponseFormWithIsolatedTransportAsync(
+            signedRequestJwt, form, independentlyPinnedResponseUri,
+            trustedVerifierDid, credentialType, subjectContextUri, clock);
+```
+
+This authenticates the original verifier's Ed25519 Request Object, the
+**independently pinned exact HTTPS response URI**, credential type and subject
+context, checks that the form has the original challenge's canonical state,
+and submits the unchanged URL-encoded VP body as
+`application/x-www-form-urlencoded` with POST. The SDK's safe default
+creates its own short-lived `HttpClientHandler`: no redirects, cookies,
+proxy, automatic credentials, client TLS certificate selection or automatic
+decompression; normal TLS server verification and certificate revocation
+checks are retained. There is a 15-second default whole-response deadline
+(maximum 30 seconds), 180,000-byte maximum form and 4,096-byte maximum JSON
+receipt. Only HTTP 200 with a bounded JSON object from the exact callback
+returns true; a 3xx, invalid receipt or network timeout returns false.
+Returned `redirect_uri` values are **not** automatically navigated and
+the method does not implement the complete OpenID4VP response redirect
+journey. In particular, `true` is only delivery receipt evidence, **not**
+the verifier's claim acceptance, live revocation or authorization decision.
+
+Advanced callers needing a proxy may explicitly supply an audited `HttpClient`
+to `PostResponseFormAsync`. It rejects any nonempty
+`DefaultRequestHeaders` before sending, but **cannot inspect its handler**:
+a redirecting/cookie-bearing/credentialed injected handler can disclose the
+entire holder VP before the post-response destination check detects it.
+Use the isolated default for public verifier callbacks. Do not retry a
+failed transport blindly: a timeout can occur **after** a verifier has
+atomically consumed the one-use nonce. The verifier must independently
+validate both authentic signatures, signed issuer status, its own trust
+policy and replay protection before disclosing subject claims.
+
+No public verifier callback is hosted here. The integrating application must
+operate its own HTTPS callback, enforce actual consent before invocation and
+separately handle any approved user-agent navigation. This is not an
+independent third-party Wallet interoperability or OpenID4VP conformance test,
+identity vetting or business permission.
