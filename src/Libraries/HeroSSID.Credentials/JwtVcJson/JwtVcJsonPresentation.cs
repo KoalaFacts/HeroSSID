@@ -181,18 +181,43 @@ public static class JwtVcJsonPresentation
             expectedCredentialType, expectedSubjectContextUri, challenges, clock,
             requiredOriginalRequestSha256, out verifiedSubject);
 
+    /// <summary>
+    /// Wallet-only cryptographic preflight for an independently authenticated verifier
+    /// Request Object. No verifier challenge is fetched or consumed, and no subject
+    /// claims are disclosed by this API. This does not prove consent or live status.
+    /// </summary>
+    internal static bool IsAuthenticHolderBoundProofForWalletTransport(
+        string presentationJwt, PresentationChallenge authenticatedRequestChallenge,
+        string expectedCredentialType, Uri expectedSubjectContextUri,
+        string requiredOriginalRequestSha256, TimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(authenticatedRequestChallenge);
+        return CheckCore(presentationJwt, Guid.Empty,
+            authenticatedRequestChallenge.Audience, authenticatedRequestChallenge.Nonce,
+            expectedCredentialType, expectedSubjectContextUri,
+            null, clock, requiredOriginalRequestSha256, out _,
+            authenticatedRequestChallenge) ==
+            JwtVcJsonPresentationCheckResult.SignedButStatusUnchecked;
+    }
+
     private static JwtVcJsonPresentationCheckResult CheckCore(string presentationJwt,
         Guid verifierTenantId, string expectedAudience, string expectedNonce,
         string expectedCredentialType, Uri expectedSubjectContextUri,
-        IPresentationChallengeStore challenges, TimeProvider clock,
-        string? requiredOriginalRequestSha256, out JsonElement verifiedSubject)
+        IPresentationChallengeStore? challenges, TimeProvider clock,
+        string? requiredOriginalRequestSha256, out JsonElement verifiedSubject,
+        PresentationChallenge? authenticatedWalletChallenge = null)
     {
         ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
-        ArgumentNullException.ThrowIfNull(challenges);
         ArgumentNullException.ThrowIfNull(clock);
+        if (authenticatedWalletChallenge is null)
+        {
+            ArgumentNullException.ThrowIfNull(challenges);
+        }
+
         verifiedSubject = default;
 
-        if (!PresentationChallengePolicy.IsValidLookup(verifierTenantId, expectedAudience, expectedNonce) ||
+        if ((authenticatedWalletChallenge is null &&
+                !PresentationChallengePolicy.IsValidLookup(verifierTenantId, expectedAudience, expectedNonce)) ||
             !StrictJwtReader.IsCanonicalCompact(presentationJwt, MaximumPresentationLength) ||
             !TryReadUntrustedHolder(presentationJwt, out string holderDid) ||
             !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(holderDid, out var holderPublicKey))
@@ -202,7 +227,8 @@ public static class JwtVcJsonPresentation
 
         // The only accepted issuer and audience come from the verifier's own
         // challenge store. Neither the untrusted VP nor its embedded VC grants trust.
-        var challenge = challenges.Find(verifierTenantId, expectedAudience, expectedNonce);
+        var challenge = authenticatedWalletChallenge ??
+            challenges!.Find(verifierTenantId, expectedAudience, expectedNonce);
         DateTimeOffset now = clock.GetUtcNow();
         if (challenge is null || challenge.ExpiresAt <= now ||
             challenge.ExpiresAt > now.Add(InMemoryPresentationChallengeStore.MaximumLifetime) ||
@@ -242,9 +268,17 @@ public static class JwtVcJsonPresentation
             return JwtVcJsonPresentationCheckResult.Invalid;
         }
 
+        // The Wallet preflight checks authentic proofs before any HTTP disclosure,
+        // but it MUST NOT consume a verifier-owned challenge or expose subject data.
+        // Actual acceptance remains a separate atomic verifier-only operation.
+        if (authenticatedWalletChallenge is not null)
+        {
+            return JwtVcJsonPresentationCheckResult.SignedButStatusUnchecked;
+        }
+
         // Atomic consume is the authorization boundary for one-time presentation
         // verification; an older duplicate must never return verified claims.
-        if (!challenges.TryConsume(verifierTenantId, expectedAudience, expectedNonce))
+        if (!challenges!.TryConsume(verifierTenantId, expectedAudience, expectedNonce))
         {
             return JwtVcJsonPresentationCheckResult.Invalid;
         }

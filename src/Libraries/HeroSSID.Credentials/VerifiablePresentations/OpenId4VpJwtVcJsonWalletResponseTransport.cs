@@ -19,8 +19,9 @@ public static class OpenId4VpJwtVcJsonWalletResponseTransport
     private const string FormMediaType = "application/x-www-form-urlencoded";
 
     /// <summary>
-    /// Send only to the exact HTTPS response_uri authenticated by the original
-    /// Ed25519 verifier Request Object and independently pinned by the Wallet.
+    /// Send only a genuine issuer/holder Ed25519-signed, original-request-bound
+    /// VP to the exact HTTPS response_uri authenticated by the original verifier
+    /// Request Object and independently pinned by the Wallet.
     /// An injected HttpClient MUST use an audited handler with redirects, cookies,
     /// proxy and implicit credentials disabled; DefaultRequestHeaders are
     /// rejected, but arbitrary handler internals cannot be inspected here.
@@ -40,20 +41,17 @@ public static class OpenId4VpJwtVcJsonWalletResponseTransport
         ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
         ArgumentNullException.ThrowIfNull(clock);
 
-        // Authenticate the original verifier request and wallet's independent
-        // destination/policy pins before even constructing a network request.
-        if (!OpenId4VpJwtVcJsonDirectPost.TryReadSignedRequest(
-                signedRequestJwt, expectedVerifierDid, independentlyTrustedResponseUri,
-                expectedCredentialType, expectedSubjectContextUri, clock, out var signed) ||
-            signed is null ||
-            string.IsNullOrEmpty(form) || form.Length > MaximumFormBytes ||
-            !form.StartsWith("vp_token=", StringComparison.Ordinal) ||
-            !form.EndsWith("&state=" + Uri.EscapeDataString(signed.Challenge.Nonce),
-                StringComparison.Ordinal) ||
-            form.IndexOf('&', StringComparison.Ordinal) != form.LastIndexOf('&') ||
-            form.IndexOf('&', StringComparison.Ordinal) <= "vp_token=".Length ||
-            !form.All(static character => character is >= '!' and <= '~') ||
-            http.DefaultRequestHeaders.Any())
+        // No network disclosure of a merely state-matching but arbitrary,
+        // unbound, forged or differently request-bound VP. Recheck the genuine
+        // verifier, issuer and holder Ed25519 signatures and exact original
+        // signed Request Object hash without consuming the verifier's nonce.
+        // Human full-disclosure consent remains the integrating Wallet's duty.
+        if (string.IsNullOrEmpty(form) || form.Length > MaximumFormBytes ||
+            http.DefaultRequestHeaders.Any() ||
+            !OpenId4VpJwtVcJsonDirectPost.IsAuthenticHolderBoundWalletForm(
+                signedRequestJwt, form, expectedVerifierDid,
+                independentlyTrustedResponseUri, expectedCredentialType,
+                expectedSubjectContextUri, clock))
         {
             return false;
         }

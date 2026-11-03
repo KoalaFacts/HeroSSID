@@ -100,7 +100,28 @@ public static class OpenId4VpJwtVcJsonWalletDisclosure
     public static string CreateHolderResponseFormAfterPreview(
         JwtVcJsonWalletDisclosurePreview preview,
         string requestJwt, string credentialJwt, byte[] holderSeed,
-        TimeProvider clock)
+        TimeProvider clock) =>
+        CreateHolderResponseFormAfterPreviewCore(
+            preview, requestJwt, credentialJwt, holderSeed, clock,
+            bindOriginalRequest: false);
+
+    /// <summary>
+    /// After the Wallet obtains actual full-disclosure consent, revalidate the
+    /// exact preview and sign a VP bound to the original signed verifier request.
+    /// This form is accepted by the fail-closed Wallet HTTPS transport.
+    /// </summary>
+    public static string CreateHolderBoundResponseFormAfterPreview(
+        JwtVcJsonWalletDisclosurePreview preview,
+        string requestJwt, string credentialJwt, byte[] holderSeed,
+        TimeProvider clock) =>
+        CreateHolderResponseFormAfterPreviewCore(
+            preview, requestJwt, credentialJwt, holderSeed, clock,
+            bindOriginalRequest: true);
+
+    private static string CreateHolderResponseFormAfterPreviewCore(
+        JwtVcJsonWalletDisclosurePreview preview,
+        string requestJwt, string credentialJwt, byte[] holderSeed,
+        TimeProvider clock, bool bindOriginalRequest)
     {
         ArgumentNullException.ThrowIfNull(preview);
         ArgumentNullException.ThrowIfNull(holderSeed);
@@ -127,10 +148,15 @@ public static class OpenId4VpJwtVcJsonWalletDisclosure
 
         // The original VP creator rechecks the verifier signature, issuer JWT,
         // holder private key and expiry. Never sign by trusting preview metadata.
-        return OpenId4VpJwtVcJsonDirectPost.CreateHolderResponseForm(
-            requestJwt, preview.VerifierDid, preview.ResponseUri,
-            preview.CredentialType, preview.SubjectContextUri,
-            credentialJwt, preview.HolderDid, holderSeed, clock);
+        return bindOriginalRequest
+            ? OpenId4VpJwtVcJsonDirectPost.CreateHolderBoundResponseForm(
+                requestJwt, preview.VerifierDid, preview.ResponseUri,
+                preview.CredentialType, preview.SubjectContextUri,
+                credentialJwt, preview.HolderDid, holderSeed, clock)
+            : OpenId4VpJwtVcJsonDirectPost.CreateHolderResponseForm(
+                requestJwt, preview.VerifierDid, preview.ResponseUri,
+                preview.CredentialType, preview.SubjectContextUri,
+                credentialJwt, preview.HolderDid, holderSeed, clock);
     }
 
 
@@ -177,7 +203,28 @@ public static class OpenId4VpJwtVcJsonWalletDisclosure
     public static string CreateHolderResponseFormAfterStatusPreview(
         JwtVcJsonWalletStatusDisclosurePreview preview, string requestJwt,
         string credentialJwt, string issuerSignedSnapshotJwt,
-        byte[] holderSeed, TimeProvider clock)
+        byte[] holderSeed, TimeProvider clock) =>
+        CreateHolderResponseFormAfterStatusPreviewCore(
+            preview, requestJwt, credentialJwt, issuerSignedSnapshotJwt,
+            holderSeed, clock, bindOriginalRequest: false);
+
+    /// <summary>
+    /// Revalidate the unmodified signed issuer status and actual approved
+    /// disclosure, then create an original-request-bound holder VP suitable
+    /// for strict Wallet HTTP delivery. Consent is supplied by the application.
+    /// </summary>
+    public static string CreateHolderBoundResponseFormAfterStatusPreview(
+        JwtVcJsonWalletStatusDisclosurePreview preview, string requestJwt,
+        string credentialJwt, string issuerSignedSnapshotJwt,
+        byte[] holderSeed, TimeProvider clock) =>
+        CreateHolderResponseFormAfterStatusPreviewCore(
+            preview, requestJwt, credentialJwt, issuerSignedSnapshotJwt,
+            holderSeed, clock, bindOriginalRequest: true);
+
+    private static string CreateHolderResponseFormAfterStatusPreviewCore(
+        JwtVcJsonWalletStatusDisclosurePreview preview, string requestJwt,
+        string credentialJwt, string issuerSignedSnapshotJwt,
+        byte[] holderSeed, TimeProvider clock, bool bindOriginalRequest)
     {
         ArgumentNullException.ThrowIfNull(preview);
         ArgumentNullException.ThrowIfNull(holderSeed);
@@ -199,8 +246,9 @@ public static class OpenId4VpJwtVcJsonWalletDisclosure
 
         // Re-check the signed verifier request, issuer JWT, original digests,
         // full displayed claims and real holder seed before producing any proof.
-        string form = CreateHolderResponseFormAfterPreview(
-            preview.Disclosure, requestJwt, credentialJwt, holderSeed, clock);
+        string form = CreateHolderResponseFormAfterPreviewCore(
+            preview.Disclosure, requestJwt, credentialJwt, holderSeed,
+            clock, bindOriginalRequest);
 
         // Signing may cross the private 60-second status expiry boundary. Never
         // return a proof described as status-gated after the snapshot expires.
