@@ -227,6 +227,23 @@ public static class OpenId4VpJwtVcJsonRequestUri
             clock, maximumDuration, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Resolve a runtime opaque request reference under an independently pinned
+    /// HTTPS base and authenticate the actual signed Request Object. This lets a
+    /// Wallet follow a by-reference launch without knowing the random reference
+    /// in advance. The Wallet application still owns trust enrollment, explicit
+    /// full-disclosure consent and its independently audited HTTP handler.
+    /// </summary>
+    public static Task<string?> FetchVerifiedRequestFromTrustedBaseAsync(
+        string invocation, Uri independentlyTrustedRequestBaseUri, HttpClient http,
+        string expectedVerifierDid, Uri expectedResponseUri,
+        string expectedCredentialType, Uri expectedSubjectContextUri,
+        TimeProvider clock, TimeSpan? maximumDuration = null,
+        CancellationToken cancellationToken = default)
+    {
+        throw new NotSupportedException("Pinned base request_uri resolution is not implemented.");
+    }
+
     private static string ExpectedInvocation(Uri requestUri, string verifierDid) =>
         "openid4vp://?client_id=" +
         Uri.EscapeDataString("decentralized_identifier:" + verifierDid) +
