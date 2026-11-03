@@ -91,6 +91,48 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStoreTests
         Assert.Equal(43, host.Reserve().Length);
     }
 
+    [Fact]
+    public void RetiredChallengeReclaimsOnlyItsOwnVolatileSlot()
+    {
+        var clock = new Clock();
+        var challenges = new InMemoryPresentationChallengeStore(clock);
+        var host = new OpenId4VpJwtVcJsonRequestObjectStore(challenges, clock);
+        Guid tenant = Guid.NewGuid();
+        var verifier = Identity();
+        var otherVerifier = Identity();
+        var issuer = Identity();
+        string audience = "decentralized_identifier:" + verifier.Did;
+        string otherAudience = "decentralized_identifier:" + otherVerifier.Did;
+        var cancelled = challenges.Issue(tenant, audience, issuer.Did, TimeSpan.FromMinutes(2));
+        var unaffected = challenges.Issue(tenant, otherAudience, issuer.Did, TimeSpan.FromMinutes(2));
+        string cancelledReference = host.Publish(tenant,
+            SignedRequest(cancelled, verifier, clock), verifier.Did, Callback, CredentialType, Context);
+        string unaffectedReference = host.Publish(tenant,
+            SignedRequest(unaffected, otherVerifier, clock), otherVerifier.Did, Callback,
+            CredentialType, Context);
+        string[] reservations = Enumerable.Range(0, 254).Select(_ => host.Reserve()).ToArray();
+        try
+        {
+            Assert.Throws<InvalidOperationException>(() => host.Reserve());
+            host.RetireConsumedChallenge(Guid.NewGuid(), audience, cancelled.Nonce);
+            Assert.Throws<InvalidOperationException>(() => host.Reserve());
+            host.RetireConsumedChallenge(tenant, otherAudience, cancelled.Nonce);
+            Assert.Throws<InvalidOperationException>(() => host.Reserve());
+            Assert.True(challenges.TryConsume(tenant, audience, cancelled.Nonce));
+            host.RetireConsumedChallenge(tenant, audience, cancelled.Nonce);
+            Assert.False(host.TryGet(cancelledReference, out _));
+            Assert.True(host.TryGet(unaffectedReference, out _));
+            Assert.Equal(43, host.Reserve().Length);
+        }
+        finally
+        {
+            foreach (string reservation in reservations)
+            {
+                host.ReleaseReservation(reservation);
+            }
+        }
+    }
+
     private static (byte[] Seed, string Did) Identity()
     {
         using var key = Key.Create(SignatureAlgorithm.Ed25519,
