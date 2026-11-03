@@ -32,14 +32,14 @@ internal static class IssuerSigningGrantEndpointFilter
             return false;
         }
 
-        string? issuerDid = request switch
+        (string? issuerDid, string? credentialType) = request switch
         {
-            IssueCredentialRequest legacy => legacy.IssuerDid,
-            IssueJwtVcJsonCredentialRequest vc11 => vc11.IssuerDid,
-            IssueVcdm20CredentialRequest vc20 => vc20.IssuerDid,
-            _ => null
+            IssueCredentialRequest legacy => (legacy.IssuerDid, legacy.CredentialType),
+            IssueJwtVcJsonCredentialRequest vc11 => (vc11.IssuerDid, vc11.CredentialType),
+            IssueVcdm20CredentialRequest vc20 => (vc20.IssuerDid, vc20.CredentialType),
+            _ => (null, null)
         };
         var grants = context.RequestServices.GetRequiredService<IssuerSigningGrantRegistry>();
-        return grants.IsAllowed(tenant, context.User, issuerDid);
+        return grants.IsAllowed(tenant, context.User, issuerDid, credentialType);
     }
 }
