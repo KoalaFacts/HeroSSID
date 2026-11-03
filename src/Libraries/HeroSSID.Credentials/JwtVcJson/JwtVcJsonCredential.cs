@@ -322,7 +322,7 @@ public static class JwtVcJsonCredential
             return false;
         }
 
-        int point = mantissa.IndexOf('.');
+        int point = mantissa.IndexOf('.', StringComparison.Ordinal);
         int decimalPosition = (point < 0 ? mantissa.Length : point) + exponent;
         int digitIndex = 0;
         foreach (char digit in mantissa)
