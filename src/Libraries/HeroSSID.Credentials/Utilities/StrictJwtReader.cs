@@ -37,7 +37,8 @@ internal static class StrictJwtReader
     }
 
     public static bool TryRead(string token, string expectedType, int maximumLength, out JsonElement payload,
-        string? expectedKeyId = null, string? expectedContentType = null)
+        string? expectedKeyId = null, string? expectedContentType = null,
+        bool allowMissingType = false)
     {
         payload = default;
         if (!IsCanonicalCompact(token, maximumLength))
@@ -60,13 +61,19 @@ internal static class StrictJwtReader
             // direct JWTs may omit it. Never silently accept an incorrect or
             // unexpected content type or an extra JOSE header parameter.
             bool hasContentType = header.TryGetProperty("cty", out var contentType);
+            bool hasType = header.TryGetProperty("typ", out _);
+            // Only the explicitly opted-in VC1.1 JWT verifier accepts an absent
+            // JOSE typ (VC Data Model 1.1 REC 6.3.1). A present typ must still
+            // match exactly; all other callers retain mandatory type separation.
             if (header.EnumerateObject().Count() !=
-                    (expectedKeyId is null ? 2 : 3) + (hasContentType ? 1 : 0) ||
+                    (expectedKeyId is null ? 2 : 3) + (hasContentType ? 1 : 0) -
+                    (hasType ? 0 : 1) ||
                 (hasContentType && (expectedContentType is null ||
                     contentType.ValueKind != JsonValueKind.String ||
                     !string.Equals(contentType.GetString(), expectedContentType, StringComparison.Ordinal))) ||
                 !TryGetString(header, "alg", out var algorithm) || algorithm != "EdDSA" ||
-                !TryGetString(header, "typ", out var type) || type != expectedType ||
+                (!hasType && !allowMissingType) ||
+                (hasType && (!TryGetString(header, "typ", out var type) || type != expectedType)) ||
                 (expectedKeyId is not null && (!TryGetString(header, "kid", out var keyId) ||
                     !string.Equals(keyId, expectedKeyId, StringComparison.Ordinal))))
             {
