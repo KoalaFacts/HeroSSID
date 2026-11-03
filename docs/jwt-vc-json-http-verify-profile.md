@@ -20,7 +20,9 @@ An authenticated caller with the exact OAuth scope **`credential:verify`** sends
 
 These DIDs are placeholders, not real signing keys. The verifier **must obtain the trusted issuer DID, expected subject and type, and approved versioned HTTPS context from its own policy**, never from the JWT it is checking. The custom type is a globally expanded HTTPS IRI (rather than an undefined JSON-LD compact term). The subject context must be an absolute HTTPS URI without user-info or fragment. Neither endpoint downloads or JSON-LD-expands arbitrary contexts.
 
-The server verifies the actual Ed25519 issuer signature and exact `did:key` key ID, nested VC1.1 `vc.@context`/`vc.type` and matching `vc.credentialSubject.id`, strict JWT shape, signed time bounds, holder DID, type and vocabulary before releasing verified subject JSON.
+The server verifies the actual Ed25519 issuer signature, any present JOSE `kid` against the pinned `did:key`, nested VC1.1 `vc.@context`/`vc.type`, JWT `sub` holder binding (including an explicitly matching nested `credentialSubject.id` if supplied), signed time bounds, type and vocabulary before releasing verified subject JSON.
+
+For independently issued, **normative VC Data Model 1.1 `typ=JWT` or omitted-`typ`** credentials, the verifier also accepts the W3C §6.3.1 **"in addition to" JWT mapping**: optional redundant `vc.issuer` (matching issuer DID string or an exact `{"id":"did:key:..."}` object), `vc.id` (matching signed `jti`), and XML date-time `vc.issuanceDate`/`vc.expirationDate` (exact instants matching signed `nbf`/`exp`). These signed fields cannot override independently pinned issuer, holder, subject vocabulary, type or dates; conflicts, unknown `vc` members and the historical private `vc+jwt` shape with extra fields fail closed. Issuer status export authenticates **the unchanged original JWT** with the same metadata rules; these internal checks are not independent third-party Wallet interoperability or standard conformance certification.
 
 A successful signature verification responds with HTTP **200**:
 

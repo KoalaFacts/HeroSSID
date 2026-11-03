@@ -279,7 +279,9 @@ public static class JwtVcJsonRevocationSnapshot
             !HasValidOptionalCredentialId(payload) ||
             expiresAt <= notBefore || expiresAt - notBefore > 900 ||
             !payload.TryGetProperty("vc", out var vc) ||
-            vc.ValueKind != JsonValueKind.Object || vc.EnumerateObject().Count() != 3 ||
+            vc.ValueKind != JsonValueKind.Object ||
+            !JwtVcJsonCredential.HasCompatibleEmbeddedVcMetadata(vc, payload, issuerDid,
+                notBefore, expiresAt, isNormativeJwt) ||
             !HasBaseArray(vc, "@context", BaseContext) ||
             !HasBaseArray(vc, "type", "VerifiableCredential") ||
             !vc.TryGetProperty("credentialSubject", out var encodedSubject) ||
