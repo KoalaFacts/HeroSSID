@@ -448,6 +448,45 @@ public sealed class JwtVcJsonCredentialTests
                 _issuer.Seed, Now, new FixedClock(Now)));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void IssuerCanSignVc11SubOnlyCredentialWithoutFabricatingNestedId(bool includeJti)
+    {
+        // VC Data Model 1.1 §6.3.1 maps credentialSubject.id to JWT sub.
+        // The issuer should be able to serialize that exact representation;
+        // the verifier must still independently pin the expected holder.
+        using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
+            new { membership = "active" }));
+        var credentialId = new Uri("https://issuer.example/credentials/sub-only-issuer");
+        string jwt = includeJti
+            ? JwtVcJsonCredential.Create(_issuer.Did, _holder.Did, CredentialType,
+                Vocabulary, subject.RootElement, _issuer.Seed,
+                Now.AddMinutes(-1), Now.AddMinutes(10), credentialId)
+            : JwtVcJsonCredential.Create(_issuer.Did, _holder.Did, CredentialType,
+                Vocabulary, subject.RootElement, _issuer.Seed,
+                Now.AddMinutes(-1), Now.AddMinutes(10));
+
+        using var signed = JsonDocument.Parse(Ed25519JwtSigner.ExtractPayload(jwt));
+        Assert.Equal(_holder.Did, signed.RootElement.GetProperty("sub").GetString());
+        Assert.False(signed.RootElement.GetProperty("vc")
+            .GetProperty("credentialSubject").TryGetProperty("id", out _));
+        Assert.Equal(includeJti, signed.RootElement.TryGetProperty("jti", out _));
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out var verified, out string? identifier));
+        Assert.Equal("active", verified.GetProperty("membership").GetString());
+        Assert.False(verified.TryGetProperty("id", out _));
+        Assert.Equal(includeJti ? credentialId.AbsoluteUri : null, identifier);
+
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _other.Did,
+            CredentialType, Vocabulary, Now, out var wrongHolder));
+        Assert.Equal(JsonValueKind.Undefined, wrongHolder.ValueKind);
+        string revoked = JwtVcJsonRevocationSnapshot.Create(_issuer.Did, [jwt],
+            _issuer.Seed, Now, new FixedClock(Now));
+        Assert.Equal(RevocationSnapshotCheckResult.Revoked,
+            JwtVcJsonRevocationSnapshot.Check(revoked, jwt, _issuer.Did, Now));
+    }
+
     [Fact]
     public void IssuerCanSignPortableCredentialIdWithOriginalCredentialAndStatusSignature()
     {
