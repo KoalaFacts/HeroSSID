@@ -10,7 +10,7 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStoreTests
     private static readonly Uri Context = new("https://issuer.example/contexts/member/v1");
 
     [Fact]
-    public void HostedStrictLookupUsesOnlyExactServerPolicyAndRejectsAmbiguousRequest()
+    public void HostedStrictLookupUsesOnlyExactServerPolicyOnRetry()
     {
         var clock = new Clock();
         var challenges = new InMemoryPresentationChallengeStore(clock);
@@ -46,13 +46,14 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStoreTests
         Assert.Equal(CredentialType, original.CredentialType);
         Assert.Equal(Context, original.SubjectContextUri);
 
-        // Publishing a second valid signed request for the same challenge
-        // makes exact-original selection ambiguous and must fail closed.
+        // An exact retry keeps the original reference rather than creating
+        // an ambiguous request that would prevent valid holder verification.
         string duplicate = host.Publish(tenant, signed, verifier.Did,
             Callback, CredentialType, Context);
-        Assert.NotEqual(reference, duplicate);
-        Assert.False(host.TryFindPublishedChallenge(
-            tenant, audience, challenge.Nonce, out _));
+        Assert.Equal(reference, duplicate);
+        Assert.True(host.TryFindPublishedChallenge(
+            tenant, audience, challenge.Nonce, out var repeated));
+        Assert.Equal(signed, repeated!.SignedRequestJwt);
         Assert.True(host.HasPublishedChallenge(tenant, audience, challenge.Nonce));
 
         Assert.True(challenges.TryConsume(tenant, audience, challenge.Nonce));
