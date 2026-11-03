@@ -394,7 +394,7 @@ public sealed class JwtVcJsonOpenId4VpHttpIntegrationTests(DatabaseFixture fixtu
         string credential = JwtVcJsonCredential.Create(issuerDid, holderDid, TypeIri,
             Context, subject.RootElement, issuerKey.Export(KeyBlobFormat.RawPrivateKey),
             now.AddMinutes(-1), now.AddMinutes(10));
-        string form = OpenId4VpJwtVcJsonDirectPost.CreateHolderResponseForm(
+        string form = OpenId4VpJwtVcJsonDirectPost.CreateHolderBoundResponseForm(
             jwt, verifierDid, new Uri(ResponseUri), TypeIri, Context, credential, holderDid,
             holderKey.Export(KeyBlobFormat.RawPrivateKey), TimeProvider.System);
         string status = JwtVcJsonRevocationSnapshot.Create(issuerDid, [],
@@ -407,7 +407,7 @@ public sealed class JwtVcJsonOpenId4VpHttpIntegrationTests(DatabaseFixture fixtu
         {
             using var full = await PostAsync(client, IssueRoute, input, token).ConfigureAwait(true);
             Assert.Equal(HttpStatusCode.TooManyRequests, full.StatusCode);
-            using var accepted = await PostAsync(client, VerifyRoute, new
+            using var accepted = await PostAsync(client, HostedVerifyRoute, new
             {
                 verifierDid, nonce, form, revocationSnapshot = status,
                 expectedCredentialType = TypeIri, subjectContextUri = Context.AbsoluteUri
