@@ -122,16 +122,7 @@ public static class JwtVcJsonCredential
             !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(expectedHolderDid, out _) ||
             !ValidType(expectedCredentialType) ||
             !ValidContext(expectedSubjectContextUri) ||
-            !(StrictJwtReader.TryRead(jwt, JwtType, MaximumJwtLength,
-                out var payload, KeyId(trustedIssuerDid)) ||
-              // W3C VC 1.1 REC §6.3.1 permits omitting kid. A missing
-              // kid cannot select a signer: only the independently pinned
-              // issuer did:key supplies the actual Ed25519 verification key.
-              // This two-field header path rejects an explicit wrong kid.
-              StrictJwtReader.TryRead(jwt, JwtType, MaximumJwtLength,
-                out payload) ||
-              StrictJwtReader.TryRead(jwt, LegacyJwtType, MaximumJwtLength,
-                out payload, KeyId(trustedIssuerDid))) ||
+            !TryReadSupportedCredentialJwt(jwt, trustedIssuerDid, out var payload, out bool isNormativeJwt) ||
             !HasSupportedClaims(payload) ||
             !Ed25519JwtSigner.VerifySignedJwt(jwt, issuerPublicKey) ||
             !StrictJwtReader.TryGetString(payload, "iss", out var signedIssuer) ||
@@ -150,7 +141,7 @@ public static class JwtVcJsonCredential
             !HasExactArray(vc, "type", BaseType, expectedCredentialType) ||
             !vc.TryGetProperty("credentialSubject", out var subject) ||
             subject.ValueKind != JsonValueKind.Object ||
-            !HasSubjectId(subject, expectedHolderDid) ||
+            !HasBoundSubject(subject, expectedHolderDid, isNormativeJwt) ||
             StrictJwtReader.HasEmbeddedContext(subject) ||
             Encoding.UTF8.GetByteCount(subject.GetRawText()) > MaximumSubjectBytes)
         {
@@ -159,6 +150,35 @@ public static class JwtVcJsonCredential
 
         verifiedSubject = subject.Clone();
         return true;
+    }
+
+    private static bool TryReadSupportedCredentialJwt(string jwt, string issuerDid,
+        out JsonElement payload, out bool isNormativeJwt)
+    {
+        // W3C VC1.1 REC §6.3.1 has optional kid only for typ=JWT. The
+        // verifier-supplied did:key always supplies the signature key.
+        // Legacy vc+jwt MUST continue to have the exact issuer kid.
+        isNormativeJwt =
+            StrictJwtReader.TryRead(jwt, JwtType, MaximumJwtLength,
+                out payload, KeyId(issuerDid)) ||
+            StrictJwtReader.TryRead(jwt, JwtType, MaximumJwtLength, out payload);
+        return isNormativeJwt ||
+            StrictJwtReader.TryRead(jwt, LegacyJwtType, MaximumJwtLength,
+                out payload, KeyId(issuerDid));
+    }
+
+    private static bool HasBoundSubject(JsonElement subject, string holderDid, bool isNormativeJwt)
+    {
+        // JWT sub represents credentialSubject.id in VC1.1. The duplicate
+        // nested field MAY be omitted for the normative JWT only. If explicitly
+        // present, including null or an empty string, it MUST match the independently
+        // pinned holder; never let a signed conflict be silently overwritten.
+        if (subject.TryGetProperty("id", out _))
+        {
+            return HasSubjectId(subject, holderDid);
+        }
+
+        return isNormativeJwt;
     }
 
     // W3C VC 1.1 maps the credential id into JWT jti. OpenID4VP's
