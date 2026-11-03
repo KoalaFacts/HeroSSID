@@ -151,6 +151,11 @@ and any public `direct_post` callback; the API does **not** host the latter.
 
 The integration suite exercises real authenticated issuance, anonymous
 GET preserving exact JWT bytes, absent/unknown reference, and cancellation
-against isolated PostgreSQL challenge storage. It is **not** independent
+against isolated PostgreSQL challenge storage.
+Authorized cancellation now also immediately retires the matching volatile
+Request Object by exact tenant, verifier audience and nonce. This releases
+host capacity without waiting for its JWT expiry; unrelated active requests
+remain available. Recovery applies to the publishing process only. It does
+not change the independent PostgreSQL challenge or make the host distributed. It is **not** independent
 Wallet interoperability, a full OpenID4VP conformance test, user consent,
 live non-revocation, personal identity proof or business authorization.
