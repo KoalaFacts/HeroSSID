@@ -47,7 +47,7 @@ string? signedRequest = await OpenId4VpJwtVcJsonRequestUri
     .FetchVerifiedRequestAsync(
         deepLink, independentlyTrustedRequestUri, http,
         trustedVerifierDid, trustedCallback, trustedType, trustedContext,
-        TimeProvider.System, cancellationToken);
+        TimeProvider.System, cancellationToken: cancellationToken);
 
 if (signedRequest is null)
 {

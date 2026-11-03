@@ -67,8 +67,8 @@ public static class OpenId4VpJwtVcJsonRequestUri
         string invocation, Uri independentlyTrustedRequestUri, HttpClient http,
         string expectedVerifierDid, Uri expectedResponseUri,
         string expectedCredentialType, Uri expectedSubjectContextUri,
-        TimeProvider clock, CancellationToken cancellationToken = default,
-        TimeSpan? maximumDuration = null)
+        TimeProvider clock, TimeSpan? maximumDuration = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(independentlyTrustedRequestUri);
