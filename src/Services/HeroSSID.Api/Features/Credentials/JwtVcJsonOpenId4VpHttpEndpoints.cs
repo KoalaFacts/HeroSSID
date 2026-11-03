@@ -116,6 +116,7 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
         }
 
         byte[]? verifierSeed = null;
+        string? reservedReference = null;
         try
         {
             var verifier = await dbContext.Dids.AsNoTracking()
@@ -132,6 +133,13 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
             }
 
             verifierSeed = encryption.Decrypt(verifier.PrivateKeyEd25519Encrypted);
+            // Reserve the single-process host slot BEFORE committing a durable
+            // challenge: a full host cannot drain the independent PG quota.
+            if (requestUriBase is not null)
+            {
+                reservedReference = requestObjects.Reserve();
+            }
+
             string clientId = "decentralized_identifier:" + request.VerifierDid;
             var challenge = challenges.Issue(tenantId, clientId,
                 request.TrustedIssuerDid!, TimeSpan.FromSeconds(request.LifetimeSeconds));
@@ -144,13 +152,15 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
             string? referenceWalletInvocation = null;
             if (requestUriBase is not null)
             {
-                string opaqueReference = requestObjects.Publish(tenantId, signed,
-                    request.VerifierDid!, request.ResponseUri!, request.CredentialType!,
-                    request.SubjectContextUri!);
-                var publishedUri = new Uri(requestUriBase, opaqueReference);
+                // Create the launch before committing the reservation, so a
+                // malformed/expired request cannot leave a published orphan.
+                var publishedUri = new Uri(requestUriBase, reservedReference!);
                 referenceWalletInvocation = OpenId4VpJwtVcJsonRequestUri.CreateWalletInvocation(
                     signed, publishedUri, request.VerifierDid!, request.ResponseUri!,
                     request.CredentialType!, request.SubjectContextUri!, clock);
+                requestObjects.PublishReserved(reservedReference!, tenantId, signed,
+                    request.VerifierDid!, request.ResponseUri!, request.CredentialType!,
+                    request.SubjectContextUri!);
             }
 
             return Results.Json(new IssueOpenId4VpSignedRequestResponse(
@@ -192,6 +202,11 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
         }
         finally
         {
+            if (reservedReference is not null)
+            {
+                requestObjects.ReleaseReservation(reservedReference);
+            }
+
             if (verifierSeed is not null)
             {
                 CryptographicOperations.ZeroMemory(verifierSeed);
