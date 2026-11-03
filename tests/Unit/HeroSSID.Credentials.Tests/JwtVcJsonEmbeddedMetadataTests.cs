@@ -104,7 +104,22 @@ public sealed class JwtVcJsonEmbeddedMetadataTests
             JwtVcJsonRevocationSnapshot.Check(revoked, jwt, _issuer.Did, Now));
     }
 
+    [Fact]
+    public void FractionalValidityBoundariesAreCheckedAtExactInstant()
+    {
+        string jwt = SignExternal(variant: "fractional-valid");
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now.AddMinutes(-1).AddMilliseconds(249), out _));
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now.AddMinutes(-1).AddMilliseconds(250), out _));
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now.AddMinutes(5).AddMilliseconds(499), out _));
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now.AddMinutes(5).AddMilliseconds(500), out _));
+    }
+
     [Theory]
+    [InlineData("legacy-fractional")]
     [InlineData("fractional-embedded-mismatch")]
     [InlineData("fractional-subtick")]
     [InlineData("fractional-iat-invalid")]
@@ -116,9 +131,21 @@ public sealed class JwtVcJsonEmbeddedMetadataTests
             CredentialType, Vocabulary, Now, out var subject, out var identifier));
         Assert.Equal(JsonValueKind.Undefined, subject.ValueKind);
         Assert.Null(identifier);
-        Assert.Throws<CryptographicException>(() =>
-            JwtVcJsonRevocationSnapshot.Create(_issuer.Did, [jwt],
-                _issuer.Seed, Now, new FixedClock(Now)));
+        if (variant == "fractional-expired")
+        {
+            // Issuer status may legitimately list an expired original VC.
+            // Status authentication does not assert current VC validity.
+            string snapshot = JwtVcJsonRevocationSnapshot.Create(_issuer.Did,
+                [jwt], _issuer.Seed, Now, new FixedClock(Now));
+            Assert.Equal(RevocationSnapshotCheckResult.Revoked,
+                JwtVcJsonRevocationSnapshot.Check(snapshot, jwt, _issuer.Did, Now));
+        }
+        else
+        {
+            Assert.Throws<CryptographicException>(() =>
+                JwtVcJsonRevocationSnapshot.Create(_issuer.Did, [jwt],
+                    _issuer.Seed, Now, new FixedClock(Now)));
+        }
     }
 
     [Fact]
@@ -196,6 +223,14 @@ public sealed class JwtVcJsonEmbeddedMetadataTests
                         .ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture) + ".500Z";
                 }
                 break;
+            case "legacy-fractional":
+                payload["nbf"] = notBefore + 0.25m;
+                vc.Remove("issuer");
+                vc.Remove("id");
+                vc.Remove("issuanceDate");
+                vc.Remove("expirationDate");
+                vc["credentialSubject"] = new { id = _holder.Did, membership = "active" };
+                break;
             case "wrong-issuer":
                 vc["issuer"] = _stranger.Did;
                 break;
@@ -242,7 +277,7 @@ public sealed class JwtVcJsonEmbeddedMetadataTests
                 break;
         }
 
-        string header = variant == "legacy-header"
+        string header = variant is "legacy-header" or "legacy-fractional"
             ? JsonSerializer.Serialize(new
             {
                 alg = "EdDSA", typ = "vc+jwt",
