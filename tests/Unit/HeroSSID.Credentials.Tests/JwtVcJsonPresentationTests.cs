@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using HeroSSID.Credentials.JwtVcJson;
 using HeroSSID.Credentials.Utilities;
 using HeroSSID.Credentials.Vcdm20;
@@ -54,6 +55,39 @@ public sealed class JwtVcJsonPresentationTests
             JwtVcJsonPresentation.Check(presentation, tenant, Audience, challenge.Nonce,
                 Type, Vocabulary, store, _clock, out var replayClaims));
         Assert.Equal(JsonValueKind.Undefined, replayClaims.ValueKind);
+    }
+
+    [Fact]
+    public void GenuineIssuerSignedSingleElementArrayCanBePresentedWithHolderKeyAndOneUseChallenge()
+    {
+        // The original issuer signs an array-form VC. The holder signs a
+        // separate nonce-bound VP; neither signature substitutes for the other.
+        string original = IssueCredential();
+        JsonNode model = JsonNode.Parse(Ed25519JwtSigner.ExtractPayload(original))!;
+        JsonNode selectedSubject = model["vc"]!["credentialSubject"]!.DeepClone();
+        model["vc"]!["credentialSubject"] = new JsonArray(selectedSubject);
+        string arrayCredential = Ed25519JwtSigner.CreateSignedJwt(
+            Ed25519JwtSigner.ExtractHeader(original), model.ToJsonString(), _issuer.Seed);
+
+        Guid tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did);
+        string request = OfflineSignedPresentationRequest.Create(
+            challenge, _verifier.Did, _verifier.Seed, _clock);
+        string presentation = JwtVcJsonPresentation.Create(
+            request, _verifier.Did, Audience, arrayCredential,
+            Type, Vocabulary, _holder.Did, _holder.Seed, _clock);
+        using var signedVp = JsonDocument.Parse(Ed25519JwtSigner.ExtractPayload(presentation));
+        Assert.Equal(arrayCredential, signedVp.RootElement.GetProperty("vp")
+            .GetProperty("verifiableCredential")[0].GetString());
+        Assert.Equal(JwtVcJsonPresentationCheckResult.SignedButStatusUnchecked,
+            JwtVcJsonPresentation.Check(presentation, tenant, Audience, challenge.Nonce,
+                Type, Vocabulary, store, _clock, out var claims));
+        Assert.Equal("active", claims.GetProperty("membership").GetString());
+        Assert.Equal(JwtVcJsonPresentationCheckResult.Invalid,
+            JwtVcJsonPresentation.Check(presentation, tenant, Audience, challenge.Nonce,
+                Type, Vocabulary, store, _clock, out var replay));
+        Assert.Equal(JsonValueKind.Undefined, replay.ValueKind);
     }
 
     [Fact]
