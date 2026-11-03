@@ -14,7 +14,11 @@ public static class JwtVcJsonCredential
 {
     private const string BaseContext = "https://www.w3.org/2018/credentials/v1";
     private const string BaseType = "VerifiableCredential";
-    private const string JwtType = "vc+jwt";
+    // W3C VC Data Model 1.1 Recommendation §6.3.1 requires typ=JWT if present.
+    // Retain verification of the previously issued HeroSSID vc+jwt header as a
+    // bounded legacy input, without presenting it as VC1.1-conformant output.
+    private const string JwtType = "JWT";
+    private const string LegacyJwtType = "vc+jwt";
     private const int MaximumJwtLength = 65_536;
     private const int MaximumSubjectBytes = 16_384;
     private const long MaximumValiditySeconds = 900;
@@ -100,8 +104,9 @@ public static class JwtVcJsonCredential
     /// <summary>
     /// Independently verify the actual Ed25519 issuer signature and pinned issuer,
     /// holder, type, HTTPS vocabulary and 15-minute validity, before releasing claims.
-    /// Also accepts separately encoded VC1.1 JWTs with a bounded HTTPS jti and
-    /// no iat, or an iat preceding nbf by at most 15 minutes.
+    /// Also accepts independently signed VC1.1 JWTs with typ=JWT, bounded HTTPS
+    /// jti and no iat (or iat preceding nbf by at most 15 minutes). Existing
+    /// HeroSSID typ=vc+jwt credentials remain readable as legacy input only.
     /// Does NOT establish holder possession, consent, revocation or business authority.
     /// </summary>
     public static bool TryVerify(string jwt, string trustedIssuerDid, string expectedHolderDid,
@@ -116,8 +121,10 @@ public static class JwtVcJsonCredential
             !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(expectedHolderDid, out _) ||
             !ValidType(expectedCredentialType) ||
             !ValidContext(expectedSubjectContextUri) ||
-            !StrictJwtReader.TryRead(jwt, JwtType, MaximumJwtLength,
+            !(StrictJwtReader.TryRead(jwt, JwtType, MaximumJwtLength,
                 out var payload, KeyId(trustedIssuerDid)) ||
+              StrictJwtReader.TryRead(jwt, LegacyJwtType, MaximumJwtLength,
+                out payload, KeyId(trustedIssuerDid))) ||
             !HasSupportedClaims(payload) ||
             !Ed25519JwtSigner.VerifySignedJwt(jwt, issuerPublicKey) ||
             !StrictJwtReader.TryGetString(payload, "iss", out var signedIssuer) ||
