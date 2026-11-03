@@ -183,7 +183,9 @@ public static class JwtVcJsonCredential
             expires <= notBefore || expires - notBefore > MaximumValiditySeconds ||
             notBefore > now.ToUnixTimeSeconds() || expires <= now.ToUnixTimeSeconds() ||
             !payload.TryGetProperty("vc", out var vc) ||
-            vc.ValueKind != JsonValueKind.Object || vc.EnumerateObject().Count() != 3 ||
+            vc.ValueKind != JsonValueKind.Object ||
+            !HasCompatibleEmbeddedVcMetadata(vc, payload, trustedIssuerDid,
+                notBefore, expires, isNormativeJwt) ||
             !HasExactArray(vc, "@context", BaseContext, expectedSubjectContextUri.AbsoluteUri) ||
             !HasExactArray(vc, "type", BaseType, expectedCredentialType) ||
             !vc.TryGetProperty("credentialSubject", out var encodedSubject) ||
@@ -305,6 +307,91 @@ public static class JwtVcJsonCredential
         !string.IsNullOrWhiteSpace(uri.Host) &&
         uri.UserInfo.Length == 0 &&
         uri.AbsoluteUri.Length <= 2_048;
+
+    /// <summary>
+    /// W3C VC1.1 REC §6.3.1 permits registered JWT claims instead of, or
+    /// in addition to, the equivalent VC properties. Accept only redundant
+    /// fields that are semantically identical to the authenticated JWT claims.
+    /// Untrusted metadata never enrolls issuers, replaces the signed subject,
+    /// grants authority or overrides verifier policy. Historical vc+jwt stays
+    /// on its original strict three-member VC shape.
+    /// </summary>
+    internal static bool HasCompatibleEmbeddedVcMetadata(
+        JsonElement vc, JsonElement payload, string pinnedIssuerDid,
+        long signedNotBefore, long signedExpires, bool isNormativeJwt)
+    {
+        bool hasIssuer = vc.TryGetProperty("issuer", out var embeddedIssuer);
+        bool hasId = vc.TryGetProperty("id", out _);
+        bool hasIssuance = vc.TryGetProperty("issuanceDate", out _);
+        bool hasExpiration = vc.TryGetProperty("expirationDate", out _);
+        int metadataCount = (hasIssuer ? 1 : 0) + (hasId ? 1 : 0) +
+            (hasIssuance ? 1 : 0) + (hasExpiration ? 1 : 0);
+
+        if (vc.EnumerateObject().Count() != 3 + metadataCount ||
+            (!isNormativeJwt && metadataCount != 0))
+        {
+            return false;
+        }
+
+        if (hasIssuer)
+        {
+            bool matchesIssuer = embeddedIssuer.ValueKind switch
+            {
+                JsonValueKind.String =>
+                    string.Equals(embeddedIssuer.GetString(), pinnedIssuerDid,
+                        StringComparison.Ordinal),
+                JsonValueKind.Object =>
+                    embeddedIssuer.EnumerateObject().Count() == 1 &&
+                    StrictJwtReader.TryGetString(embeddedIssuer, "id", out string issuerId) &&
+                    string.Equals(issuerId, pinnedIssuerDid, StringComparison.Ordinal),
+                _ => false
+            };
+            if (!matchesIssuer)
+            {
+                return false;
+            }
+        }
+
+        if (hasId &&
+            (!StrictJwtReader.TryGetString(payload, "jti", out string signedId) ||
+             !StrictJwtReader.TryGetString(vc, "id", out string embeddedId) ||
+             !string.Equals(embeddedId, signedId, StringComparison.Ordinal)))
+        {
+            return false;
+        }
+
+        return (!hasIssuance || HasMatchingXmlDateTime(vc, "issuanceDate", signedNotBefore)) &&
+            (!hasExpiration || HasMatchingXmlDateTime(vc, "expirationDate", signedExpires));
+    }
+
+    private static bool HasMatchingXmlDateTime(JsonElement vc, string name, long signedEpoch)
+    {
+        if (!StrictJwtReader.TryGetString(vc, name, out string dateTime) ||
+            dateTime.Length > 64 ||
+            // XML Schema permits time zone offsets as well as Z, but an
+            // unspecified local zone cannot map unambiguously to JWT NumericDate.
+            !(dateTime.EndsWith("Z", StringComparison.Ordinal) ||
+                (dateTime.Length >= 6 &&
+                    (dateTime[^6] == '+' || dateTime[^6] == '-') &&
+                    dateTime[^3] == ':')))
+        {
+            return false;
+        }
+
+        try
+        {
+            return System.Xml.XmlConvert.ToDateTimeOffset(dateTime) ==
+                DateTimeOffset.FromUnixTimeSeconds(signedEpoch);
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
 
     private static bool HasExactArray(JsonElement element, string name, string first, string second)
     {
