@@ -218,6 +218,96 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStoreTests
         }
     }
 
+    [Fact]
+    public void RetryingTheSameSignedRequestReturnsTheOriginalReferenceEvenAtCapacity()
+    {
+        var clock = new Clock();
+        var challenges = new InMemoryPresentationChallengeStore(clock);
+        var host = new OpenId4VpJwtVcJsonRequestObjectStore(challenges, clock);
+        Guid tenant = Guid.NewGuid();
+        var verifier = Identity();
+        var issuer = Identity();
+        var challenge = challenges.IssueHosted(tenant,
+            "decentralized_identifier:" + verifier.Did, issuer.Did, TimeSpan.FromMinutes(2));
+        string signed = SignedRequest(challenge, verifier, clock);
+        string original = host.Publish(tenant, signed, verifier.Did, Callback, CredentialType, Context);
+        string[] pending = Enumerable.Range(0, 255).Select(_ => host.Reserve()).ToArray();
+
+        try
+        {
+            // A retry must not reserve another slot or poison strict original-request lookup.
+            string retried = host.Publish(tenant, signed, verifier.Did, Callback, CredentialType, Context);
+            Assert.Equal(original, retried);
+            Assert.True(host.TryGet(retried, out string fetched));
+            Assert.Equal(signed, fetched);
+            Assert.True(host.TryFindPublishedChallenge(tenant,
+                "decentralized_identifier:" + verifier.Did, challenge.Nonce, out var published));
+            Assert.Equal(signed, published!.SignedRequestJwt);
+            Assert.Throws<InvalidOperationException>(() => host.Reserve());
+        }
+        finally
+        {
+            foreach (string reservation in pending)
+            {
+                host.ReleaseReservation(reservation);
+            }
+        }
+    }
+
+    [Fact]
+    public void ConcurrentRetriesShareOnePublishedReference()
+    {
+        var clock = new Clock();
+        var challenges = new InMemoryPresentationChallengeStore(clock);
+        var host = new OpenId4VpJwtVcJsonRequestObjectStore(challenges, clock);
+        Guid tenant = Guid.NewGuid();
+        var verifier = Identity();
+        var issuer = Identity();
+        var challenge = challenges.IssueHosted(tenant,
+            "decentralized_identifier:" + verifier.Did, issuer.Did, TimeSpan.FromMinutes(2));
+        string signed = SignedRequest(challenge, verifier, clock);
+
+        string?[] returned = new string?[16];
+        Parallel.For(0, returned.Length, index =>
+            returned[index] = host.Publish(tenant, signed, verifier.Did,
+                Callback, CredentialType, Context));
+
+        Assert.Single(returned.Distinct(StringComparer.Ordinal));
+        Assert.True(host.TryFindPublishedChallenge(tenant,
+            "decentralized_identifier:" + verifier.Did, challenge.Nonce, out var published));
+        Assert.Equal(signed, published!.SignedRequestJwt);
+    }
+
+    [Fact]
+    public void DifferentAuthenticRequestForSameChallengeCannotReplaceOriginalPublication()
+    {
+        var clock = new Clock();
+        var challenges = new InMemoryPresentationChallengeStore(clock);
+        var host = new OpenId4VpJwtVcJsonRequestObjectStore(challenges, clock);
+        Guid tenant = Guid.NewGuid();
+        var verifier = Identity();
+        var issuer = Identity();
+        var challenge = challenges.IssueHosted(tenant,
+            "decentralized_identifier:" + verifier.Did, issuer.Did, TimeSpan.FromMinutes(2));
+        string originalJwt = SignedRequest(challenge, verifier, clock);
+        string reference = host.Publish(tenant, originalJwt, verifier.Did,
+            Callback, CredentialType, Context);
+
+        var alternateCallback = new Uri("https://verifier.example/different-callback");
+        string alternateJwt = OpenId4VpJwtVcJsonDirectPost.CreateSignedRequest(
+            challenge, verifier.Did, verifier.Seed, alternateCallback,
+            CredentialType, Context, clock);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            host.Publish(tenant, alternateJwt, verifier.Did,
+                alternateCallback, CredentialType, Context));
+        Assert.True(host.TryGet(reference, out string stillPublished));
+        Assert.Equal(originalJwt, stillPublished);
+        Assert.True(host.TryFindPublishedChallenge(tenant,
+            "decentralized_identifier:" + verifier.Did, challenge.Nonce, out var bound));
+        Assert.Equal(originalJwt, bound!.SignedRequestJwt);
+    }
+
     private static (byte[] Seed, string Did) Identity()
     {
         using var key = Key.Create(SignatureAlgorithm.Ed25519,
