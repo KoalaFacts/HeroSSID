@@ -414,8 +414,8 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
                 // caller could bypass the strict verifier by changing routes.
                 // This guard covers this process's live published requests;
                 // volatile references are not persisted across replicas/restarts.
-                if (requestObjects.TryFindPublishedChallenge(
-                        tenantId, audience, request.Nonce!, out _))
+                if (requestObjects.HasPublishedChallenge(
+                        tenantId, audience, request.Nonce!))
                 {
                     return Results.Ok(new VerifyOpenId4VpDirectPostResponse("Invalid", null));
                 }
