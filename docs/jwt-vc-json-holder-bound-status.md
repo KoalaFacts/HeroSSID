@@ -12,6 +12,14 @@ Do **not** combine the existing unbound `CheckResponseForm` with an independentl
 
 `NotListed` means only that the real issuer's signed, caller-supplied snapshot did not list this credential at its claimed observation instant. It cannot prove truthful list completeness, live non-revocation, issuer trust enrollment, actual user consent, legal identity, Agent delegation or business authorization. The `herossidRequestSha256` holder claim and issuer-status envelope are HeroSSID extensions; this implementation is **not** a third-party Wallet interoperability test, complete OpenID4VP conformance or an external cryptographic audit.
 
+## Post-incident issuer observation cutoff (strict opt-in)
+
+Use `JwtVcJsonDirectPostRevocation.CheckHolderBoundResponseFormWithObservationCutoff(..., minimumStatusObservedAt, out verifiedSubject)` when the relying verifier has independently recorded an incident/compromise time. This combines the existing genuine verifier-request/holder signature, exact-original-request pin and atomic one-use challenge with the **same genuine issuer's** signed status whose `iat` (claimed observation timestamp) must be **at or after** the verifier's cutoff. The pre-existing `CheckHolderBoundResponseForm` remains available without incident cutoff; it must not be used when incident policy requires one.
+
+The verifier must choose and retain `minimumStatusObservedAt` from its own incident policy, not from the Wallet, signed Request Object, credential, form, or issuer's claimed time. An authentic still-fresh pre-incident snapshot fails and discloses no claims. Invalid cutoff values before the Unix epoch or in the future fail *before* consuming a challenge; valid holder proof spends its challenge even if signed status is pre-incident, revoked, malformed or unavailable. A new request and fresh one-time challenge are necessary to try a later snapshot; a used nonce cannot be revived.
+
+Status timestamps are signed whole seconds. A cutoff at 10:00:00.500 UTC requires a signed issuer observation at 10:00:01 UTC or later; rounding a cutoff down would admit an older snapshot. `NotListed` is only a private signed assertion about a caller-provided revocation set at its claimed observation instant. It does not prove the issuer actually observed that set after the incident, its completeness, the private key remained safe, or live non-revocation. It is not a W3C status-list protocol, a user consent UI, legal identity proof or business authorization.
+
 Acceptance test:
 
 ```bash
