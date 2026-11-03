@@ -60,3 +60,49 @@ true subject claims, informed disclosure, automatic key continuity trust,
 relying-party authorization or third-party Wallet interoperability.
 
 See [vision](VISION.md) and [implemented limitations](../README.md).
+
+## Optional exact credential type restriction
+
+A client approved to use a tenant-owned Ed25519 issuer signing key could otherwise
+assert any credential type supported by the chosen issue route. A valid issuer
+signature authenticates the signing key, **not** that every assertion is
+permitted. An operator can additionally restrict each existing exact
+`TenantId + ClientId + IssuerDid` grant to a small set of **literal credential
+type strings**:
+
+```json
+{
+  "IssuerSigningGrants": {
+    "EnforcedTenants": ["11111111-1111-1111-1111-111111111111"],
+    "Grants": [{
+      "TenantId": "11111111-1111-1111-1111-111111111111",
+      "ClientId": "membership-issuer",
+      "IssuerDid": "did:key:z6Mkj...",
+      "CredentialTypes": [
+        "MembershipCredential",
+        "https://issuer.example/credentials#MembershipCredential"
+      ]
+    }]
+  }
+}
+```
+
+The DID is illustrative; replace it with a real canonical Ed25519 `did:key`.
+For each grant, `CredentialTypes` is **opt-in**. Omitting it preserves the
+existing unrestricted-type key-use permission; specifying it requires 1–16
+unique, nonempty strings of at most 128 characters without whitespace or
+control characters. Empty, duplicate, malformed, sparse-indexed, nested or
+oversized lists fail host startup, rather than silently granting all types.
+Matching is ordinal and case-sensitive; no URI normalization or implied
+inheritance is performed. Different format routes may have different literal
+types: VC1.1 `jwt_vc_json` uses an expanded HTTPS credential type, while the
+legacy and direct VC2 HTTP issue examples use `MembershipCredential`.
+
+All three authenticated HTTP issuance routes reject a type outside the
+operator-approved list with **404 before signing**; even a client holding a
+valid `credential:issue` OAuth scope and an approved issuer key is denied.
+This does not inspect or approve the truth, value or allowed fields of the
+`credentialSubject` claims. Type restriction is a narrow key-use permission,
+**not** the receiving application's business authorization, verified human
+identity, holder control, user consent, credential revocation, or external
+wallet conformance. Operators must synchronize policy across every replica.
