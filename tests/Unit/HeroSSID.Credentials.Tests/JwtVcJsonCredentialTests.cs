@@ -560,16 +560,57 @@ public sealed class JwtVcJsonCredentialTests
         }
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void IndependentlySignedVc11WithoutOptionalTypPreservesIssuerHolderAndRevocation(bool includeKid)
+    {
+        // VC Data Model 1.1 REC 6.3.1: JOSE typ, if present, MUST equal JWT.
+        // A different Ed25519 signer constructs the header with no typ at all.
+        // Its omission must not bypass the pinned issuer/holder or legacy rules.
+        string jwt = SignExternalJwt(null,
+            "https://issuer.example/credentials/typ-omitted", "JWT",
+            includeKid: includeKid, omitSubjectId: true, omitTyp: true);
+        using var header = JsonDocument.Parse(Ed25519JwtSigner.ExtractHeader(jwt));
+        Assert.False(header.RootElement.TryGetProperty("typ", out _));
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out var subject));
+        Assert.Equal("active", subject.GetProperty("membership").GetString());
+        Assert.False(subject.TryGetProperty("id", out _));
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, _other.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out var foreign));
+        Assert.Equal(JsonValueKind.Undefined, foreign.ValueKind);
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _other.Did,
+            CredentialType, Vocabulary, Now, out _));
+
+        string revoked = JwtVcJsonRevocationSnapshot.Create(_issuer.Did, [jwt],
+            _issuer.Seed, Now, new FixedClock(Now));
+        Assert.Equal(RevocationSnapshotCheckResult.Revoked,
+            JwtVcJsonRevocationSnapshot.Check(revoked, jwt, _issuer.Did, Now));
+
+        string[] segments = jwt.Split('.');
+        segments[1] = Base64UrlEncoder.Encode(
+            Base64UrlEncoder.DecodeString(segments[1]).Replace(
+                "active", "admin", StringComparison.Ordinal));
+        Assert.False(JwtVcJsonCredential.TryVerify(string.Join('.', segments),
+            _issuer.Did, _holder.Did, CredentialType, Vocabulary, Now, out _));
+    }
+
     private string SignExternalJwt(long? signatureIssuedAt, string credentialId,
         string tokenType = "vc+jwt", bool includeKid = true, string? headerKidOverride = null,
-        bool omitSubjectId = false, string? subjectIdOverride = null)
+        bool omitSubjectId = false, string? subjectIdOverride = null, bool omitTyp = false)
     {
         string kid = _issuer.Did + "#" + _issuer.Did["did:key:".Length..];
-        string header = includeKid
-            ? Base64UrlEncoder.Encode(JsonSerializer.Serialize(
-                new { alg = "EdDSA", typ = tokenType, kid = headerKidOverride ?? kid }))
-            : Base64UrlEncoder.Encode(JsonSerializer.Serialize(
-                new { alg = "EdDSA", typ = tokenType }));
+        string header = omitTyp
+            ? includeKid
+                ? Base64UrlEncoder.Encode(JsonSerializer.Serialize(
+                    new { alg = "EdDSA", kid = headerKidOverride ?? kid }))
+                : Base64UrlEncoder.Encode(JsonSerializer.Serialize(new { alg = "EdDSA" }))
+            : includeKid
+                ? Base64UrlEncoder.Encode(JsonSerializer.Serialize(
+                    new { alg = "EdDSA", typ = tokenType, kid = headerKidOverride ?? kid }))
+                : Base64UrlEncoder.Encode(JsonSerializer.Serialize(
+                    new { alg = "EdDSA", typ = tokenType }));
         var claims = new Dictionary<string, object>
         {
             ["iss"] = _issuer.Did,
