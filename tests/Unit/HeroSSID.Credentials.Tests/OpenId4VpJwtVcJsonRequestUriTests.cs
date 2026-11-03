@@ -363,8 +363,8 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
     [Fact]
     public void IsolatedDirectPostHandlerRejectsAmbientCredentialsAndTracePropagation()
     {
-        using var activity = new System.Diagnostics.Activity("secret-wallet-tenant")
-            .SetIdFormat(System.Diagnostics.ActivityIdFormat.W3C);
+        using var activity = new System.Diagnostics.Activity("secret-wallet-tenant");
+        activity.SetIdFormat(System.Diagnostics.ActivityIdFormat.W3C);
         activity.AddBaggage("private-tenant", "internal-account-name");
         activity.Start();
         using var handler =
@@ -389,23 +389,26 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
     {
         // Exercise .NET's actual SocketsHttpHandler diagnostics pipeline, not a
         // fake HttpMessageHandler that would miss injected trace/baggage headers.
-        var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        using var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         int port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        Task<string> server = ReadHeadersAndReplyAsync(listener, cancellation.Token);
 
-        using var activity = new System.Diagnostics.Activity("wallet-sensitive-flow")
-            .SetIdFormat(System.Diagnostics.ActivityIdFormat.W3C);
+        using var activity = new System.Diagnostics.Activity("wallet-sensitive-flow");
+        activity.SetIdFormat(System.Diagnostics.ActivityIdFormat.W3C);
         activity.AddBaggage("tenant", "private-account-identifier");
         activity.Start();
         using var handler =
             OpenId4VpJwtVcJsonWalletResponseTransport.CreateIsolatedDirectPostHandler();
         using var http = new HttpClient(handler);
-        using var response = await http.GetAsync(
+        // Start request before accepting the TCP connection. Await both the
+        // real HTTP call and the server before leaving the using scopes.
+        Task<HttpResponseMessage> requestTask = http.GetAsync(
             new Uri($"http://127.0.0.1:{port}/probe"), cancellation.Token);
+        string received = await ReadHeadersAndReplyAsync(
+            listener, cancellation.Token).ConfigureAwait(false);
+        using var response = await requestTask.ConfigureAwait(false);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        string received = await server;
         Assert.DoesNotContain("traceparent:", received, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("tracestate:", received, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("baggage:", received, StringComparison.OrdinalIgnoreCase);
@@ -416,13 +419,13 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
     private static async Task<string> ReadHeadersAndReplyAsync(
         System.Net.Sockets.TcpListener listener, CancellationToken cancellationToken)
     {
-        using var connection = await listener.AcceptTcpClientAsync(cancellationToken);
+        using var connection = await listener.AcceptTcpClientAsync(cancellationToken).ConfigureAwait(false);
         using var stream = connection.GetStream();
         using var reader = new StreamReader(stream, Encoding.ASCII, leaveOpen: true);
         var headers = new List<string>();
         while (true)
         {
-            string? line = await reader.ReadLineAsync(cancellationToken);
+            string? line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
             if (line is null || line.Length == 0)
             {
                 break;
@@ -433,8 +436,8 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
 
         byte[] response = Encoding.ASCII.GetBytes(
             "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
-        await stream.WriteAsync(response, cancellationToken);
-        await stream.FlushAsync(cancellationToken);
+        await stream.WriteAsync(response, cancellationToken).ConfigureAwait(false);
+        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
         return string.Join("\n", headers);
     }
 
