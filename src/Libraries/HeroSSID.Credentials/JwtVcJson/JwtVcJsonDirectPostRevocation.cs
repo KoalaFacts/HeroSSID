@@ -111,6 +111,23 @@ public static class JwtVcJsonDirectPostRevocation
         return status;
     }
 
+    /// <summary>
+    /// Opt-in verifier incident cutoff: a valid signed status must have been
+    /// observed at or after the independently configured emergency instant.
+    /// Fails closed until the policy-aware verification is implemented.
+    /// </summary>
+    public static RevocationSnapshotCheckResult CheckHolderBoundResponseFormWithObservationCutoff(
+        string form, string snapshotJwt, string signedRequestJwt,
+        string verifierRetainedRequestSha256, string trustedVerifierDid,
+        Uri expectedResponseUri, Guid verifierTenantId, string expectedClientId,
+        string expectedNonce, string expectedCredentialType, Uri expectedSubjectContextUri,
+        IPresentationChallengeStore challenges, TimeProvider clock,
+        DateTimeOffset minimumStatusObservedAt, out JsonElement verifiedSubject)
+    {
+        verifiedSubject = default;
+        return RevocationSnapshotCheckResult.Invalid;
+    }
+
     private static bool TryGetCredential(string form, out string credential)
     {
         credential = string.Empty;
