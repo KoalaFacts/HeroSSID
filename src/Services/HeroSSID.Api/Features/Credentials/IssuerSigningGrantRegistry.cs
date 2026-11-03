@@ -13,10 +13,11 @@ namespace HeroSSID.Api.Features.Credentials;
 internal sealed class IssuerSigningGrantRegistry
 {
     private static readonly HashSet<string> AllowedGrantFields =
-        new(StringComparer.OrdinalIgnoreCase) { "TenantId", "ClientId", "IssuerDid", "CredentialTypes" };
+        new(StringComparer.OrdinalIgnoreCase) { "TenantId", "ClientId", "IssuerDid", "CredentialTypes", "SubjectClaimNames" };
 
     private readonly HashSet<Guid> _enforcedTenants = [];
-    private readonly Dictionary<(Guid Tenant, string ClientId, string IssuerDid), HashSet<string>?> _grants = [];
+    private readonly Dictionary<(Guid Tenant, string ClientId, string IssuerDid),
+        (HashSet<string>? Types, HashSet<string>? SubjectClaims)> _grants = [];
 
     public IssuerSigningGrantRegistry(IConfiguration configuration)
     {
@@ -60,9 +61,10 @@ internal sealed class IssuerSigningGrantRegistry
             }
 
             IConfigurationSection[] fields = [.. entry.GetChildren()];
-            if (fields.Length is not (3 or 4) || fields.Any(field =>
+            if (fields.Length is < 3 or > 5 || fields.Any(field =>
                     !AllowedGrantFields.Contains(field.Key) ||
-                    (string.Equals(field.Key, "CredentialTypes", StringComparison.OrdinalIgnoreCase)
+                    ((string.Equals(field.Key, "CredentialTypes", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(field.Key, "SubjectClaimNames", StringComparison.OrdinalIgnoreCase))
                         ? field.Value is not null
                         : field.Value is null || field.GetChildren().Any())))
             {
@@ -99,6 +101,37 @@ internal sealed class IssuerSigningGrantRegistry
                 }
             }
 
+            // This is strictly a top-level claim-name gate, not verification of
+            // the truth, semantics or permissible values of an issuer assertion.
+            IConfigurationSection? configuredSubjects = fields.FirstOrDefault(field =>
+                string.Equals(field.Key, "SubjectClaimNames", StringComparison.OrdinalIgnoreCase));
+            HashSet<string>? permittedSubjects = null;
+            if (configuredSubjects is not null)
+            {
+                IConfigurationSection[] values = [.. configuredSubjects.GetChildren()];
+                if (values.Length is 0 or > 32)
+                {
+                    throw new InvalidOperationException("Invalid issuer subject claim name capacity.");
+                }
+
+                permittedSubjects = new HashSet<string>(StringComparer.Ordinal);
+                for (int index = 0; index < values.Length; index++)
+                {
+                    IConfigurationSection value = values[index];
+                    string? name = value.Value;
+                    if (!string.Equals(value.Key, index.ToString(CultureInfo.InvariantCulture),
+                            StringComparison.Ordinal) ||
+                        value.GetChildren().Any() ||
+                        name is not { Length: > 0 and <= 64 } ||
+                        !char.IsLetter(name[0]) ||
+                        name.Any(static c => !(char.IsLetterOrDigit(c) || c == '_' || c == '-')) ||
+                        !permittedSubjects.Add(name))
+                    {
+                        throw new InvalidOperationException("Invalid or duplicate issuer subject claim name.");
+                    }
+                }
+            }
+
             string? client = entry["ClientId"];
             string? issuer = entry["IssuerDid"];
             if (!Guid.TryParse(entry["TenantId"], out Guid tenant) ||
@@ -107,19 +140,24 @@ internal sealed class IssuerSigningGrantRegistry
                 client.Any(char.IsWhiteSpace) || client.Any(char.IsControl) ||
                 issuer is not { Length: > 0 and <= 255 } ||
                 !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(issuer, out _) ||
-                !_grants.TryAdd((tenant, client, issuer), permittedTypes))
+                !_grants.TryAdd((tenant, client, issuer), (permittedTypes, permittedSubjects)))
             {
                 throw new InvalidOperationException("Invalid, orphaned or duplicate issuer signing grant.");
             }
         }
     }
 
-    // Callers without a credential type cannot bypass an opt-in type policy.
+    // Callers without the actual type or subject keys cannot bypass an opt-in policy.
     internal bool IsAllowed(Guid tenant, ClaimsPrincipal principal, string? issuerDid) =>
-        IsAllowed(tenant, principal, issuerDid, null);
+        IsAllowed(tenant, principal, issuerDid, null, null, false);
 
     internal bool IsAllowed(Guid tenant, ClaimsPrincipal principal, string? issuerDid,
-        string? credentialType)
+        string? credentialType) =>
+        IsAllowed(tenant, principal, issuerDid, credentialType, null, false);
+
+    internal bool IsAllowed(Guid tenant, ClaimsPrincipal principal, string? issuerDid,
+        string? credentialType, IReadOnlyCollection<string>? subjectClaimNames,
+        bool allowIntrinsicHolderId)
     {
         ArgumentNullException.ThrowIfNull(principal);
         if (!_enforcedTenants.Contains(tenant))
@@ -138,8 +176,15 @@ internal sealed class IssuerSigningGrantRegistry
         return clients.Length == 1 && subjects.Length == 1 && tenants.Length == 1 &&
             Guid.TryParse(tenants[0].Value, out Guid signedTenant) && signedTenant == tenant &&
             string.Equals(clients[0].Value, subjects[0].Value, StringComparison.Ordinal) &&
-            _grants.TryGetValue((tenant, clients[0].Value, issuerDid), out HashSet<string>? allowedTypes) &&
-            (allowedTypes is null ||
-                (credentialType is not null && allowedTypes.Contains(credentialType)));
+            _grants.TryGetValue((tenant, clients[0].Value, issuerDid), out var grant) &&
+            (grant.Types is null ||
+                (credentialType is not null && grant.Types.Contains(credentialType))) &&
+            (grant.SubjectClaims is null ||
+                (subjectClaimNames is { Count: > 0 and <= 33 } &&
+                    subjectClaimNames.Distinct(StringComparer.Ordinal).Count() ==
+                        subjectClaimNames.Count &&
+                    subjectClaimNames.All(name =>
+                        (allowIntrinsicHolderId && string.Equals(name, "id", StringComparison.Ordinal)) ||
+                        grant.SubjectClaims.Contains(name))));
     }
 }

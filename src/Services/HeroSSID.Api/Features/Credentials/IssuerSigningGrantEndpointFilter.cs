@@ -1,3 +1,4 @@
+using System.Text.Json;
 using HeroSSID.Api.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -32,14 +33,24 @@ internal static class IssuerSigningGrantEndpointFilter
             return false;
         }
 
-        (string? issuerDid, string? credentialType) = request switch
+        (string? issuerDid, string? credentialType,
+            IReadOnlyCollection<string>? claimNames, bool intrinsicHolderId) = request switch
         {
-            IssueCredentialRequest legacy => (legacy.IssuerDid, legacy.CredentialType),
-            IssueJwtVcJsonCredentialRequest vc11 => (vc11.IssuerDid, vc11.CredentialType),
-            IssueVcdm20CredentialRequest vc20 => (vc20.IssuerDid, vc20.CredentialType),
-            _ => (null, null)
+            IssueCredentialRequest legacy =>
+                (legacy.IssuerDid, legacy.CredentialType, legacy.Claims?.Keys.ToArray(), false),
+            IssueJwtVcJsonCredentialRequest vc11 =>
+                (vc11.IssuerDid, vc11.CredentialType, SubjectNames(vc11.CredentialSubject), true),
+            IssueVcdm20CredentialRequest vc20 =>
+                (vc20.IssuerDid, vc20.CredentialType, SubjectNames(vc20.CredentialSubject), true),
+            _ => (null, null, null, false)
         };
         var grants = context.RequestServices.GetRequiredService<IssuerSigningGrantRegistry>();
-        return grants.IsAllowed(tenant, context.User, issuerDid, credentialType);
+        return grants.IsAllowed(tenant, context.User, issuerDid, credentialType,
+            claimNames, intrinsicHolderId);
     }
+
+    private static IReadOnlyCollection<string>? SubjectNames(JsonElement subject) =>
+        subject.ValueKind == JsonValueKind.Object
+            ? [.. subject.EnumerateObject().Select(static claim => claim.Name)]
+            : null;
 }

@@ -71,19 +71,35 @@ public sealed class IssuerSigningGrantHttpIntegrationTests(DatabaseFixture fixtu
         const string adminType = "AdministratorCredential";
         const string memberIri = "https://issuer.example/credentials#MembershipCredential";
         const string adminIri = "https://issuer.example/credentials#AdministratorCredential";
-        (string Path, object DeniedIssuer, object DeniedType, object Allowed)[] formats =
+        object ForbiddenLegacyClaim() => new
+        {
+            issuerDid = grantedDid, holderDid, credentialType = memberType,
+            claims = new { membership = "active", administrator = true }
+        };
+        object ForbiddenVcClaim(string type) => new
+        {
+            issuerDid = grantedDid, holderDid, credentialType = type,
+            subjectContextUri = Vocabulary,
+            credentialSubject = new { id = holderDid, membership = "active", administrator = true },
+            validUntil = DateTimeOffset.UtcNow.AddMinutes(5)
+        };
+        (string Path, object DeniedIssuer, object DeniedType,
+            object DeniedClaim, object Allowed)[] formats =
         [
             ("/api/v1/credentials/issue",
                 Legacy(ungrantedDid, holderDid, memberType),
                 Legacy(grantedDid, holderDid, adminType),
+                ForbiddenLegacyClaim(),
                 Legacy(grantedDid, holderDid, memberType)),
             ("/api/v1/credentials/jwt-vc-json/issue",
                 Vc11(ungrantedDid, memberIri),
                 Vc11(grantedDid, adminIri),
+                ForbiddenVcClaim(memberIri),
                 Vc11(grantedDid, memberIri)),
             ("/api/v1/credentials/vcdm20/issue",
                 Vc20(ungrantedDid, memberType),
                 Vc20(grantedDid, adminType),
+                ForbiddenVcClaim(memberType),
                 Vc20(grantedDid, memberType))
         ];
 
@@ -96,6 +112,10 @@ public sealed class IssuerSigningGrantHttpIntegrationTests(DatabaseFixture fixtu
             using var deniedType = await PostAsync(client, format.Path, format.DeniedType, token)
                 .ConfigureAwait(true);
             Assert.Equal(HttpStatusCode.NotFound, deniedType.StatusCode);
+
+            using var deniedClaim = await PostAsync(client, format.Path, format.DeniedClaim, token)
+                .ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.NotFound, deniedClaim.StatusCode);
         }
 
         await using (var db = _fixture.CreateDbContext<HeroDbContext>())
@@ -149,6 +169,8 @@ public sealed class IssuerSigningGrantHttpIntegrationTests(DatabaseFixture fixtu
                         "MembershipCredential";
                     values["IssuerSigningGrants:Grants:0:CredentialTypes:1"] =
                         "https://issuer.example/credentials#MembershipCredential";
+                    values["IssuerSigningGrants:Grants:0:SubjectClaimNames:0"] =
+                        "membership";
                 }
 
                 configuration.AddInMemoryCollection(values);
