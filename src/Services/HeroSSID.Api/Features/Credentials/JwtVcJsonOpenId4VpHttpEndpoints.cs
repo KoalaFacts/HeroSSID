@@ -59,6 +59,16 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
             .Produces(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
+        credentials.MapPost("/jwt-vc-json/openid4vp/verify-hosted-response", VerifyHosted)
+            .RequireAuthorization(OperationScopes.CredentialVerify)
+            .WithName("VerifyHostedJwtVcJsonOpenId4VpDirectPostResponse")
+            .WithSummary("Verify holder-signed exact original hosted request, issuer signature and status")
+            .Produces<VerifyOpenId4VpDirectPostResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
         credentials.MapPost("/jwt-vc-json/openid4vp/verify-response", Verify)
             .RequireAuthorization(OperationScopes.CredentialVerify)
             .WithName("VerifyJwtVcJsonOpenId4VpDirectPostResponse")
@@ -315,7 +325,30 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
         [FromServices] IPresentationChallengeStore challenges,
         [FromServices] OpenId4VpJwtVcJsonRequestObjectStore requestObjects,
         [FromServices] ITenantContext tenantContext,
-        [FromServices] TimeProvider clock)
+        [FromServices] TimeProvider clock) =>
+        VerifyCore(request, challenges, requestObjects, tenantContext, clock,
+            requireHostedBinding: false);
+
+    /// <summary>
+    /// Opt-in, fail-closed hosted verification: an authentic original verifier
+    /// request MUST be present in the backend's own volatile store. The caller
+    /// cannot provide or replace the signed request, hash, callback or policy.
+    /// </summary>
+    internal static IResult VerifyHosted(
+        [FromBody] VerifyOpenId4VpDirectPostRequest request,
+        [FromServices] IPresentationChallengeStore challenges,
+        [FromServices] OpenId4VpJwtVcJsonRequestObjectStore requestObjects,
+        [FromServices] ITenantContext tenantContext,
+        [FromServices] TimeProvider clock) =>
+        VerifyCore(request, challenges, requestObjects, tenantContext, clock,
+            requireHostedBinding: true);
+
+    private static IResult VerifyCore(
+        VerifyOpenId4VpDirectPostRequest request,
+        IPresentationChallengeStore challenges,
+        OpenId4VpJwtVcJsonRequestObjectStore requestObjects,
+        ITenantContext tenantContext, TimeProvider clock,
+        bool requireHostedBinding)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(challenges);
@@ -344,11 +377,43 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
 
         try
         {
-            var status = JwtVcJsonDirectPostRevocation.CheckResponseForm(
-                request.Form!, request.RevocationSnapshot!, tenantId,
-                "decentralized_identifier:" + request.VerifierDid,
-                request.Nonce!, request.ExpectedCredentialType!,
-                request.SubjectContextUri!, challenges, clock, out JsonElement subject);
+            string audience = "decentralized_identifier:" + request.VerifierDid;
+            RevocationSnapshotCheckResult status;
+            JsonElement subject;
+            if (requireHostedBinding)
+            {
+                // Never accept holder-supplied request hashes, callback URLs or
+                // fallback to the unbound compatibility verifier. A process
+                // restart or another API replica without this original hosted
+                // request must return Invalid without spending the challenge.
+                if (!requestObjects.TryFindPublishedChallenge(
+                        tenantId, audience, request.Nonce!, out var hosted) ||
+                    hosted is null ||
+                    !string.Equals(request.ExpectedCredentialType,
+                        hosted.CredentialType, StringComparison.Ordinal) ||
+                    !string.Equals(request.SubjectContextUri!.AbsoluteUri,
+                        hosted.SubjectContextUri.AbsoluteUri, StringComparison.Ordinal))
+                {
+                    return Results.Ok(new VerifyOpenId4VpDirectPostResponse("Invalid", null));
+                }
+
+                string requestHash = Convert.ToHexStringLower(SHA256.HashData(
+                    Encoding.ASCII.GetBytes(hosted.SignedRequestJwt)));
+                status = JwtVcJsonDirectPostRevocation.CheckHolderBoundResponseForm(
+                    request.Form!, request.RevocationSnapshot!, hosted.SignedRequestJwt,
+                    requestHash, request.VerifierDid!, hosted.ResponseUri, tenantId,
+                    audience, request.Nonce!, hosted.CredentialType,
+                    hosted.SubjectContextUri, challenges, clock, out subject);
+            }
+            else
+            {
+                // Legacy by-value compatibility route is explicitly not
+                // server-retained original Request Object binding.
+                status = JwtVcJsonDirectPostRevocation.CheckResponseForm(
+                    request.Form!, request.RevocationSnapshot!, tenantId, audience,
+                    request.Nonce!, request.ExpectedCredentialType!,
+                    request.SubjectContextUri!, challenges, clock, out subject);
+            }
             if (status is RevocationSnapshotCheckResult.NotListed or
                 RevocationSnapshotCheckResult.Revoked)
             {

@@ -25,11 +25,169 @@ public sealed class JwtVcJsonOpenId4VpHttpIntegrationTests(DatabaseFixture fixtu
 {
     private const string IssueRoute = "/api/v1/credentials/jwt-vc-json/openid4vp/signed-request";
     private const string VerifyRoute = "/api/v1/credentials/jwt-vc-json/openid4vp/verify-response";
+    private const string HostedVerifyRoute = "/api/v1/credentials/jwt-vc-json/openid4vp/verify-hosted-response";
     private const string CancelRoute = "/api/v1/credentials/jwt-vc-json/openid4vp/cancel-request";
     private const string ResponseUri = "https://verifier.example/direct-post";
     private const string TypeIri = "https://issuer.example/credentials#MembershipCredential";
     private static readonly Uri Context = new("https://issuer.example/contexts/membership/v1");
     private readonly DatabaseFixture _fixture = fixture;
+
+    [Fact]
+    public async Task HostedStrictVerifierRequiresOriginalRequestBoundHolderProof()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        await using var host = NewHost();
+        using var client = host.CreateClient();
+        string token = await GetTokenAsync(client, "credential:verify did:manage").ConfigureAwait(true);
+        string verifierDid = await CreateDidAsync(client, token).ConfigureAwait(true);
+        using var issuerKey = NewKey();
+        using var holderKey = NewKey();
+        string issuerDid = DidFromKey(issuerKey);
+        string holderDid = DidFromKey(holderKey);
+
+        using var issued = await PostAsync(client, IssueRoute, new
+        {
+            verifierDid, responseUri = ResponseUri, trustedIssuerDid = issuerDid,
+            credentialType = TypeIri, subjectContextUri = Context.AbsoluteUri,
+            lifetimeSeconds = 120, publishRequestUri = true
+        }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Created, issued.StatusCode);
+        var payload = await issued.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        string signed = payload.GetProperty("signedRequestJwt").GetString()!;
+        string nonce = payload.GetProperty("nonce").GetString()!;
+        string launch = payload.GetProperty("referenceWalletInvocationUri").GetString()!;
+        int index = launch.IndexOf("&request_uri=", StringComparison.Ordinal);
+        Assert.True(index > 0);
+        Uri published = new(Uri.UnescapeDataString(launch[(index + "&request_uri=".Length)..]));
+
+        using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
+            new { id = holderDid, role = "trusted-member" }));
+        DateTimeOffset now = TimeProvider.System.GetUtcNow();
+        string credential = JwtVcJsonCredential.Create(issuerDid, holderDid, TypeIri,
+            Context, subject.RootElement, issuerKey.Export(KeyBlobFormat.RawPrivateKey),
+            now.AddMinutes(-1), now.AddMinutes(10));
+        string status = JwtVcJsonRevocationSnapshot.Create(issuerDid, [],
+            issuerKey.Export(KeyBlobFormat.RawPrivateKey), now, TimeProvider.System);
+        byte[] holderSeed = holderKey.Export(KeyBlobFormat.RawPrivateKey);
+        string unbound = OpenId4VpJwtVcJsonDirectPost.CreateHolderResponseForm(
+            signed, verifierDid, new Uri(ResponseUri), TypeIri, Context, credential,
+            holderDid, holderSeed, TimeProvider.System);
+        string bound = OpenId4VpJwtVcJsonDirectPost.CreateHolderBoundResponseForm(
+            signed, verifierDid, new Uri(ResponseUri), TypeIri, Context, credential,
+            holderDid, holderSeed, TimeProvider.System);
+
+        using var rejected = await PostAsync(client, HostedVerifyRoute, new
+        {
+            verifierDid, nonce, form = unbound, revocationSnapshot = status,
+            expectedCredentialType = TypeIri, subjectContextUri = Context.AbsoluteUri
+        }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, rejected.StatusCode);
+        var rejectedBody = await rejected.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal("Invalid", rejectedBody.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, rejectedBody.GetProperty("verifiedSubject").ValueKind);
+
+        // An invalid/unbound attempt must not spend the independently stored nonce.
+        using var stillHosted = await client.GetAsync(published.PathAndQuery,
+            TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, stillHosted.StatusCode);
+
+        using var substitutedPolicy = await PostAsync(client, HostedVerifyRoute, new
+        {
+            verifierDid, nonce, form = bound, revocationSnapshot = status,
+            expectedCredentialType = "https://issuer.example/credentials#Wrong",
+            subjectContextUri = Context.AbsoluteUri
+        }, token).ConfigureAwait(true);
+        var substitutionBody = await substitutedPolicy.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal("Invalid", substitutionBody.GetProperty("status").GetString());
+
+        var submitted = new
+        {
+            verifierDid, nonce, form = bound, revocationSnapshot = status,
+            expectedCredentialType = TypeIri, subjectContextUri = Context.AbsoluteUri
+        };
+        using var accepted = await PostAsync(client, HostedVerifyRoute, submitted, token)
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        var acceptedBody = await accepted.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal("SignedNotListed", acceptedBody.GetProperty("status").GetString());
+        Assert.Equal("trusted-member",
+            acceptedBody.GetProperty("verifiedSubject").GetProperty("role").GetString());
+
+        using var replay = await PostAsync(client, HostedVerifyRoute, submitted, token)
+            .ConfigureAwait(true);
+        var replayBody = await replay.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal("Invalid", replayBody.GetProperty("status").GetString());
+        using var retired = await client.GetAsync(published.PathAndQuery,
+            TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, retired.StatusCode);
+    }
+
+    [Fact]
+    public async Task HostedStrictVerifierDoesNotDowngradeToUnpublishedByValueRequest()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        await using var host = NewHost();
+        using var client = host.CreateClient();
+        string token = await GetTokenAsync(client, "credential:verify did:manage").ConfigureAwait(true);
+        string verifierDid = await CreateDidAsync(client, token).ConfigureAwait(true);
+        using var issuerKey = NewKey();
+        using var holderKey = NewKey();
+        string issuerDid = DidFromKey(issuerKey);
+        string holderDid = DidFromKey(holderKey);
+        using var issued = await PostAsync(client, IssueRoute, new
+        {
+            verifierDid, responseUri = ResponseUri, trustedIssuerDid = issuerDid,
+            credentialType = TypeIri, subjectContextUri = Context.AbsoluteUri,
+            lifetimeSeconds = 120, publishRequestUri = false
+        }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Created, issued.StatusCode);
+        var details = await issued.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        string signed = details.GetProperty("signedRequestJwt").GetString()!;
+        string nonce = details.GetProperty("nonce").GetString()!;
+        DateTimeOffset now = TimeProvider.System.GetUtcNow();
+        using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
+            new { id = holderDid, role = "member" }));
+        string credential = JwtVcJsonCredential.Create(issuerDid, holderDid, TypeIri,
+            Context, subject.RootElement, issuerKey.Export(KeyBlobFormat.RawPrivateKey),
+            now.AddMinutes(-1), now.AddMinutes(10));
+        string bound = OpenId4VpJwtVcJsonDirectPost.CreateHolderBoundResponseForm(
+            signed, verifierDid, new Uri(ResponseUri), TypeIri, Context, credential,
+            holderDid, holderKey.Export(KeyBlobFormat.RawPrivateKey), TimeProvider.System);
+        string legacyUnbound = OpenId4VpJwtVcJsonDirectPost.CreateHolderResponseForm(
+            signed, verifierDid, new Uri(ResponseUri), TypeIri, Context, credential,
+            holderDid, holderKey.Export(KeyBlobFormat.RawPrivateKey), TimeProvider.System);
+        string status = JwtVcJsonRevocationSnapshot.Create(issuerDid, [],
+            issuerKey.Export(KeyBlobFormat.RawPrivateKey), now, TimeProvider.System);
+        var submitted = new
+        {
+            verifierDid, nonce, form = bound, revocationSnapshot = status,
+            expectedCredentialType = TypeIri, subjectContextUri = Context.AbsoluteUri
+        };
+
+        using var denied = await PostAsync(client, HostedVerifyRoute, submitted, token)
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, denied.StatusCode);
+        var deniedBody = await denied.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal("Invalid", deniedBody.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, deniedBody.GetProperty("verifiedSubject").ValueKind);
+
+        // Strict route denial must neither consume nor silently switch policy.
+        using var legacy = await PostAsync(client, VerifyRoute, new
+        {
+            verifierDid, nonce, form = legacyUnbound, revocationSnapshot = status,
+            expectedCredentialType = TypeIri, subjectContextUri = Context.AbsoluteUri
+        }, token).ConfigureAwait(true);
+        var legacyBody = await legacy.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal("SignedNotListed", legacyBody.GetProperty("status").GetString());
+    }
 
     [Fact]
     public async Task SignedVerifierRequestOffersUsableByValueWalletLaunchWithoutChangingSignedPolicy()

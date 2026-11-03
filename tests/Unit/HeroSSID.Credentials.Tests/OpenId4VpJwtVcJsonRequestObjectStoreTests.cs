@@ -10,6 +10,48 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStoreTests
     private static readonly Uri Context = new("https://issuer.example/contexts/member/v1");
 
     [Fact]
+    public void HostedStrictLookupUsesOnlyExactServerPolicyAndRejectsAmbiguousRequest()
+    {
+        var clock = new Clock();
+        var challenges = new InMemoryPresentationChallengeStore(clock);
+        var host = new OpenId4VpJwtVcJsonRequestObjectStore(challenges, clock);
+        Guid tenant = Guid.NewGuid();
+        var verifier = Identity();
+        var issuer = Identity();
+        string audience = "decentralized_identifier:" + verifier.Did;
+        var challenge = challenges.Issue(tenant, audience, issuer.Did, TimeSpan.FromMinutes(2));
+        string signed = SignedRequest(challenge, verifier, clock);
+        string reference = host.Publish(tenant, signed, verifier.Did,
+            Callback, CredentialType, Context);
+
+        Assert.False(host.TryFindPublishedChallenge(
+            Guid.NewGuid(), audience, challenge.Nonce, out _));
+        Assert.False(host.TryFindPublishedChallenge(
+            tenant, "decentralized_identifier:" + issuer.Did, challenge.Nonce, out _));
+        Assert.False(host.TryFindPublishedChallenge(
+            tenant, audience, new string('A', 43), out _));
+        Assert.True(host.TryFindPublishedChallenge(
+            tenant, audience, challenge.Nonce, out var original));
+        Assert.NotNull(original);
+        Assert.Equal(signed, original.SignedRequestJwt);
+        Assert.Equal(Callback, original.ResponseUri);
+        Assert.Equal(CredentialType, original.CredentialType);
+        Assert.Equal(Context, original.SubjectContextUri);
+
+        // Publishing a second valid signed request for the same challenge
+        // makes exact-original selection ambiguous and must fail closed.
+        string duplicate = host.Publish(tenant, signed, verifier.Did,
+            Callback, CredentialType, Context);
+        Assert.NotEqual(reference, duplicate);
+        Assert.False(host.TryFindPublishedChallenge(
+            tenant, audience, challenge.Nonce, out _));
+
+        Assert.True(challenges.TryConsume(tenant, audience, challenge.Nonce));
+        Assert.False(host.TryFindPublishedChallenge(
+            tenant, audience, challenge.Nonce, out _));
+    }
+
+    [Fact]
     public void GenuinePublishedRequestIsByteIdenticalAndExpiresWhenChallengeIsConsumed()
     {
         var clock = new Clock();

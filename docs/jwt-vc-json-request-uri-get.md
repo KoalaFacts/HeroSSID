@@ -164,3 +164,42 @@ not change the independent PostgreSQL challenge or make the host distributed.
 Neither the HTTP integration suite nor this fix establishes independent
 Wallet interoperability, a full OpenID4VP conformance test, user consent,
 live non-revocation, personal identity proof or business authorization.
+
+## Opt-in server-retained original-request verification over authenticated HTTP
+
+A verifier that publishes a `request_uri` Request Object may now forward a
+holder's unchanged `direct_post` form to authenticated
+`POST /api/v1/credentials/jwt-vc-json/openid4vp/verify-hosted-response`
+(`credential:verify` scope). The JSON contract matches `verify-response`:
+`verifierDid`, `nonce`, `form`, `revocationSnapshot`,
+`expectedCredentialType` and `subjectContextUri`.
+
+Unlike the older `verify-response` compatibility route, this **strict** route
+uses only the server's own published original Ed25519-signed Request Object
+and independently retained tenant-bound challenge. The server derives its own
+SHA-256 of those **original JWT bytes**, pinned HTTPS callback, credential type
+and subject vocabulary. It rejects an unsigned/unbound holder VP, another
+signed request for the same nonce, changed policy, unknown/expired/cancelled
+challenge or missing/ambiguous original publication **without consuming** a
+valid pending challenge or disclosing claims. A successful genuine holder
+Ed25519 proof atomically spends the nonce; only a separately authenticated,
+fresh issuer status `SignedNotListed` releases verified subject claims.
+Correctly signed but revoked credentials release no subject data. It never
+trusts a request hash or response URI forwarded by the holder.
+
+This is **opt-in**: the existing `verify-response` route preserves its older
+non-original-bound behavior for by-value clients. Integrators requiring
+original-request binding must consistently use the new strict route and must
+not route failed strict validations to that compatibility endpoint. The strict
+route deliberately fails closed following process restart, load-balancer
+routing to a different process or loss of the volatile original request.
+It is not a multi-replica hosted verifier; the reference and HTTP verifier
+must reach the **same process**. This improvement does not implement a
+public `direct_post` callback, informed user consent, selective disclosure,
+independent Wallet interoperability, full OpenID4VP conformance, identity
+vetting or business authorization.
+
+The real PostgreSQL/HTTP integration suite exercises both success and replay,
+unbound holder proof rejection before spending a challenge, changed policy
+and explicit no-downgrade for an unpublished by-value request. SDK unit tests
+also reject cross-tenant and ambiguous original-request references.

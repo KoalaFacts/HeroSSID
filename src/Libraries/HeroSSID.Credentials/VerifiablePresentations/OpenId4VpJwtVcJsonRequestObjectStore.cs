@@ -152,7 +152,8 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStore(
             _reservations.Remove(opaqueReference);
             _entries.Add(opaqueReference, new HostedRequest(tenantId, signed.ClientId,
                 signed.Challenge.Nonce, signed.Challenge.TrustedIssuerDid,
-                signed.Challenge.ExpiresAt, signedRequestJwt));
+                signed.Challenge.ExpiresAt, signedRequestJwt, expectedResponseUri,
+                expectedCredentialType, expectedSubjectContextUri));
         }
     }
 
@@ -206,6 +207,53 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStore(
         return true;
     }
 
+    /// <summary>
+    /// Locate the original *server-published* verifier request by its exact
+    /// tenant/client/nonce, for a strict authenticated verification route.
+    /// No reference, request hash, callback or policy comes from the holder.
+    /// Multiple publications for one challenge fail closed rather than choosing
+    /// an arbitrary Request Object. Volatile single-process storage only.
+    /// </summary>
+    public bool TryFindPublishedChallenge(Guid tenantId, string audience, string nonce,
+        out HostedVerifierRequest? request)
+    {
+        request = null;
+        if (!PresentationChallengePolicy.IsValidLookup(tenantId, audience, nonce))
+        {
+            return false;
+        }
+
+        HostedRequest[] matches;
+        lock (_gate)
+        {
+            RemoveExpired(clock.GetUtcNow());
+            matches = _entries.Values
+                .Where(entry => entry.TenantId == tenantId &&
+                    string.Equals(entry.Audience, audience, StringComparison.Ordinal) &&
+                    string.Equals(entry.Nonce, nonce, StringComparison.Ordinal))
+                .Take(2).ToArray();
+        }
+
+        if (matches.Length != 1)
+        {
+            return false;
+        }
+
+        HostedRequest hosted = matches[0];
+        PresentationChallenge? retained = challenges.Find(
+            tenantId, hosted.Audience, hosted.Nonce);
+        if (retained is null || retained.ExpiresAt != hosted.ExpiresAt ||
+            !string.Equals(retained.TrustedIssuerDid, hosted.TrustedIssuerDid,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        request = new HostedVerifierRequest(hosted.SignedRequestJwt,
+            hosted.ResponseUri, hosted.CredentialType, hosted.SubjectContextUri);
+        return true;
+    }
+
     private void RemoveExpired(DateTimeOffset now)
     {
         foreach (string token in _entries
@@ -225,5 +273,10 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStore(
 
     private sealed record HostedRequest(
         Guid TenantId, string Audience, string Nonce,
-        string TrustedIssuerDid, DateTimeOffset ExpiresAt, string SignedRequestJwt);
+        string TrustedIssuerDid, DateTimeOffset ExpiresAt, string SignedRequestJwt,
+        Uri ResponseUri, string CredentialType, Uri SubjectContextUri);
 }
+
+/// <summary>Original server-authenticated, volatile verifier request metadata.</summary>
+public sealed record HostedVerifierRequest(
+    string SignedRequestJwt, Uri ResponseUri, string CredentialType, Uri SubjectContextUri);
