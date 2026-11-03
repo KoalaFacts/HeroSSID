@@ -109,6 +109,17 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
             return InvalidRequest();
         }
 
+        // Hosted-only mode must not issue a by-value challenge that the same
+        // deployment is configured to reject at the legacy verify endpoint.
+        // This is operator-controlled configuration, never a holder field.
+        if (configuration.GetValue<bool>("OpenId4Vp:RequireHostedResponseBinding") &&
+            !request.PublishRequestUri)
+        {
+            return Results.Problem(title: "Hosted Request Required",
+                detail: "This verifier only issues request_uri-bound presentations.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
         Uri? requestUriBase = null;
         if (request.PublishRequestUri &&
             (!Uri.TryCreate(configuration["OpenId4Vp:PublicRequestUriBase"],
@@ -325,9 +336,11 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
         [FromServices] IPresentationChallengeStore challenges,
         [FromServices] OpenId4VpJwtVcJsonRequestObjectStore requestObjects,
         [FromServices] ITenantContext tenantContext,
+        [FromServices] IConfiguration configuration,
         [FromServices] TimeProvider clock) =>
         VerifyCore(request, challenges, requestObjects, tenantContext, clock,
-            requireHostedBinding: false);
+            requireHostedBinding: false,
+            denyLegacy: configuration.GetValue<bool>("OpenId4Vp:RequireHostedResponseBinding"));
 
     /// <summary>
     /// Opt-in, fail-closed hosted verification: an authentic original verifier
@@ -348,7 +361,7 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
         IPresentationChallengeStore challenges,
         OpenId4VpJwtVcJsonRequestObjectStore requestObjects,
         ITenantContext tenantContext, TimeProvider clock,
-        bool requireHostedBinding)
+        bool requireHostedBinding, bool denyLegacy = false)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(challenges);
@@ -377,6 +390,16 @@ internal static class JwtVcJsonOpenId4VpHttpEndpoints
 
         try
         {
+            // In a hosted-only deployment, another replica/restart cannot know
+            // which shared PostgreSQL nonces were issued behind a process-local
+            // request_uri. Never expose issuer/subject claims or consume ANY
+            // challenge through the unbound compatibility endpoint. All
+            // verifier replicas must enable this setting consistently.
+            if (!requireHostedBinding && denyLegacy)
+            {
+                return Results.Ok(new VerifyOpenId4VpDirectPostResponse("Invalid", null));
+            }
+
             string audience = "decentralized_identifier:" + request.VerifierDid;
             RevocationSnapshotCheckResult status;
             JsonElement subject;
