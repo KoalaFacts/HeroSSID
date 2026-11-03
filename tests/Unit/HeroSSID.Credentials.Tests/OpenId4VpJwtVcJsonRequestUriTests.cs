@@ -406,8 +406,8 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
         Task<HttpResponseMessage> requestTask = http.GetAsync(
             new Uri($"http://127.0.0.1:{port}/probe"), cancellation.Token);
         string received = await ReadHeadersAndReplyAsync(
-            listener, cancellation.Token).ConfigureAwait(false);
-        using var response = await requestTask.ConfigureAwait(false);
+            listener, cancellation.Token);
+        using var response = await requestTask;
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.DoesNotContain("traceparent:", received, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("tracestate:", received, StringComparison.OrdinalIgnoreCase);
