@@ -128,6 +128,33 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
     }
 
     [Fact]
+    public async Task WalletDoesNotSendAmbientCredentialsToPublicRequestUri()
+    {
+        string signed = SignedRequest(new InMemoryPresentationChallengeStore(_clock)
+            .IssueHosted(Guid.NewGuid(), "decentralized_identifier:" + _verifier.Did, _issuer.Did));
+        string launch = ByReferenceLaunch(signed);
+
+        // A shared application HttpClient may carry a bearer token or even
+        // proprietary session headers. Never forward these to a public Request Object GET.
+        using (var handler = new ProbeHandler(_ => JwtResponse(signed)))
+        using (var http = new HttpClient(handler))
+        {
+            http.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "wallet-secret");
+            Assert.Null(await Resolve(launch, RequestUri, http));
+            Assert.Equal(0, handler.Calls);
+        }
+
+        using (var handler = new ProbeHandler(_ => JwtResponse(signed)))
+        using (var http = new HttpClient(handler))
+        {
+            http.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-Key", "secret");
+            Assert.Null(await Resolve(launch, RequestUri, http));
+            Assert.Equal(0, handler.Calls);
+        }
+    }
+
+    [Fact]
     public async Task BoundedDeadlineStopsAStalledBodyWithNoCallerCancellation()
     {
         string signed = SignedRequest(new InMemoryPresentationChallengeStore(_clock)
