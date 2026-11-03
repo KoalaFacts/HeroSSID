@@ -92,6 +92,14 @@ Prefer the built-in credential-free, non-redirecting isolated transport.
 It does **not** inherit cookies, HTTP credentials, proxy credentials, automatic
 redirects, TLS client certificates or shared application default headers:
 
+The Wallet accepts HTTP `Content-Type` spellings equivalent under
+[RFC 9110 §8.3.1–8.3.2](https://www.rfc-editor.org/rfc/rfc9110.html#section-8.3.1):
+type/subtype and optional UTF-8 charset are compared case-insensitively,
+including a quoted `charset="UTF-8"`. Non-UTF-8 charsets, unrecognized
+parameters and any different media type still fail closed. This repairs a
+real transport rejection of genuine verifier-signed Request Objects, not
+an independent-wallet interop or OpenID4VP conformance certification.
+
 The adapter rejects untrusted or noncanonical launches before any GET,
 non-HTTPS endpoints, non-200/redirect responses, wrong content types,
 unexpected/oversized bodies (even absent Content-Length), body streams that
