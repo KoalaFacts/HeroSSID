@@ -67,7 +67,8 @@ public static class OpenId4VpJwtVcJsonRequestUri
         string invocation, Uri independentlyTrustedRequestUri, HttpClient http,
         string expectedVerifierDid, Uri expectedResponseUri,
         string expectedCredentialType, Uri expectedSubjectContextUri,
-        TimeProvider clock, CancellationToken cancellationToken = default)
+        TimeProvider clock, CancellationToken cancellationToken = default,
+        TimeSpan? maximumDuration = null)
     {
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(independentlyTrustedRequestUri);
@@ -86,13 +87,24 @@ public static class OpenId4VpJwtVcJsonRequestUri
             return null;
         }
 
+        // ResponseHeadersRead leaves content streaming outside HttpClient.Timeout.
+        // A single deadline must cover both headers and the entire body, even
+        // when the integrating Wallet supplies no cancellation token.
+        TimeSpan duration = maximumDuration ?? TimeSpan.FromSeconds(15);
+        if (duration <= TimeSpan.Zero || duration > TimeSpan.FromSeconds(30))
+        {
+            throw new ArgumentOutOfRangeException(nameof(maximumDuration));
+        }
+
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(duration);
         using var request = new HttpRequestMessage(HttpMethod.Get, independentlyTrustedRequestUri);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(RequestObjectMediaType));
 
         try
         {
             using var response = await http.SendAsync(request,
-                HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+                HttpCompletionOption.ResponseHeadersRead, deadline.Token).ConfigureAwait(false);
             MediaTypeHeaderValue? contentType = response.Content.Headers.ContentType;
             if (response.StatusCode != HttpStatusCode.OK ||
                 response.RequestMessage?.RequestUri?.OriginalString !=
@@ -109,12 +121,12 @@ public static class OpenId4VpJwtVcJsonRequestUri
             // Read no more than 16,385 bytes even if Content-Length is absent,
             // incorrect or content is transparently decompressed by the client.
             byte[] bytes = new byte[MaximumSignedRequestBytes + 1];
-            using var stream = await response.Content.ReadAsStreamAsync(cancellationToken)
+            using var stream = await response.Content.ReadAsStreamAsync(deadline.Token)
                 .ConfigureAwait(false);
             int length = 0;
             while (length < bytes.Length)
             {
-                int read = await stream.ReadAsync(bytes.AsMemory(length), cancellationToken)
+                int read = await stream.ReadAsync(bytes.AsMemory(length), deadline.Token)
                     .ConfigureAwait(false);
                 if (read == 0)
                 {
@@ -145,7 +157,7 @@ public static class OpenId4VpJwtVcJsonRequestUri
         {
             return null;
         }
-        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             return null;
         }
