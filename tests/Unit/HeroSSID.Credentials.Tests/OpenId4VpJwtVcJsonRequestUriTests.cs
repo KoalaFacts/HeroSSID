@@ -127,6 +127,53 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
         }
     }
 
+    [Theory]
+    [InlineData("Application/OAUTH-Authz-Req+JWT")]
+    [InlineData("application/oauth-authz-req+jwt; charset=\"UTF-8\"")]
+    [InlineData("APPLICATION/OAUTH-AUTHZ-REQ+JWT; CHARSET=utf-8")]
+    public async Task FetchAcceptsEquivalentHttpRequestObjectMediaTypes(string mediaType)
+    {
+        // RFC 9110 permits case-insensitive type/subtype and charset names
+        // as well as a quoted charset value. A genuine verifier must work
+        // with independent, standards-conforming HTTP servers.
+        string signed = SignedRequest(new InMemoryPresentationChallengeStore(_clock)
+            .IssueHosted(Guid.NewGuid(), "decentralized_identifier:" + _verifier.Did, _issuer.Did));
+        string launch = ByReferenceLaunch(signed);
+        using var handler = new ProbeHandler(_ =>
+        {
+            var response = JwtResponse(signed);
+            response.Content.Headers.ContentType =
+                System.Net.Http.Headers.MediaTypeHeaderValue.Parse(mediaType);
+            return response;
+        });
+        using var http = new HttpClient(handler);
+
+        Assert.Equal(signed, await Resolve(launch, RequestUri, http));
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData("application/oauth-authz-req+jwt; charset=utf-16")]
+    [InlineData("application/oauth-authz-req+jwt; profile=untrusted")]
+    [InlineData("application/json")]
+    public async Task FetchRejectsNonEquivalentHttpRequestObjectMediaTypes(string mediaType)
+    {
+        string signed = SignedRequest(new InMemoryPresentationChallengeStore(_clock)
+            .IssueHosted(Guid.NewGuid(), "decentralized_identifier:" + _verifier.Did, _issuer.Did));
+        string launch = ByReferenceLaunch(signed);
+        using var handler = new ProbeHandler(_ =>
+        {
+            var response = JwtResponse(signed);
+            response.Content.Headers.ContentType =
+                System.Net.Http.Headers.MediaTypeHeaderValue.Parse(mediaType);
+            return response;
+        });
+        using var http = new HttpClient(handler);
+
+        Assert.Null(await Resolve(launch, RequestUri, http));
+        Assert.Equal(1, handler.Calls);
+    }
+
     [Fact]
     public async Task WalletDoesNotSendAmbientCredentialsToPublicRequestUri()
     {
