@@ -11,7 +11,7 @@ public interface IHostedPresentationChallengeStore : IPresentationChallengeStore
     /// Issue a one-use challenge marked for a hosted original Request Object.
     /// Implementations must enforce capacity and atomic consumption as for Issue.
     /// </summary>
-    PresentationChallenge IssueHosted(
+    public PresentationChallenge IssueHosted(
         Guid verifierTenantId, string audience, string trustedIssuerDid,
         TimeSpan? lifetime = null);
 }
