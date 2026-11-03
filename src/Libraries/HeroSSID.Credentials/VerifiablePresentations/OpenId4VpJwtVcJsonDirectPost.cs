@@ -1,4 +1,6 @@
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using HeroSSID.Credentials.CredentialVerification;
 using HeroSSID.Credentials.JwtVcJson;
@@ -274,7 +276,27 @@ public static class OpenId4VpJwtVcJsonDirectPost
     /// </summary>
     public static string CreateHolderResponseForm(string requestJwt, string expectedVerifierDid,
         Uri expectedResponseUri, string expectedCredentialType, Uri expectedSubjectContextUri,
-        string credentialJwt, string holderDid, byte[] holderSeed, TimeProvider clock)
+        string credentialJwt, string holderDid, byte[] holderSeed, TimeProvider clock) =>
+        CreateHolderResponseFormCore(requestJwt, expectedVerifierDid, expectedResponseUri,
+            expectedCredentialType, expectedSubjectContextUri, credentialJwt,
+            holderDid, holderSeed, clock, bindOriginalRequest: false);
+
+    /// <summary>
+    /// Opt-in: the holder's actual Ed25519-signed VP also commits to the SHA-256
+    /// of the exact original signed verifier request. A Wallet must first obtain
+    /// full-disclosure consent; this private claim is not OpenID4VP conformance.
+    /// </summary>
+    public static string CreateHolderBoundResponseForm(string requestJwt, string expectedVerifierDid,
+        Uri expectedResponseUri, string expectedCredentialType, Uri expectedSubjectContextUri,
+        string credentialJwt, string holderDid, byte[] holderSeed, TimeProvider clock) =>
+        CreateHolderResponseFormCore(requestJwt, expectedVerifierDid, expectedResponseUri,
+            expectedCredentialType, expectedSubjectContextUri, credentialJwt,
+            holderDid, holderSeed, clock, bindOriginalRequest: true);
+
+    private static string CreateHolderResponseFormCore(string requestJwt, string expectedVerifierDid,
+        Uri expectedResponseUri, string expectedCredentialType, Uri expectedSubjectContextUri,
+        string credentialJwt, string holderDid, byte[] holderSeed, TimeProvider clock,
+        bool bindOriginalRequest)
     {
         if (!TryReadSignedRequest(requestJwt, expectedVerifierDid, expectedResponseUri,
                 expectedCredentialType, expectedSubjectContextUri, clock, out var request) ||
@@ -287,7 +309,7 @@ public static class OpenId4VpJwtVcJsonDirectPost
         // implementation; never re-sign or rewrite the issuer's credential.
         string presentation = JwtVcJsonPresentation.CreateForAuthenticatedChallenge(
             request.Challenge, credentialJwt, expectedCredentialType, expectedSubjectContextUri,
-            holderDid, holderSeed, clock);
+            holderDid, holderSeed, clock, bindOriginalRequest ? requestJwt : null);
 
         string tokenJson = JsonSerializer.Serialize(new Dictionary<string, string[]>(StringComparer.Ordinal)
         {
@@ -312,7 +334,70 @@ public static class OpenId4VpJwtVcJsonDirectPost
     public static JwtVcJsonPresentationCheckResult CheckResponseForm(string form,
         Guid verifierTenantId, string expectedClientId, string expectedNonce,
         string expectedCredentialType, Uri expectedSubjectContextUri,
+        IPresentationChallengeStore challenges, TimeProvider clock, out JsonElement verifiedSubject) =>
+        CheckResponseFormCore(form, verifierTenantId, expectedClientId, expectedNonce,
+            expectedCredentialType, expectedSubjectContextUri, challenges, clock,
+            null, out verifiedSubject);
+
+    /// <summary>
+    /// Strict opt-in verifier: independently pin the exact original signed request
+    /// hash, verify that request under a separately trusted verifier key and callback,
+    /// match the stored live tenant challenge, then check holder-signed hash and both
+    /// issuer/holder signatures before atomically consuming the nonce.
+    /// The pin MUST come from verifier-controlled storage, never from the presenter.
+    /// </summary>
+    public static JwtVcJsonPresentationCheckResult CheckHolderBoundResponseForm(string form,
+        string signedRequestJwt, string verifierRetainedRequestSha256, string trustedVerifierDid,
+        Uri expectedResponseUri, Guid verifierTenantId, string expectedClientId,
+        string expectedNonce, string expectedCredentialType, Uri expectedSubjectContextUri,
         IPresentationChallengeStore challenges, TimeProvider clock, out JsonElement verifiedSubject)
+    {
+        ArgumentNullException.ThrowIfNull(expectedResponseUri);
+        ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
+        ArgumentNullException.ThrowIfNull(challenges);
+        ArgumentNullException.ThrowIfNull(clock);
+        verifiedSubject = default;
+
+        // Never consume the nonce or reveal claims on a missing/mismatched pin,
+        // despite the presence of another genuinely signed request for that nonce.
+        if (verifierRetainedRequestSha256 is not { Length: 64 } ||
+            !verifierRetainedRequestSha256.All(static character =>
+                character is >= '0' and <= '9' or >= 'a' and <= 'f') ||
+            !StrictJwtReader.IsCanonicalCompact(signedRequestJwt, MaximumRequestLength) ||
+            !string.Equals(Convert.ToHexStringLower(
+                    SHA256.HashData(Encoding.UTF8.GetBytes(signedRequestJwt))),
+                verifierRetainedRequestSha256, StringComparison.Ordinal) ||
+            !PresentationChallengePolicy.IsValidLookup(
+                verifierTenantId, expectedClientId, expectedNonce) ||
+            !TryReadSignedRequest(signedRequestJwt, trustedVerifierDid,
+                expectedResponseUri, expectedCredentialType, expectedSubjectContextUri,
+                clock, out var request) ||
+            request is null ||
+            !string.Equals(request.ClientId, expectedClientId, StringComparison.Ordinal) ||
+            !string.Equals(request.Challenge.Nonce, expectedNonce, StringComparison.Ordinal))
+        {
+            return JwtVcJsonPresentationCheckResult.Invalid;
+        }
+
+        var retained = challenges.Find(verifierTenantId, expectedClientId, expectedNonce);
+        if (retained is null ||
+            retained.ExpiresAt != request.Challenge.ExpiresAt ||
+            !string.Equals(retained.TrustedIssuerDid,
+                request.Challenge.TrustedIssuerDid, StringComparison.Ordinal))
+        {
+            return JwtVcJsonPresentationCheckResult.Invalid;
+        }
+
+        return CheckResponseFormCore(form, verifierTenantId, expectedClientId,
+            expectedNonce, expectedCredentialType, expectedSubjectContextUri,
+            challenges, clock, verifierRetainedRequestSha256, out verifiedSubject);
+    }
+
+    private static JwtVcJsonPresentationCheckResult CheckResponseFormCore(string form,
+        Guid verifierTenantId, string expectedClientId, string expectedNonce,
+        string expectedCredentialType, Uri expectedSubjectContextUri,
+        IPresentationChallengeStore challenges, TimeProvider clock,
+        string? requiredOriginalRequestSha256, out JsonElement verifiedSubject)
     {
         ArgumentNullException.ThrowIfNull(challenges);
         ArgumentNullException.ThrowIfNull(clock);
@@ -369,30 +454,20 @@ public static class OpenId4VpJwtVcJsonDirectPost
                 return JwtVcJsonPresentationCheckResult.Invalid;
             }
 
-            return JwtVcJsonPresentation.Check(presentation, verifierTenantId,
-                expectedClientId, expectedNonce, expectedCredentialType,
-                expectedSubjectContextUri, challenges, clock, out verifiedSubject);
+            return requiredOriginalRequestSha256 is null
+                ? JwtVcJsonPresentation.Check(presentation, verifierTenantId,
+                    expectedClientId, expectedNonce, expectedCredentialType,
+                    expectedSubjectContextUri, challenges, clock, out verifiedSubject)
+                : JwtVcJsonPresentation.CheckWithHolderSignedRequestHash(presentation,
+                    verifierTenantId, expectedClientId, expectedNonce, expectedCredentialType,
+                    expectedSubjectContextUri, challenges, clock, requiredOriginalRequestSha256,
+                    out verifiedSubject);
         }
         catch (JsonException)
         {
             return JwtVcJsonPresentationCheckResult.Invalid;
         }
     }
-
-
-    /// <summary>Opt-in private holder-signed original request binding, not OpenID4VP conformance.</summary>
-    public static string CreateHolderBoundResponseForm(string requestJwt, string expectedVerifierDid,
-        Uri expectedResponseUri, string expectedCredentialType, Uri expectedSubjectContextUri,
-        string credentialJwt, string holderDid, byte[] holderSeed, TimeProvider clock) =>
-        throw new NotSupportedException("Holder request binding has not been implemented.");
-
-    /// <summary>Verify the wallet's signed exact request hash against the verifier's own retained pin.</summary>
-    public static JwtVcJsonPresentationCheckResult CheckHolderBoundResponseForm(string form,
-        string signedRequestJwt, string verifierRetainedRequestSha256, string trustedVerifierDid,
-        Uri expectedResponseUri, Guid verifierTenantId, string expectedClientId,
-        string expectedNonce, string expectedCredentialType, Uri expectedSubjectContextUri,
-        IPresentationChallengeStore challenges, TimeProvider clock, out JsonElement verifiedSubject) =>
-        throw new NotSupportedException("Holder request binding has not been implemented.");
 
     private static bool IsSupportedQuery(JsonElement query, string credentialType)
     {
