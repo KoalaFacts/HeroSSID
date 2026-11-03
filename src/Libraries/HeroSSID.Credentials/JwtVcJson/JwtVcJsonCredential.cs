@@ -176,12 +176,12 @@ public static class JwtVcJsonCredential
             !string.Equals(signedIssuer, trustedIssuerDid, StringComparison.Ordinal) ||
             !StrictJwtReader.TryGetString(payload, "sub", out var signedSubject) ||
             !string.Equals(signedSubject, expectedHolderDid, StringComparison.Ordinal) ||
-            !StrictJwtReader.TryGetTimestamp(payload, "nbf", out var notBefore) ||
-            !StrictJwtReader.TryGetTimestamp(payload, "exp", out var expires) ||
-            !HasValidOptionalIssuedAt(payload, notBefore) ||
+            !TryGetSignedNumericDate(payload, "nbf", isNormativeJwt, out var notBefore) ||
+            !TryGetSignedNumericDate(payload, "exp", isNormativeJwt, out var expires) ||
+            !HasValidOptionalIssuedAt(payload, notBefore, isNormativeJwt) ||
             !HasValidOptionalCredentialId(payload) ||
             expires <= notBefore || expires - notBefore > MaximumValiditySeconds ||
-            notBefore > now.ToUnixTimeSeconds() || expires <= now.ToUnixTimeSeconds() ||
+            notBefore > NumericDate(now) || expires <= NumericDate(now) ||
             !payload.TryGetProperty("vc", out var vc) ||
             vc.ValueKind != JsonValueKind.Object ||
             !HasCompatibleEmbeddedVcMetadata(vc, payload, trustedIssuerDid,
@@ -277,15 +277,44 @@ public static class JwtVcJsonCredential
         (payload.TryGetProperty("iat", out _) ? 1 : 0) +
         (payload.TryGetProperty("jti", out _) ? 1 : 0);
 
-    private static bool HasValidOptionalIssuedAt(JsonElement payload, long notBefore)
+    // RFC 7519 allows fractional NumericDates. Only accept exact 100ns
+    // instants; keep older nonstandard vc+jwt payloads integer-only.
+    internal static bool TryGetSignedNumericDate(
+        JsonElement claims, string name, bool normative, out decimal seconds)
     {
-        // JWT iat describes signature issue time, not credential validity.
-        // It can precede nbf, but is never a proof of historical signing.
-        // A bounded window prevents accepting arbitrary backdated timestamps.
-        return !payload.TryGetProperty("iat", out _) ||
-            (StrictJwtReader.TryGetTimestamp(payload, "iat", out long issued) &&
-                issued <= notBefore && issued >= notBefore - MaximumValiditySeconds);
+        seconds = 0;
+        if (!normative)
+        {
+            if (!StrictJwtReader.TryGetTimestamp(claims, name, out long integral))
+            {
+                return false;
+            }
+
+            seconds = integral;
+            return true;
+        }
+
+        if (!claims.TryGetProperty(name, out var value) ||
+            value.ValueKind != JsonValueKind.Number ||
+            !value.TryGetDecimal(out seconds) ||
+            seconds < 0 || seconds >= 253402300800m)
+        {
+            return false;
+        }
+
+        decimal ticks = seconds * TimeSpan.TicksPerSecond;
+        return ticks == decimal.Truncate(ticks);
     }
+
+    internal static bool HasValidOptionalIssuedAt(
+        JsonElement claims, decimal notBefore, bool normative) =>
+        !claims.TryGetProperty("iat", out _) ||
+        (TryGetSignedNumericDate(claims, "iat", normative, out decimal issued) &&
+            issued <= notBefore && issued >= notBefore - MaximumValiditySeconds);
+
+    private static decimal NumericDate(DateTimeOffset instant) =>
+        (decimal)(instant.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks) /
+        TimeSpan.TicksPerSecond;
 
     private static bool HasValidOptionalCredentialId(JsonElement payload)
     {
@@ -318,7 +347,7 @@ public static class JwtVcJsonCredential
     /// </summary>
     internal static bool HasCompatibleEmbeddedVcMetadata(
         JsonElement vc, JsonElement payload, string pinnedIssuerDid,
-        long signedNotBefore, long signedExpires, bool isNormativeJwt)
+        decimal signedNotBefore, decimal signedExpires, bool isNormativeJwt)
     {
         bool hasIssuer = vc.TryGetProperty("issuer", out var embeddedIssuer);
         bool hasId = vc.TryGetProperty("id", out _);
@@ -364,7 +393,7 @@ public static class JwtVcJsonCredential
             (!hasExpiration || HasMatchingXmlDateTime(vc, "expirationDate", signedExpires));
     }
 
-    private static bool HasMatchingXmlDateTime(JsonElement vc, string name, long signedEpoch)
+    private static bool HasMatchingXmlDateTime(JsonElement vc, string name, decimal signedEpoch)
     {
         if (!StrictJwtReader.TryGetString(vc, name, out string dateTime) ||
             dateTime.Length > 64 || dateTime.Length < 20)
@@ -392,12 +421,12 @@ public static class JwtVcJsonCredential
             !AllAsciiDigits(value.Slice(11, 2)) ||
             !AllAsciiDigits(value.Slice(14, 2)) ||
             !AllAsciiDigits(value.Slice(17, 2)) ||
-            // The signed JWT NumericDate has whole-second precision.
-            // Never allow XmlConvert to round a nonzero sub-tick fraction
-            // into equality with that authenticated instant.
+            // Validate all fractional digits and reject any nonzero sub-tick
+            // tail before XmlConvert can round a different instant.
             (end > 19 &&
                 (value[19] != '.' || end == 20 ||
-                 !AllZeroDigits(value.Slice(20, end - 20)))))
+                 !AllAsciiDigits(value.Slice(20, end - 20)) ||
+                 (end > 27 && !AllZeroDigits(value.Slice(27, end - 27))))))
         {
             return false;
         }
@@ -405,7 +434,8 @@ public static class JwtVcJsonCredential
         bool isEndOfDay = value[11] == '2' && value[12] == '4';
         if (isEndOfDay &&
             (value[14] != '0' || value[15] != '0' ||
-             value[17] != '0' || value[18] != '0'))
+             value[17] != '0' || value[18] != '0' ||
+             (end > 19 && !AllZeroDigits(value.Slice(20, end - 20)))))
         {
             return false;
         }
@@ -420,7 +450,8 @@ public static class JwtVcJsonCredential
                     string.Concat(dateTime.AsSpan(0, 11), "00",
                         dateTime.AsSpan(13))).AddDays(1)
                 : System.Xml.XmlConvert.ToDateTimeOffset(dateTime);
-            return parsed == DateTimeOffset.FromUnixTimeSeconds(signedEpoch);
+            return (decimal)(parsed.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks) ==
+                signedEpoch * TimeSpan.TicksPerSecond;
         }
         catch (FormatException)
         {
