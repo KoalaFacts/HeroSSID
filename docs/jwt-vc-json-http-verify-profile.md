@@ -27,11 +27,14 @@ A successful signature verification responds with HTTP **200**:
 ```json
 {
   "status": "SignedButStatusUnchecked",
-  "verifiedSubject": {"id": "did:key:z...holder", "membership": "active"}
+  "verifiedSubject": {"id": "did:key:z...holder", "membership": "active"},
+  "verifiedCredentialId": "https://issuer.example/credentials/member-123"
 }
 ```
 
-A malformed, forged, expired, wrong-issuer, wrong-holder, wrong-type or wrong-vocabulary **credential** with otherwise valid bounded request parameters returns HTTP **200** with `{"status":"Invalid","verifiedSubject":null}`. Missing/oversized credential or malformed policy inputs return **400**; anonymous requests return **401** and insufficient-scope requests **403**. The JWT and status snapshot are limited to 65,536 characters each, issuer/holder inputs to 255 characters, custom type to 128 and vocabulary URI to 2,048.
+For this **single-issuer** route, `verifiedCredentialId` is the exact authenticated `jti` of the issuer-signed VC1.1 JWT, if present; otherwise it is `null`. It is released only after the independently pinned issuer signature, holder, type, context and validity checks succeed. The HTTPS URI is an **issuer-assigned identifier**, not evidence of domain control, actual identity or authorization. The verifier does not dereference it. The other historical/retired/denylist routes retain their existing response contracts.
+
+A malformed, forged, expired, wrong-issuer, wrong-holder, wrong-type or wrong-vocabulary **credential** with otherwise valid bounded request parameters returns HTTP **200** with `{"status":"Invalid","verifiedSubject":null,"verifiedCredentialId":null}`. Missing/oversized credential or malformed policy inputs return **400**; anonymous requests return **401** and insufficient-scope requests **403**. The JWT and status snapshot are limited to 65,536 characters each, issuer/holder inputs to 255 characters, custom type to 128 and vocabulary URI to 2,048.
 
 ## Optional issuer-signed private revocation snapshot
 
@@ -54,9 +57,9 @@ Use the same request with one additional field:
 
 The server first authenticates the original credential using the caller's pinned issuer/holder/type/context policy. It then authenticates the snapshot signed by **that same pinned issuer**, with its format, freshness (60-second limit) and digest of the **exact signed credential bytes**. The snapshot cannot choose its own trusted issuer. Responses:
 
-- `SignedNotListed` — authentic credential and fresh issuer-signed snapshot without its digest; releases the verified subject.
-- `Revoked` — authentic credential's digest occurs in the signed snapshot; **never** releases the subject.
-- `Invalid` — credential or snapshot cannot be authenticated, is stale or has incorrect policy/format; **never** releases the subject.
+- `SignedNotListed` — authentic credential and fresh issuer-signed snapshot without its digest; releases the verified subject and optional **signed `jti`**.
+- `Revoked` — authentic credential's digest occurs in the signed snapshot; **never** releases subject or credential ID.
+- `Invalid` — credential or snapshot cannot be authenticated, is stale or has incorrect policy/format; **never** releases subject or credential ID.
 
 A missing snapshot fails **400**. This is a private issuer-distributed export, **not** W3C Bitstring Status List or live non-revocation verification. Even `SignedNotListed` depends on the issuer supplying a **complete authoritative revocation set**, which HeroSSID cannot infer or publish from this request. No snapshot is created or stored by these verification endpoints.
 
