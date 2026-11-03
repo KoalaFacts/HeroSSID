@@ -295,11 +295,14 @@ public static class JwtVcJsonRevocationSnapshot
     private static bool TryReadSupportedCredentialJwt(string jwt, string issuerDid,
         out JsonElement payload, out bool isNormativeJwt)
     {
+        // This reads ORIGINAL issuer-signed VC1.1 credentials, not the issuer
+        // revocation snapshot (whose typ remains mandatory and strict).
+        // W3C VC1.1 permits omitting credential typ, with or without kid.
         isNormativeJwt =
             StrictJwtReader.TryRead(jwt, CredentialJwtType, MaximumCredentialLength,
-                out payload, KeyId(issuerDid)) ||
+                out payload, KeyId(issuerDid), allowMissingType: true) ||
             StrictJwtReader.TryRead(jwt, CredentialJwtType, MaximumCredentialLength,
-                out payload);
+                out payload, allowMissingType: true);
         return isNormativeJwt ||
             StrictJwtReader.TryRead(jwt, LegacyCredentialJwtType, MaximumCredentialLength,
                 out payload, KeyId(issuerDid));
