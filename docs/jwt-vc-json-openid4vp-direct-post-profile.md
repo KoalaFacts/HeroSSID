@@ -54,11 +54,23 @@ bool httpDelivered =
             trustedVerifierDid, credentialType, subjectContextUri, clock);
 ```
 
-This authenticates the original verifier's Ed25519 Request Object, the
-**independently pinned exact HTTPS response URI**, credential type and subject
-context, checks that the form has the original challenge's canonical state,
-and submits the unchanged URL-encoded VP body as
-`application/x-www-form-urlencoded` with POST. The SDK's safe default
+Before any HTTP request, this transport authenticates the original
+verifier's Ed25519 Request Object, independently pinned exact HTTPS callback,
+credential type and subject context **and also the outgoing VP's actual
+holder Ed25519 signature, the unchanged issuer-signed VC1.1 JWT, the exact
+original Request Object SHA-256 signed by the holder, and its canonical
+one-use state and expiry**. Merely matching `state`, a legitimate but
+unbound VP, a modified holder signature or a genuine VP bound to a different
+signed request with the same nonce now **fails closed before network
+disclosure**. No verifier challenge is consumed by this Wallet preflight;
+the verifier separately consumes it atomically when checking the real POST.
+The SDK sends the unchanged canonical `application/x-www-form-urlencoded`
+body only after all these checks. This opt-in transport deliberately requires
+`CreateHolderBoundResponseForm` (or its preview/status-gated bound equivalent);
+legacy `CreateHolderResponseForm` (without original-request hash binding) is
+not accepted by these HTTP methods. This is a security boundary change for
+integrations still using unbound legacy forms, not a claim that their already
+issued VP is revoked or that user consent was recorded. The SDK's safe default
 creates its own short-lived `SocketsHttpHandler`: no redirects, cookies,
 proxy, automatic credentials, client TLS certificate selection or automatic
 decompression or W3C Activity header/baggage propagation; normal TLS server verification and certificate revocation
