@@ -177,6 +177,27 @@ public static class OpenId4VpJwtVcJsonRequestUri
         }
     }
 
+    /// <summary>
+    /// Construct an isolated transport for public, unsigned-credential-free
+    /// Request Object GET. No cookies, ambient credentials, proxy or redirects.
+    /// The caller owns and disposes this handler and must not weaken its policy.
+    /// </summary>
+    public static HttpClientHandler CreateIsolatedTransportHandler() =>
+        throw new NotSupportedException("The isolated Request Object transport is not implemented.");
+
+    /// <summary>
+    /// Fetch with a short-lived, independently configured HTTP transport rather
+    /// than a shared application HttpClient that may carry handler credentials.
+    /// Does not grant trust to an unpinned verifier or obtain holder consent.
+    /// </summary>
+    public static Task<string?> FetchVerifiedRequestWithIsolatedTransportAsync(
+        string invocation, Uri independentlyTrustedRequestUri,
+        string expectedVerifierDid, Uri expectedResponseUri,
+        string expectedCredentialType, Uri expectedSubjectContextUri,
+        TimeProvider clock, TimeSpan? maximumDuration = null,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("The isolated Request Object fetch is not implemented.");
+
     private static string ExpectedInvocation(Uri requestUri, string verifierDid) =>
         "openid4vp://?client_id=" +
         Uri.EscapeDataString("decentralized_identifier:" + verifierDid) +
