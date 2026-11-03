@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using HeroSSID.Credentials.CredentialVerification;
 using HeroSSID.Credentials.Utilities;
@@ -65,7 +67,7 @@ public static class JwtVcJsonPresentation
     /// </summary>
     internal static string CreateForAuthenticatedChallenge(PresentationChallenge challenge,
         string credentialJwt, string expectedCredentialType, Uri expectedSubjectContextUri,
-        string holderDid, byte[] holderSeed, TimeProvider clock)
+        string holderDid, byte[] holderSeed, TimeProvider clock, string? originalSignedRequestJwt = null)
     {
         ArgumentNullException.ThrowIfNull(challenge);
         ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
@@ -102,21 +104,37 @@ public static class JwtVcJsonPresentation
         });
         // This is the JWT-secured VC1.1 VP shape from OpenID4VP Appendix B,
         // not a direct VCDM 2.0 EnvelopedVerifiableCredential.
-        string payload = JsonSerializer.Serialize(new
+        // The optional extension signs the EXACT compact verifier Request Object.
+        // It does not replace independent relying-party storage of the original pin.
+        if (originalSignedRequestJwt is not null &&
+            !StrictJwtReader.IsCanonicalCompact(originalSignedRequestJwt, 16_384))
         {
-            iss = holderDid,
-            aud = challenge.Audience,
-            nonce = challenge.Nonce,
-            iat = issuedAt,
-            nbf = issuedAt,
-            exp = expiresAt,
-            vp = new Dictionary<string, object>(StringComparer.Ordinal)
+            throw new ArgumentException("A canonical compact signed request is required.",
+                nameof(originalSignedRequestJwt));
+        }
+
+        var claims = new Dictionary<string, object>(StringComparer.Ordinal)
+        {
+            ["iss"] = holderDid,
+            ["aud"] = challenge.Audience,
+            ["nonce"] = challenge.Nonce,
+            ["iat"] = issuedAt,
+            ["nbf"] = issuedAt,
+            ["exp"] = expiresAt,
+            ["vp"] = new Dictionary<string, object>(StringComparer.Ordinal)
             {
                 ["@context"] = PresentationContexts,
                 ["type"] = PresentationTypes,
                 ["verifiableCredential"] = new[] { credentialJwt }
             }
-        });
+        };
+        if (originalSignedRequestJwt is not null)
+        {
+            claims["herossidRequestSha256"] = Convert.ToHexStringLower(
+                SHA256.HashData(Encoding.UTF8.GetBytes(originalSignedRequestJwt)));
+        }
+
+        string payload = JsonSerializer.Serialize(claims);
         string signed = Ed25519JwtSigner.CreateSignedJwt(header, payload, holderSeed);
         if (signed.Length > MaximumPresentationLength ||
             !Ed25519JwtSigner.VerifySignedJwt(signed, holderPublicKey))
@@ -144,7 +162,30 @@ public static class JwtVcJsonPresentation
         Guid verifierTenantId, string expectedAudience, string expectedNonce,
         string expectedCredentialType, Uri expectedSubjectContextUri,
         IPresentationChallengeStore challenges, TimeProvider clock,
-        out JsonElement verifiedSubject)
+        out JsonElement verifiedSubject) =>
+        CheckCore(presentationJwt, verifierTenantId, expectedAudience, expectedNonce,
+            expectedCredentialType, expectedSubjectContextUri, challenges, clock,
+            null, out verifiedSubject);
+
+    /// <summary>
+    /// Require the holder's actual Ed25519 signature over the exact original
+    /// verifier request digest. The caller MUST authenticate the signed
+    /// request and independently retain its SHA-256 before invoking this.
+    /// </summary>
+    internal static JwtVcJsonPresentationCheckResult CheckWithHolderSignedRequestHash(
+        string presentationJwt, Guid verifierTenantId, string expectedAudience,
+        string expectedNonce, string expectedCredentialType, Uri expectedSubjectContextUri,
+        IPresentationChallengeStore challenges, TimeProvider clock,
+        string requiredOriginalRequestSha256, out JsonElement verifiedSubject) =>
+        CheckCore(presentationJwt, verifierTenantId, expectedAudience, expectedNonce,
+            expectedCredentialType, expectedSubjectContextUri, challenges, clock,
+            requiredOriginalRequestSha256, out verifiedSubject);
+
+    private static JwtVcJsonPresentationCheckResult CheckCore(string presentationJwt,
+        Guid verifierTenantId, string expectedAudience, string expectedNonce,
+        string expectedCredentialType, Uri expectedSubjectContextUri,
+        IPresentationChallengeStore challenges, TimeProvider clock,
+        string? requiredOriginalRequestSha256, out JsonElement verifiedSubject)
     {
         ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
         ArgumentNullException.ThrowIfNull(challenges);
@@ -167,7 +208,13 @@ public static class JwtVcJsonPresentation
             challenge.ExpiresAt > now.Add(InMemoryPresentationChallengeStore.MaximumLifetime) ||
             !StrictJwtReader.TryRead(presentationJwt, "vp+jwt", MaximumPresentationLength,
                 out var payload, KeyId(holderDid)) ||
-            payload.EnumerateObject().Count() != 7 ||
+            payload.EnumerateObject().Count() !=
+                (requiredOriginalRequestSha256 is null ? 7 : 8) ||
+            (requiredOriginalRequestSha256 is not null &&
+                (!StrictJwtReader.TryGetString(payload, "herossidRequestSha256",
+                    out var holderSignedRequestHash) ||
+                 !string.Equals(holderSignedRequestHash,
+                    requiredOriginalRequestSha256, StringComparison.Ordinal))) ||
             !StrictJwtReader.TryGetString(payload, "iss", out string signedHolder) ||
             !string.Equals(signedHolder, holderDid, StringComparison.Ordinal) ||
             !StrictJwtReader.TryGetString(payload, "aud", out string audience) ||
