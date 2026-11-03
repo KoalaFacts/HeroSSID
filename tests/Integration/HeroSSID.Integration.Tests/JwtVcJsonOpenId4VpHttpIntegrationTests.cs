@@ -74,6 +74,62 @@ public sealed class JwtVcJsonOpenId4VpHttpIntegrationTests(DatabaseFixture fixtu
     }
 
     [Fact]
+    public async Task OptInPublicGetReturnsExactOriginalJwtAndStopsAfterCancellation()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        await using var host = NewHost();
+        using var client = host.CreateClient();
+        string token = await GetTokenAsync(client, "credential:verify did:manage").ConfigureAwait(true);
+        string verifierDid = await CreateDidAsync(client, token).ConfigureAwait(true);
+        using var issuerKey = NewKey();
+        string issuerDid = DidFromKey(issuerKey);
+
+        using var issued = await PostAsync(client, IssueRoute, new
+        {
+            verifierDid, responseUri = ResponseUri, trustedIssuerDid = issuerDid,
+            credentialType = TypeIri, subjectContextUri = Context.AbsoluteUri,
+            lifetimeSeconds = 120, publishRequestUri = true
+        }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Created, issued.StatusCode);
+        var body = await issued.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        string jwt = body.GetProperty("signedRequestJwt").GetString()!;
+        string nonce = body.GetProperty("nonce").GetString()!;
+        string invocation = body.GetProperty("referenceWalletInvocationUri").GetString()!;
+        Assert.StartsWith("openid4vp://?client_id=", invocation, StringComparison.Ordinal);
+        Assert.DoesNotContain(jwt, invocation, StringComparison.Ordinal);
+        int start = invocation.IndexOf("&request_uri=", StringComparison.Ordinal);
+        Assert.True(start > 0);
+        var publishedUri = new Uri(Uri.UnescapeDataString(
+            invocation[(start + "&request_uri=".Length)..]));
+        Assert.Equal("https", publishedUri.Scheme);
+        Assert.StartsWith("/api/v1/credentials/jwt-vc-json/openid4vp/requests/",
+            publishedUri.AbsolutePath, StringComparison.Ordinal);
+
+        // The wallet's GET is anonymous, while publication required both scopes.
+        using var fetched = await client.GetAsync(publishedUri.PathAndQuery,
+            TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, fetched.StatusCode);
+        Assert.Equal("application/oauth-authz-req+jwt",
+            fetched.Content.Headers.ContentType?.MediaType);
+        Assert.Contains("no-store", fetched.Headers.CacheControl?.ToString(),
+            StringComparison.Ordinal);
+        Assert.Equal(jwt, await fetched.Content.ReadAsStringAsync(
+            TestContext.Current.CancellationToken).ConfigureAwait(true));
+
+        using var cancelled = await PostAsync(client, CancelRoute,
+            new { verifierDid, nonce }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NoContent, cancelled.StatusCode);
+        using var rejected = await client.GetAsync(publishedUri.PathAndQuery,
+            TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, rejected.StatusCode);
+        using var unknown = await client.GetAsync(
+            "/api/v1/credentials/jwt-vc-json/openid4vp/requests/" + new string('A', 43),
+            TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+    }
+
+    [Fact]
     public async Task SignedRequestAndIndependentHolderResponseVerifyOnceWithIssuerStatus()
     {
         await EnsureMigratedAsync().ConfigureAwait(true);
@@ -383,7 +439,9 @@ public sealed class JwtVcJsonOpenId4VpHttpIntegrationTests(DatabaseFixture fixtu
                 {
                     ["ConnectionStrings:HeroDb"] = connectionString,
                     ["HEROSSID_DB_PASSWORD"] = "test_password",
-                    ["Jwt:Secret"] = "isolated-openid4vp-http-adapter-test-secret-with-at-least-32-bytes"
+                    ["Jwt:Secret"] = "isolated-openid4vp-http-adapter-test-secret-with-at-least-32-bytes",
+                    ["OpenId4Vp:PublicRequestUriBase"] =
+                        "https://verifier.example/api/v1/credentials/jwt-vc-json/openid4vp/requests/"
                 }));
         }
     }
