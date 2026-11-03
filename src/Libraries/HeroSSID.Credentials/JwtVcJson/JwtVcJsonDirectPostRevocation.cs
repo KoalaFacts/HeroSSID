@@ -65,7 +65,40 @@ public static class JwtVcJsonDirectPostRevocation
         Uri expectedResponseUri, Guid verifierTenantId, string expectedClientId,
         string expectedNonce, string expectedCredentialType, Uri expectedSubjectContextUri,
         IPresentationChallengeStore challenges, TimeProvider clock,
-        out JsonElement verifiedSubject)
+        out JsonElement verifiedSubject) =>
+        CheckHolderBoundResponseFormCore(
+            form, snapshotJwt, signedRequestJwt, verifierRetainedRequestSha256,
+            trustedVerifierDid, expectedResponseUri, verifierTenantId, expectedClientId,
+            expectedNonce, expectedCredentialType, expectedSubjectContextUri,
+            challenges, clock, null, out verifiedSubject);
+
+    /// <summary>
+    /// Strict incident policy: a fresh genuine issuer status must be observed at
+    /// or after the independent verifier-owned cutoff. Signed whole-second
+    /// observation time is never rounded backward to satisfy a fractional cutoff.
+    /// A valid holder proof atomically spends the challenge even for denied status;
+    /// invalid future or pre-epoch verifier policy does not spend it.
+    /// </summary>
+    public static RevocationSnapshotCheckResult CheckHolderBoundResponseFormWithObservationCutoff(
+        string form, string snapshotJwt, string signedRequestJwt,
+        string verifierRetainedRequestSha256, string trustedVerifierDid,
+        Uri expectedResponseUri, Guid verifierTenantId, string expectedClientId,
+        string expectedNonce, string expectedCredentialType, Uri expectedSubjectContextUri,
+        IPresentationChallengeStore challenges, TimeProvider clock,
+        DateTimeOffset minimumStatusObservedAt, out JsonElement verifiedSubject) =>
+        CheckHolderBoundResponseFormCore(
+            form, snapshotJwt, signedRequestJwt, verifierRetainedRequestSha256,
+            trustedVerifierDid, expectedResponseUri, verifierTenantId, expectedClientId,
+            expectedNonce, expectedCredentialType, expectedSubjectContextUri,
+            challenges, clock, minimumStatusObservedAt, out verifiedSubject);
+
+    private static RevocationSnapshotCheckResult CheckHolderBoundResponseFormCore(
+        string form, string snapshotJwt, string signedRequestJwt,
+        string verifierRetainedRequestSha256, string trustedVerifierDid,
+        Uri expectedResponseUri, Guid verifierTenantId, string expectedClientId,
+        string expectedNonce, string expectedCredentialType, Uri expectedSubjectContextUri,
+        IPresentationChallengeStore challenges, TimeProvider clock,
+        DateTimeOffset? minimumStatusObservedAt, out JsonElement verifiedSubject)
     {
         ArgumentNullException.ThrowIfNull(form);
         ArgumentNullException.ThrowIfNull(expectedResponseUri);
@@ -78,7 +111,9 @@ public static class JwtVcJsonDirectPostRevocation
         // without spending a legitimate pending verifier challenge.
         if (string.IsNullOrWhiteSpace(snapshotJwt) || snapshotJwt.Length > 65_536 ||
             !PresentationChallengePolicy.IsValidLookup(
-                verifierTenantId, expectedClientId, expectedNonce))
+                verifierTenantId, expectedClientId, expectedNonce) ||
+            (minimumStatusObservedAt is DateTimeOffset cutoff &&
+                (cutoff < DateTimeOffset.UnixEpoch || cutoff > clock.GetUtcNow())))
         {
             return RevocationSnapshotCheckResult.Invalid;
         }
@@ -101,31 +136,18 @@ public static class JwtVcJsonDirectPostRevocation
         // The strict bound proof has already atomically consumed the nonce.
         // Never expose its claims unless the REAL issuer's short-lived status
         // authenticates the exact original credential inside that proof.
-        var status = JwtVcJsonRevocationSnapshot.Check(
-            snapshotJwt, credential, challenge.TrustedIssuerDid, clock.GetUtcNow());
+        DateTimeOffset now = clock.GetUtcNow();
+        var status = minimumStatusObservedAt is DateTimeOffset minimum
+            ? JwtVcJsonRevocationSnapshot.CheckWithObservationCutoff(
+                snapshotJwt, credential, challenge.TrustedIssuerDid, now, minimum)
+            : JwtVcJsonRevocationSnapshot.Check(
+                snapshotJwt, credential, challenge.TrustedIssuerDid, now);
         if (status == RevocationSnapshotCheckResult.NotListed)
         {
             verifiedSubject = claims;
         }
 
         return status;
-    }
-
-    /// <summary>
-    /// Opt-in verifier incident cutoff: a valid signed status must have been
-    /// observed at or after the independently configured emergency instant.
-    /// Fails closed until the policy-aware verification is implemented.
-    /// </summary>
-    public static RevocationSnapshotCheckResult CheckHolderBoundResponseFormWithObservationCutoff(
-        string form, string snapshotJwt, string signedRequestJwt,
-        string verifierRetainedRequestSha256, string trustedVerifierDid,
-        Uri expectedResponseUri, Guid verifierTenantId, string expectedClientId,
-        string expectedNonce, string expectedCredentialType, Uri expectedSubjectContextUri,
-        IPresentationChallengeStore challenges, TimeProvider clock,
-        DateTimeOffset minimumStatusObservedAt, out JsonElement verifiedSubject)
-    {
-        verifiedSubject = default;
-        return RevocationSnapshotCheckResult.Invalid;
     }
 
     private static bool TryGetCredential(string form, out string credential)
