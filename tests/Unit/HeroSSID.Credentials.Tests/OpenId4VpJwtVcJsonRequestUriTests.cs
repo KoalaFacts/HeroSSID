@@ -172,7 +172,11 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
             HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Calls++;
-            return Task.FromResult(respond(request));
+            HttpResponseMessage response = respond(request);
+            // Real HTTP handlers attach the executed request to the response;
+            // model that metadata explicitly in this isolated in-process fake.
+            response.RequestMessage ??= request;
+            return Task.FromResult(response);
         }
     }
 
