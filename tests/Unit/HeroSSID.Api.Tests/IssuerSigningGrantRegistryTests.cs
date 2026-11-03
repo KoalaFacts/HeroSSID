@@ -65,6 +65,51 @@ public sealed class IssuerSigningGrantRegistryTests
     }
 
     [Fact]
+    public void ExplicitCredentialTypeGrantsRejectUnapprovedTypesForApprovedSigningKey()
+    {
+        using var issuer = Key.Create(SignatureAlgorithm.Ed25519);
+        string did = DidFromKey(issuer);
+        var entries = Entries(did);
+        entries["IssuerSigningGrants:Grants:0:CredentialTypes:0"] = "MembershipCredential";
+        entries["IssuerSigningGrants:Grants:0:CredentialTypes:1"] =
+            "https://issuer.example/credentials#MembershipCredential";
+        var registry = Registry(entries);
+
+        Assert.True(registry.IsAllowed(Tenant, Principal("issuing-client"), did, "MembershipCredential"));
+        Assert.True(registry.IsAllowed(Tenant, Principal("issuing-client"), did,
+            "https://issuer.example/credentials#MembershipCredential"));
+        Assert.False(registry.IsAllowed(Tenant, Principal("issuing-client"), did, "AdministratorCredential"));
+        Assert.False(registry.IsAllowed(Tenant, Principal("issuing-client"), did, "membershipcredential"));
+        Assert.False(registry.IsAllowed(Tenant, Principal("issuing-client"), did, null));
+    }
+
+    [Fact]
+    public void MalformedCredentialTypeGrantPolicyFailsStartup()
+    {
+        using var issuer = Key.Create(SignatureAlgorithm.Ed25519);
+        string did = DidFromKey(issuer);
+        var duplicate = Entries(did);
+        duplicate["IssuerSigningGrants:Grants:0:CredentialTypes:0"] = "MembershipCredential";
+        duplicate["IssuerSigningGrants:Grants:0:CredentialTypes:1"] = "MembershipCredential";
+        Assert.Throws<InvalidOperationException>(() => Registry(duplicate));
+
+        var empty = Entries(did);
+        empty["IssuerSigningGrants:Grants:0:CredentialTypes:0"] = "";
+        Assert.Throws<InvalidOperationException>(() => Registry(empty));
+
+        var nested = Entries(did);
+        nested["IssuerSigningGrants:Grants:0:CredentialTypes:0:Injected"] = "AdministratorCredential";
+        Assert.Throws<InvalidOperationException>(() => Registry(nested));
+
+        var tooMany = Entries(did);
+        for (int index = 0; index < 17; index++)
+        {
+            tooMany[$"IssuerSigningGrants:Grants:0:CredentialTypes:{index}"] = $"Type{index}";
+        }
+        Assert.Throws<InvalidOperationException>(() => Registry(tooMany));
+    }
+
+    [Fact]
     public void MalformedOrOrphanedOrDuplicateSecurityPolicyFailsStartup()
     {
         using var issuer = Key.Create(SignatureAlgorithm.Ed25519);
