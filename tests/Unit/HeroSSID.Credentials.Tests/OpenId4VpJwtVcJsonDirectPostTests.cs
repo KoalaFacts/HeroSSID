@@ -1,4 +1,6 @@
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using HeroSSID.Credentials.JwtVcJson;
 using HeroSSID.Credentials.Utilities;
@@ -254,6 +256,76 @@ public sealed class OpenId4VpJwtVcJsonDirectPostTests
         _clock.Advance(TimeSpan.FromSeconds(2));
         Assert.False(OpenId4VpJwtVcJsonDirectPost.TryReadSignedRequest(
             expiringRequest, _verifier.Did, ResponseUri, CredentialType, SubjectContext, _clock, out _));
+    }
+
+    [Fact]
+    public void StrictHolderBoundRequestRejectsLegacyAndSameNonceReplacementBeforeChallengeConsumption()
+    {
+        Guid tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did);
+        string original = Request(challenge);
+        string originalPin = Convert.ToHexStringLower(
+            SHA256.HashData(Encoding.UTF8.GetBytes(original)));
+        string credential = Credential();
+
+        string legacyForm = OpenId4VpJwtVcJsonDirectPost.CreateHolderResponseForm(
+            original, _verifier.Did, ResponseUri, CredentialType, SubjectContext,
+            credential, _holder.Did, _holder.Seed, _clock);
+        Assert.Equal(JwtVcJsonPresentationCheckResult.Invalid,
+            OpenId4VpJwtVcJsonDirectPost.CheckHolderBoundResponseForm(
+                legacyForm, original, originalPin, _verifier.Did, ResponseUri,
+                tenant, Audience, challenge.Nonce, CredentialType, SubjectContext,
+                store, _clock, out var legacyClaims));
+        Assert.Equal(JsonValueKind.Undefined, legacyClaims.ValueKind);
+
+        string boundForm = OpenId4VpJwtVcJsonDirectPost.CreateHolderBoundResponseForm(
+            original, _verifier.Did, ResponseUri, CredentialType, SubjectContext,
+            credential, _holder.Did, _holder.Seed, _clock);
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        string replacement = Request(challenge);
+        Assert.NotEqual(original, replacement);
+        Assert.True(OpenId4VpJwtVcJsonDirectPost.TryReadSignedRequest(
+            replacement, _verifier.Did, ResponseUri, CredentialType,
+            SubjectContext, _clock, out _));
+
+        // Even the same verifier key can create a distinct, authentic request
+        // for the same nonce; the verifier must enforce its OWN saved exact pin.
+        Assert.Equal(JwtVcJsonPresentationCheckResult.Invalid,
+            OpenId4VpJwtVcJsonDirectPost.CheckHolderBoundResponseForm(
+                boundForm, replacement, originalPin, _verifier.Did, ResponseUri,
+                tenant, Audience, challenge.Nonce, CredentialType, SubjectContext,
+                store, _clock, out var swappedClaims));
+        Assert.Equal(JsonValueKind.Undefined, swappedClaims.ValueKind);
+
+        string replacementBoundForm = OpenId4VpJwtVcJsonDirectPost.CreateHolderBoundResponseForm(
+            replacement, _verifier.Did, ResponseUri, CredentialType, SubjectContext,
+            credential, _holder.Did, _holder.Seed, _clock);
+        Assert.Equal(JwtVcJsonPresentationCheckResult.Invalid,
+            OpenId4VpJwtVcJsonDirectPost.CheckHolderBoundResponseForm(
+                replacementBoundForm, original, originalPin, _verifier.Did, ResponseUri,
+                tenant, Audience, challenge.Nonce, CredentialType, SubjectContext,
+                store, _clock, out var wrongHolderBinding));
+        Assert.Equal(JsonValueKind.Undefined, wrongHolderBinding.ValueKind);
+
+        Assert.Equal(JwtVcJsonPresentationCheckResult.Invalid,
+            OpenId4VpJwtVcJsonDirectPost.CheckHolderBoundResponseForm(
+                boundForm, original, new string('0', 64), _verifier.Did, ResponseUri,
+                tenant, Audience, challenge.Nonce, CredentialType, SubjectContext,
+                store, _clock, out _));
+        Assert.Equal(JwtVcJsonPresentationCheckResult.SignedButStatusUnchecked,
+            OpenId4VpJwtVcJsonDirectPost.CheckHolderBoundResponseForm(
+                boundForm, original, originalPin, _verifier.Did, ResponseUri,
+                tenant, Audience, challenge.Nonce, CredentialType, SubjectContext,
+                store, _clock, out var claims));
+        Assert.Equal("active", claims.GetProperty("membership").GetString());
+
+        Assert.Equal(JwtVcJsonPresentationCheckResult.Invalid,
+            OpenId4VpJwtVcJsonDirectPost.CheckHolderBoundResponseForm(
+                boundForm, original, originalPin, _verifier.Did, ResponseUri,
+                tenant, Audience, challenge.Nonce, CredentialType, SubjectContext,
+                store, _clock, out var replayClaims));
+        Assert.Equal(JsonValueKind.Undefined, replayClaims.ValueKind);
     }
 
     private string Request(PresentationChallenge challenge) =>
