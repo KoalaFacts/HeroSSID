@@ -34,32 +34,63 @@ OpenID4VP interoperability or third-party Wallet conformance**.
 
 ## Wallet consumption
 
-The integrating Wallet must independently trust the **exact** HTTPS request
-URI, verifier DID, HTTPS response callback, credential type, subject context
-and issuer; a URI appearing only in a QR/deep link is *not* trusted policy.
-Prefer the built-in credential-free, non-redirecting isolated transport.
-It does **not** inherit cookies, HTTP credentials, proxy credentials, automatic
-redirects, TLS client certificates or shared application default headers:
+The integrating Wallet must independently trust the verifier DID, HTTPS
+response callback, credential type, subject context and issuer. A URI appearing
+only in a QR/deep link is *not* trusted policy. The older overload requires an
+independently pinned **exact** request URI, including the verifier's randomly
+generated reference; a real Wallet normally cannot pre-enrol that reference.
+
+For actual by-reference launches, enrol the verifier's **static HTTPS request
+base** out of band (including the trailing slash), not the URL supplied by the
+launch. The following overload reads the unpredictable 43-character base64url
+reference only from the canonical two-parameter launch; it rejects changed
+host, sibling paths, query, fragment, encodings, or duplicate parameters before
+sending HTTP. It then verifies the verifier's genuine Ed25519 request and
+the independently pinned callback/type/context as before. Use the built-in
+credential-free, non-redirecting isolated transport:
 
 ```csharp
 using HeroSSID.Credentials.VerifiablePresentations;
 
+Uri trustedRequestBase = new(
+    "https://verifier.example/api/v1/credentials/jwt-vc-json/openid4vp/requests/");
 string? signedRequest = await OpenId4VpJwtVcJsonRequestUri
-    .FetchVerifiedRequestWithIsolatedTransportAsync(
-        deepLink, independentlyTrustedRequestUri,
+    .FetchVerifiedRequestFromTrustedBaseWithIsolatedTransportAsync(
+        deepLink, trustedRequestBase,
         trustedVerifierDid, trustedCallback, trustedType, trustedContext,
         TimeProvider.System, cancellationToken: cancellationToken);
 
 if (signedRequest is null)
 {
-    return; // No credential claims released or holder key used.
+    return; // No claim disclosure or holder signature.
 }
 
-// Continue with an authenticated Wallet preview (optionally the incident-aware
-// signed-status gate), show ALL claims, and obtain actual user consent.
-// Only then call CreateHolderBoundResponseFormAfterPreview or the stricter
-// incident-aware holder-signing method and POST to the pinned HTTPS callback.
+// Independently preview issuer-authenticated claims and any issuer status;
+// show the entire proposed disclosure and obtain actual informed consent.
+// Only then create a holder-bound response and send to the pinned callback.
 ```
+
+For integrations that intentionally enrol the full dynamic URI in advance,
+the earlier exact-URI API remains:
+
+```csharp
+string? signedRequest = await OpenId4VpJwtVcJsonRequestUri
+    .FetchVerifiedRequestWithIsolatedTransportAsync(
+        deepLink, independentlyTrustedRequestUri,
+        trustedVerifierDid, trustedCallback, trustedType, trustedContext,
+        TimeProvider.System, cancellationToken: cancellationToken);
+```
+
+The SDK does not discover or enrol the verifier base, authorize any entity,
+render a consent UI, prove the issuer's revocation set complete, or establish
+third-party wallet interoperability. The base-pinned overload enforces the
+existing 15-second bounded GET (up to 30 seconds configured), but transport
+trust still depends on normal TLS/server validation and independently enrolled
+operator policy.
+
+Prefer the built-in credential-free, non-redirecting isolated transport.
+It does **not** inherit cookies, HTTP credentials, proxy credentials, automatic
+redirects, TLS client certificates or shared application default headers:
 
 The adapter rejects untrusted or noncanonical launches before any GET,
 non-HTTPS endpoints, non-200/redirect responses, wrong content types,
@@ -71,7 +102,7 @@ It returns the **unchanged original compact JWT**, so existing holder
 signatures and verifier-owned request-hash pins are preserved.
 
 **Security deployment boundary:** The isolated overload creates and disposes
-its own `HttpClientHandler` with no cookies, redirects, credentials, client
+its own `SocketsHttpHandler` with no cookies, redirects, credentials, client
 certificate auto-selection or proxy use. It retains normal TLS server certificate
 validation, the exact URI/trust pin and the bounded streaming deadline. Environments
 requiring a corporate proxy must explicitly supply and audit a dedicated HTTP
