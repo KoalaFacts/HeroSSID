@@ -268,6 +268,11 @@ public static class JwtVcJsonRevocationSnapshot
         // vc+jwt credentials. These remain two explicitly bounded input profiles.
         if (!(StrictJwtReader.TryRead(jwt!, CredentialJwtType, MaximumCredentialLength,
                 out var payload, KeyId(issuerDid)) ||
+              // The VC1.1 Recommendation makes kid optional. Without kid,
+              // issuer provenance still comes from the independently pinned
+              // DID public key and the original genuine Ed25519 signature.
+              StrictJwtReader.TryRead(jwt!, CredentialJwtType, MaximumCredentialLength,
+                out payload) ||
               StrictJwtReader.TryRead(jwt!, LegacyCredentialJwtType, MaximumCredentialLength,
                 out payload, KeyId(issuerDid))) ||
             !Ed25519JwtSigner.VerifySignedJwt(jwt!, issuerKey) ||
