@@ -172,7 +172,7 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
 
     private static IResult InvalidRequest() => Results.Problem(
         title: "Invalid Request",
-        detail: "An active tenant-owned issuer, external did:key holder, HTTPS credential type and vocabulary, optional bounded HTTPS credential ID, matching subject id and expiry within 15 minutes are required.",
+        detail: "An active tenant-owned issuer, external did:key holder, HTTPS credential type and vocabulary, optional bounded HTTPS credential ID, subject with absent or matching holder id, and expiry within 15 minutes are required.",
         statusCode: StatusCodes.Status400BadRequest);
 }
 
