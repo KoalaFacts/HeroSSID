@@ -33,6 +33,82 @@ public sealed class JwtVcJsonOpenId4VpHttpIntegrationTests(DatabaseFixture fixtu
     private readonly DatabaseFixture _fixture = fixture;
 
     [Fact]
+    public async Task HostedOnlyVerifierReplicaRejectsLegacyFallbackWithoutLocalRequestObject()
+    {
+        await EnsureMigratedAsync().ConfigureAwait(true);
+        await using var publishingHost = NewHost();
+        await using var otherReplica = NewHost(requireHostedResponseBinding: true);
+        using var publisher = publishingHost.CreateClient();
+        using var verifier = otherReplica.CreateClient();
+        string publisherToken = await GetTokenAsync(publisher, "credential:verify did:manage")
+            .ConfigureAwait(true);
+        string replicaToken = await GetTokenAsync(verifier, "credential:verify did:manage")
+            .ConfigureAwait(true);
+        string verifierDid = await CreateDidAsync(publisher, publisherToken).ConfigureAwait(true);
+        using var issuerKey = NewKey();
+        using var holderKey = NewKey();
+        string issuerDid = DidFromKey(issuerKey);
+        string holderDid = DidFromKey(holderKey);
+
+        using var issued = await PostAsync(publisher, IssueRoute, new
+        {
+            verifierDid, responseUri = ResponseUri, trustedIssuerDid = issuerDid,
+            credentialType = TypeIri, subjectContextUri = Context.AbsoluteUri,
+            lifetimeSeconds = 120, publishRequestUri = true
+        }, publisherToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Created, issued.StatusCode);
+        var payload = await issued.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        string original = payload.GetProperty("signedRequestJwt").GetString()!;
+        string nonce = payload.GetProperty("nonce").GetString()!;
+        using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
+            new { id = holderDid, role = "private-member" }));
+        DateTimeOffset now = TimeProvider.System.GetUtcNow();
+        string credential = JwtVcJsonCredential.Create(issuerDid, holderDid, TypeIri,
+            Context, subject.RootElement, issuerKey.Export(KeyBlobFormat.RawPrivateKey),
+            now.AddMinutes(-1), now.AddMinutes(10));
+        string status = JwtVcJsonRevocationSnapshot.Create(issuerDid, [],
+            issuerKey.Export(KeyBlobFormat.RawPrivateKey), now, TimeProvider.System);
+        byte[] seed = holderKey.Export(KeyBlobFormat.RawPrivateKey);
+        string unbound = OpenId4VpJwtVcJsonDirectPost.CreateHolderResponseForm(
+            original, verifierDid, new Uri(ResponseUri), TypeIri, Context, credential,
+            holderDid, seed, TimeProvider.System);
+        string bound = OpenId4VpJwtVcJsonDirectPost.CreateHolderBoundResponseForm(
+            original, verifierDid, new Uri(ResponseUri), TypeIri, Context, credential,
+            holderDid, seed, TimeProvider.System);
+
+        // The second API instance shares PostgreSQL but has no original JWT in
+        // its process-local host. Hardened deployment must never fall back to
+        // accepting this genuine but unbound holder VP or consuming the nonce.
+        var unboundSubmission = new
+        {
+            verifierDid, nonce, form = unbound, revocationSnapshot = status,
+            expectedCredentialType = TypeIri, subjectContextUri = Context.AbsoluteUri
+        };
+        using var denied = await PostAsync(verifier, VerifyRoute, unboundSubmission,
+            replicaToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, denied.StatusCode);
+        var deniedBody = await denied.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal("Invalid", deniedBody.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, deniedBody.GetProperty("verifiedSubject").ValueKind);
+
+        // The denied downgrade did not spend the shared challenge: only the
+        // publishing instance can authenticate the bound original request.
+        using var accepted = await PostAsync(publisher, HostedVerifyRoute, new
+        {
+            verifierDid, nonce, form = bound, revocationSnapshot = status,
+            expectedCredentialType = TypeIri, subjectContextUri = Context.AbsoluteUri
+        }, publisherToken).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        var acceptedBody = await accepted.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal("SignedNotListed", acceptedBody.GetProperty("status").GetString());
+        Assert.Equal("private-member",
+            acceptedBody.GetProperty("verifiedSubject").GetProperty("role").GetString());
+    }
+
+    [Fact]
     public async Task HostedStrictVerifierRequiresOriginalRequestBoundHolderProof()
     {
         await EnsureMigratedAsync().ConfigureAwait(true);
@@ -728,10 +804,11 @@ public sealed class JwtVcJsonOpenId4VpHttpIntegrationTests(DatabaseFixture fixtu
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
     }
 
-    private WebApplicationFactory<HeroSSID.Api.Features.Dids.CreateDidRequest> NewHost() =>
-        new ConfiguredHost(_fixture.ConnectionString);
+    private WebApplicationFactory<HeroSSID.Api.Features.Dids.CreateDidRequest> NewHost(
+        bool requireHostedResponseBinding = false) =>
+        new ConfiguredHost(_fixture.ConnectionString, requireHostedResponseBinding);
 
-    private sealed class ConfiguredHost(string connectionString)
+    private sealed class ConfiguredHost(string connectionString, bool requireHostedResponseBinding)
         : WebApplicationFactory<HeroSSID.Api.Features.Dids.CreateDidRequest>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -744,7 +821,9 @@ public sealed class JwtVcJsonOpenId4VpHttpIntegrationTests(DatabaseFixture fixtu
                     ["HEROSSID_DB_PASSWORD"] = "test_password",
                     ["Jwt:Secret"] = "isolated-openid4vp-http-adapter-test-secret-with-at-least-32-bytes",
                     ["OpenId4Vp:PublicRequestUriBase"] =
-                        "https://verifier.example/api/v1/credentials/jwt-vc-json/openid4vp/requests/"
+                        "https://verifier.example/api/v1/credentials/jwt-vc-json/openid4vp/requests/",
+                    ["OpenId4Vp:RequireHostedResponseBinding"] =
+                        requireHostedResponseBinding ? "true" : "false"
                 }));
         }
     }
