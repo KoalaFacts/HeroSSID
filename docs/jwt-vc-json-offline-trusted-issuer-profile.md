@@ -26,7 +26,7 @@ if (result != JwtVcJsonTrustedIssuerCheckResult.SignedButStatusUnchecked)
 // prove holder private-key control, legal identity or business authorization.
 ```
 
-A relying party can reject credentials signed by a retired issuer simply by removing its DID from the independently maintained trust list. No credential is re-signed or reissued by HeroSSID. The verifier checks all trust pins (including duplicates, malformed and oversized lists) before examining any credential and does **not** trust the original JWT's unverified `iss` or `kid`. The inherited strict VC1.1 verifier checks real Ed25519 signature, exact `kid`, holder subject binding, pinned type/context, time bounds, JSON property uniqueness and the original nested `vc.@context` profile.
+A relying party can reject credentials signed by a retired issuer simply by removing its DID from the independently maintained trust list. No credential is re-signed or reissued by HeroSSID. The verifier checks all trust pins (including duplicates, malformed and oversized lists) before examining any credential and does **not** trust the original JWT's unverified `iss` or `kid`. The inherited strict VC1.1 verifier checks a genuine Ed25519 issuer signature under each independently trusted `did:key`; an **explicit** `kid` must match that DID exactly, while W3C VC1.1 `typ=JWT` may omit optional `kid` without selecting or changing the trust key. Legacy `vc+jwt` still requires exact `kid`. Holder subject binding, pinned type/context, time bounds, JSON property uniqueness and the original nested `vc.@context` profile remain enforced.
 
 ## Optional issuer status from the actual signer
 
