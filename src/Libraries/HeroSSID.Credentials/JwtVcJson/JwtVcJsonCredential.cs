@@ -100,6 +100,8 @@ public static class JwtVcJsonCredential
     /// <summary>
     /// Independently verify the actual Ed25519 issuer signature and pinned issuer,
     /// holder, type, HTTPS vocabulary and 15-minute validity, before releasing claims.
+    /// Also accepts separately encoded VC1.1 JWTs with a bounded HTTPS jti and
+    /// no iat, or an iat preceding nbf by at most 15 minutes.
     /// Does NOT establish holder possession, consent, revocation or business authority.
     /// </summary>
     public static bool TryVerify(string jwt, string trustedIssuerDid, string expectedHolderDid,
@@ -116,17 +118,17 @@ public static class JwtVcJsonCredential
             !ValidContext(expectedSubjectContextUri) ||
             !StrictJwtReader.TryRead(jwt, JwtType, MaximumJwtLength,
                 out var payload, KeyId(trustedIssuerDid)) ||
-            payload.EnumerateObject().Count() != 6 ||
+            !HasSupportedClaims(payload) ||
             !Ed25519JwtSigner.VerifySignedJwt(jwt, issuerPublicKey) ||
             !StrictJwtReader.TryGetString(payload, "iss", out var signedIssuer) ||
             !string.Equals(signedIssuer, trustedIssuerDid, StringComparison.Ordinal) ||
             !StrictJwtReader.TryGetString(payload, "sub", out var signedSubject) ||
             !string.Equals(signedSubject, expectedHolderDid, StringComparison.Ordinal) ||
-            !StrictJwtReader.TryGetTimestamp(payload, "iat", out var issued) ||
             !StrictJwtReader.TryGetTimestamp(payload, "nbf", out var notBefore) ||
             !StrictJwtReader.TryGetTimestamp(payload, "exp", out var expires) ||
-            issued != notBefore || expires <= issued ||
-            expires - issued > MaximumValiditySeconds ||
+            !HasValidOptionalIssuedAt(payload, notBefore) ||
+            !HasValidOptionalCredentialId(payload) ||
+            expires <= notBefore || expires - notBefore > MaximumValiditySeconds ||
             notBefore > now.ToUnixTimeSeconds() || expires <= now.ToUnixTimeSeconds() ||
             !payload.TryGetProperty("vc", out var vc) ||
             vc.ValueKind != JsonValueKind.Object || vc.EnumerateObject().Count() != 3 ||
@@ -143,6 +145,41 @@ public static class JwtVcJsonCredential
 
         verifiedSubject = subject.Clone();
         return true;
+    }
+
+    // W3C VC 1.1 maps the credential id into JWT jti. OpenID4VP's
+    // jwt_vc_json example omits iat altogether. Recognize only these
+    // two known optional claims; fail closed on any other payload members.
+    private static bool HasSupportedClaims(JsonElement payload) =>
+        payload.EnumerateObject().Count() == 5 +
+        (payload.TryGetProperty("iat", out _) ? 1 : 0) +
+        (payload.TryGetProperty("jti", out _) ? 1 : 0);
+
+    private static bool HasValidOptionalIssuedAt(JsonElement payload, long notBefore)
+    {
+        // JWT iat describes signature issue time, not credential validity.
+        // It can precede nbf, but is never a proof of historical signing.
+        // A bounded window prevents accepting arbitrary backdated timestamps.
+        return !payload.TryGetProperty("iat", out _) ||
+            (StrictJwtReader.TryGetTimestamp(payload, "iat", out long issued) &&
+                issued <= notBefore && issued >= notBefore - MaximumValiditySeconds);
+    }
+
+    private static bool HasValidOptionalCredentialId(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("jti", out _))
+        {
+            return true;
+        }
+
+        // Deliberately supported URI subset, not a dereference instruction:
+        // callers must not promote this issuer-signed identifier to trust.
+        return StrictJwtReader.TryGetString(payload, "jti", out string id) &&
+            id.Length <= 2_048 &&
+            Uri.TryCreate(id, UriKind.Absolute, out Uri? uri) &&
+            uri.Scheme == Uri.UriSchemeHttps &&
+            !string.IsNullOrWhiteSpace(uri.Host) &&
+            uri.UserInfo.Length == 0;
     }
 
     private static bool HasExactArray(JsonElement element, string name, string first, string second)

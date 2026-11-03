@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using HeroSSID.Credentials.JwtVcJson;
 using HeroSSID.Credentials.Utilities;
@@ -178,6 +179,93 @@ public sealed class JwtVcJsonCredentialTests
         Assert.Throws<ArgumentException>(() => JwtVcJsonCredential.Create(
             _issuer.Did, _holder.Did, CredentialType, Vocabulary, subject.RootElement,
             _issuer.Seed, Now, Now.AddHours(1)));
+    }
+
+
+    [Fact]
+    public void IndependentJwtVc11IssuerCanOmitIatAndIncludeCredentialJti()
+    {
+        // W3C VC 1.1 maps credential id into JWT jti. The OpenID4VP 1.0
+        // jwt_vc_json example contains jti and nbf but no iat. Construct the
+        // JWS independently of HeroSSID's credential issuance/JWT signer.
+        string jwt = SignExternalJwt(null, "https://issuer.example/credentials/external-123");
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out var subject));
+        Assert.Equal("active", subject.GetProperty("membership").GetString());
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, _other.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out var foreignSubject));
+        Assert.Equal(JsonValueKind.Undefined, foreignSubject.ValueKind);
+    }
+
+    [Fact]
+    public void IndependentIssuerCanSignBeforeItsCredentialBecomesValid()
+    {
+        // iat is signature issuance, whereas nbf is credential validity.
+        // Both are authentically signed but need not share a timestamp.
+        string jwt = SignExternalJwt(Now.AddMinutes(-2).ToUnixTimeSeconds(),
+            "https://issuer.example/credentials/scheduled-123");
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out var subject));
+        Assert.Equal(_holder.Did, subject.GetProperty("id").GetString());
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now.AddMinutes(-2), out _));
+    }
+
+    [Fact]
+    public void IndependentJwtCredentialIdAndSignatureAreNotImplicitTrust()
+    {
+        string invalidId = SignExternalJwt(null, "javascript:alert(1)");
+        Assert.False(JwtVcJsonCredential.TryVerify(invalidId, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out var invalidClaims));
+        Assert.Equal(JsonValueKind.Undefined, invalidClaims.ValueKind);
+
+        string futureSigned = SignExternalJwt(Now.AddMinutes(1).ToUnixTimeSeconds(),
+            "https://issuer.example/credentials/future-signing");
+        Assert.False(JwtVcJsonCredential.TryVerify(futureSigned, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out _));
+
+        string valid = SignExternalJwt(null, "https://issuer.example/credentials/external-123");
+        string[] parts = valid.Split('.');
+        parts[1] = Base64UrlEncoder.Encode(
+            Base64UrlEncoder.DecodeString(parts[1]).Replace(
+                "active", "administrator", StringComparison.Ordinal));
+        Assert.False(JwtVcJsonCredential.TryVerify(string.Join('.', parts), _issuer.Did,
+            _holder.Did, CredentialType, Vocabulary, Now, out _));
+    }
+
+    private string SignExternalJwt(long? signatureIssuedAt, string credentialId)
+    {
+        string kid = _issuer.Did + "#" + _issuer.Did["did:key:".Length..];
+        string header = Base64UrlEncoder.Encode(JsonSerializer.Serialize(
+            new { alg = "EdDSA", typ = "vc+jwt", kid }));
+        var claims = new Dictionary<string, object>
+        {
+            ["iss"] = _issuer.Did,
+            ["sub"] = _holder.Did,
+            ["nbf"] = Now.AddMinutes(-1).ToUnixTimeSeconds(),
+            ["exp"] = Now.AddMinutes(5).ToUnixTimeSeconds(),
+            ["jti"] = credentialId,
+            ["vc"] = new Dictionary<string, object>
+            {
+                ["@context"] = new[] { "https://www.w3.org/2018/credentials/v1",
+                    Vocabulary.AbsoluteUri },
+                ["type"] = new[] { "VerifiableCredential", CredentialType },
+                ["credentialSubject"] = new { id = _holder.Did, membership = "active" }
+            }
+        };
+        if (signatureIssuedAt is long issued)
+        {
+            claims["iat"] = issued;
+        }
+
+        string payload = Base64UrlEncoder.Encode(JsonSerializer.Serialize(claims));
+        string signingInput = header + "." + payload;
+        using var signer = Key.Import(SignatureAlgorithm.Ed25519, _issuer.Seed,
+            KeyBlobFormat.RawPrivateKey,
+            new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
+        byte[] signature = SignatureAlgorithm.Ed25519.Sign(
+            signer, Encoding.ASCII.GetBytes(signingInput));
+        return signingInput + "." + Base64UrlEncoder.Encode(signature);
     }
 
     private string Issue()
