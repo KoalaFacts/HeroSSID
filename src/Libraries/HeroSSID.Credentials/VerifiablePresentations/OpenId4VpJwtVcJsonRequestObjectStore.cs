@@ -20,6 +20,7 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStore(
     public bool TryGet(string opaqueReference, out string signedRequestJwt)
     {
         signedRequestJwt = string.Empty;
+        _ = challenges;
         throw new NotSupportedException("Test-first runtime failure: Request Object retrieval is not implemented.");
     }
 }
