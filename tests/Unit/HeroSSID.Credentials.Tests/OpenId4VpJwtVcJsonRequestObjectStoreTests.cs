@@ -61,6 +61,36 @@ public sealed class OpenId4VpJwtVcJsonRequestObjectStoreTests
         Assert.Equal(string.Empty, expired);
     }
 
+    [Fact]
+    public void BoundedReservationsRejectBeforeDurableIssuanceAndReleaseOnFailure()
+    {
+        var clock = new Clock();
+        var challenges = new InMemoryPresentationChallengeStore(clock);
+        var host = new OpenId4VpJwtVcJsonRequestObjectStore(challenges, clock);
+
+        string[] references = Enumerable.Range(0, 256)
+            .Select(_ => host.Reserve()).ToArray();
+        Assert.Equal(256, references.Distinct(StringComparer.Ordinal).Count());
+        Assert.All(references, reference => Assert.Equal(43, reference.Length));
+        Assert.All(references, reference => Assert.False(host.TryGet(reference, out _)));
+        Assert.Throws<InvalidOperationException>(() => host.Reserve());
+
+        // The pending reservations have not used the independent challenge store.
+        var verifier = Identity();
+        var issuer = Identity();
+        Guid tenant = Guid.NewGuid();
+        var pending = challenges.Issue(tenant,
+            "decentralized_identifier:" + verifier.Did, issuer.Did);
+        Assert.NotNull(challenges.Find(tenant, pending.Audience, pending.Nonce));
+
+        string reference = references[0];
+        host.ReleaseReservation(reference);
+        Assert.False(host.TryGet(reference, out _));
+        Assert.Equal(43, host.Reserve().Length);
+        clock.Advance(TimeSpan.FromMinutes(6));
+        Assert.Equal(43, host.Reserve().Length);
+    }
+
     private static (byte[] Seed, string Did) Identity()
     {
         using var key = Key.Create(SignatureAlgorithm.Ed25519,
