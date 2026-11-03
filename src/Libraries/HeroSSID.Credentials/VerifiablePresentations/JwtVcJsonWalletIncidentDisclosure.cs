@@ -95,8 +95,8 @@ public static class JwtVcJsonWalletIncidentDisclosure
                 issuerSignedSnapshotJwt, minimumObservedAt, clock,
                 out var rechecked) ||
             rechecked?.Status?.Disclosure is not JwtVcJsonWalletDisclosurePreview latest ||
-            !string.Equals(preview.Status.SnapshotSha256,
-                rechecked.Status.SnapshotSha256, StringComparison.Ordinal) ||
+            !string.Equals(preview.Status?.SnapshotSha256,
+                rechecked?.Status?.SnapshotSha256, StringComparison.Ordinal) ||
             !string.Equals(original.RequestSha256,
                 latest.RequestSha256, StringComparison.Ordinal) ||
             !string.Equals(original.CredentialSha256,
