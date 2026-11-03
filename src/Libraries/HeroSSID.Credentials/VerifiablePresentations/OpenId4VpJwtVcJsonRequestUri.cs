@@ -194,6 +194,7 @@ public static class OpenId4VpJwtVcJsonRequestUri
         PreAuthenticate = false,
         UseProxy = false,
         ClientCertificateOptions = ClientCertificateOption.Manual,
+        CheckCertificateRevocationList = true,
         AutomaticDecompression = DecompressionMethods.None
     };
 
