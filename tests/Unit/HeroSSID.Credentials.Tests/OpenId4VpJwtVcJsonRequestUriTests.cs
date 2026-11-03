@@ -229,6 +229,234 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
         Assert.Null(await Resolve(forgedLaunch, RequestUri, http));
     }
 
+
+    [Fact]
+    public async Task WalletPostsExactHolderSignedBodyOnlyToPinnedVerifierCallback()
+    {
+        var challenge = new InMemoryPresentationChallengeStore(_clock).IssueHosted(
+            Guid.NewGuid(), "decentralized_identifier:" + _verifier.Did, _issuer.Did);
+        string requestJwt = SignedRequest(challenge);
+        string body = HolderBoundForm(requestJwt);
+        using var handler = new ProbeHandler(request =>
+        {
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal(Callback, request.RequestUri);
+            Assert.Null(request.Headers.Authorization);
+            Assert.Equal("application/x-www-form-urlencoded",
+                request.Content?.Headers.ContentType?.MediaType);
+            Assert.Equal(body, request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{}", Encoding.UTF8, "application/json")
+            };
+        });
+        using var http = new HttpClient(handler);
+        Assert.True(await OpenId4VpJwtVcJsonWalletResponseTransport.PostResponseFormAsync(
+            requestJwt, body, Callback, http, _verifier.Did, Type, Context, _clock));
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Fact]
+    public async Task WalletDoesNotPostToUntrustedCallbackOrForwardAmbientCredentials()
+    {
+        var challenge = new InMemoryPresentationChallengeStore(_clock).IssueHosted(
+            Guid.NewGuid(), "decentralized_identifier:" + _verifier.Did, _issuer.Did);
+        string requestJwt = SignedRequest(challenge);
+        string body = HolderBoundForm(requestJwt);
+        using var handler = new ProbeHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
+        using var http = new HttpClient(handler);
+
+        Assert.False(await OpenId4VpJwtVcJsonWalletResponseTransport.PostResponseFormAsync(
+            requestJwt, body, new Uri("https://evil.example/collect"), http,
+            _verifier.Did, Type, Context, _clock));
+        Assert.False(await OpenId4VpJwtVcJsonWalletResponseTransport.PostResponseFormAsync(
+            requestJwt, body.Replace("&state=", "&state=wrong-", StringComparison.Ordinal),
+            Callback, http, _verifier.Did, Type, Context, _clock));
+
+        http.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "wallet-secret");
+        Assert.False(await OpenId4VpJwtVcJsonWalletResponseTransport.PostResponseFormAsync(
+            requestJwt, body, Callback, http, _verifier.Did, Type, Context, _clock));
+        Assert.Equal(0, handler.Calls);
+    }
+
+    [Fact]
+    public async Task WalletRejectsRedirectAndFailedDirectPostDelivery()
+    {
+        var challenge = new InMemoryPresentationChallengeStore(_clock).IssueHosted(
+            Guid.NewGuid(), "decentralized_identifier:" + _verifier.Did, _issuer.Did);
+        string requestJwt = SignedRequest(challenge);
+        string body = HolderBoundForm(requestJwt);
+        using (var handler = new ProbeHandler(_ => new HttpResponseMessage(HttpStatusCode.Redirect)
+            { Headers = { Location = new Uri("https://evil.example/collect") } }))
+        using (var http = new HttpClient(handler))
+        {
+            Assert.False(await OpenId4VpJwtVcJsonWalletResponseTransport.PostResponseFormAsync(
+                requestJwt, body, Callback, http, _verifier.Did, Type, Context, _clock));
+            Assert.Equal(1, handler.Calls);
+        }
+
+        using (var handler = new ProbeHandler(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)))
+        using (var http = new HttpClient(handler))
+        {
+            Assert.False(await OpenId4VpJwtVcJsonWalletResponseTransport.PostResponseFormAsync(
+                requestJwt, body, Callback, http, _verifier.Did, Type, Context, _clock));
+        }
+    }
+
+
+    [Fact]
+    public async Task WalletRejectsHtmlOrMalformedJsonReceiptAfterPosting()
+    {
+        var challenge = new InMemoryPresentationChallengeStore(_clock).IssueHosted(
+            Guid.NewGuid(), "decentralized_identifier:" + _verifier.Did, _issuer.Did);
+        string requestJwt = SignedRequest(challenge);
+        string body = HolderBoundForm(requestJwt);
+        using (var handler = new ProbeHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("<html>ok</html>", Encoding.UTF8, "text/html")
+            }))
+        using (var http = new HttpClient(handler))
+        {
+            Assert.False(await OpenId4VpJwtVcJsonWalletResponseTransport.PostResponseFormAsync(
+                requestJwt, body, Callback, http, _verifier.Did, Type, Context, _clock));
+        }
+
+        using (var handler = new ProbeHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{", Encoding.UTF8, "application/json")
+            }))
+        using (var http = new HttpClient(handler))
+        {
+            Assert.False(await OpenId4VpJwtVcJsonWalletResponseTransport.PostResponseFormAsync(
+                requestJwt, body, Callback, http, _verifier.Did, Type, Context, _clock));
+        }
+    }
+
+
+    [Fact]
+    public async Task WalletAcceptsSuccessfulReceiptWithQuotedUtf8Charset()
+    {
+        var challenge = new InMemoryPresentationChallengeStore(_clock).IssueHosted(
+            Guid.NewGuid(), "decentralized_identifier:" + _verifier.Did, _issuer.Did);
+        string signed = SignedRequest(challenge);
+        string body = HolderBoundForm(signed);
+        using var handler = new ProbeHandler(_ =>
+        {
+            var receipt = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{}", Encoding.UTF8, "application/json")
+            };
+            receipt.Content.Headers.ContentType =
+                System.Net.Http.Headers.MediaTypeHeaderValue.Parse(
+                    "application/json; charset=\"utf-8\"");
+            return receipt;
+        });
+        using var http = new HttpClient(handler);
+        Assert.True(await OpenId4VpJwtVcJsonWalletResponseTransport.PostResponseFormAsync(
+            signed, body, Callback, http, _verifier.Did, Type, Context, _clock));
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Fact]
+    public void IsolatedDirectPostHandlerRejectsAmbientCredentialsAndTracePropagation()
+    {
+        using var activity = new System.Diagnostics.Activity("secret-wallet-tenant");
+        activity.SetIdFormat(System.Diagnostics.ActivityIdFormat.W3C);
+        activity.AddBaggage("private-tenant", "internal-account-name");
+        activity.Start();
+        using var handler =
+            OpenId4VpJwtVcJsonWalletResponseTransport.CreateIsolatedDirectPostHandler();
+        Assert.Null(handler.ActivityHeadersPropagator);
+        Assert.False(handler.AllowAutoRedirect);
+        Assert.False(handler.UseCookies);
+        Assert.False(handler.UseProxy);
+        Assert.Null(handler.Credentials);
+        Assert.Null(handler.DefaultProxyCredentials);
+        Assert.False(handler.PreAuthenticate);
+        Assert.Equal(DecompressionMethods.None, handler.AutomaticDecompression);
+        Assert.Equal(System.Security.Cryptography.X509Certificates.X509RevocationMode.Online,
+            handler.SslOptions.CertificateRevocationCheckMode);
+        Assert.Null(handler.SslOptions.RemoteCertificateValidationCallback);
+        Assert.Null(handler.SslOptions.ClientCertificates);
+        Assert.Null(handler.SslOptions.LocalCertificateSelectionCallback);
+    }
+
+    [Fact]
+    public async Task IsolatedDirectPostHandlerDoesNotLeakActivityHeadersToRealLoopbackHttp()
+    {
+        // Exercise .NET's actual SocketsHttpHandler diagnostics pipeline, not a
+        // fake HttpMessageHandler that would miss injected trace/baggage headers.
+        using var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        using var activity = new System.Diagnostics.Activity("wallet-sensitive-flow");
+        activity.SetIdFormat(System.Diagnostics.ActivityIdFormat.W3C);
+        activity.AddBaggage("tenant", "private-account-identifier");
+        activity.Start();
+        using var handler =
+            OpenId4VpJwtVcJsonWalletResponseTransport.CreateIsolatedDirectPostHandler();
+        using var http = new HttpClient(handler);
+        // Start request before accepting the TCP connection. Await both the
+        // real HTTP call and the server before leaving the using scopes.
+        Task<HttpResponseMessage> requestTask = http.GetAsync(
+            new Uri($"http://127.0.0.1:{port}/probe"), cancellation.Token);
+        string received = await ReadHeadersAndReplyAsync(
+            listener, cancellation.Token).ConfigureAwait(true);
+        using var response = await requestTask.ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.DoesNotContain("traceparent:", received, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("tracestate:", received, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("baggage:", received, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("private-account-identifier", received, StringComparison.Ordinal);
+        listener.Stop();
+    }
+
+    private static async Task<string> ReadHeadersAndReplyAsync(
+        System.Net.Sockets.TcpListener listener, CancellationToken cancellationToken)
+    {
+        using var connection = await listener.AcceptTcpClientAsync(cancellationToken).ConfigureAwait(false);
+        using var stream = connection.GetStream();
+        using var reader = new StreamReader(stream, Encoding.ASCII, leaveOpen: true);
+        var headers = new List<string>();
+        while (true)
+        {
+            string? line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+            if (line is null || line.Length == 0)
+            {
+                break;
+            }
+
+            headers.Add(line);
+        }
+
+        byte[] response = Encoding.ASCII.GetBytes(
+            "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        await stream.WriteAsync(response, cancellationToken).ConfigureAwait(false);
+        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        return string.Join("\n", headers);
+    }
+
+    private string HolderBoundForm(string requestJwt)
+    {
+        using var subject = System.Text.Json.JsonDocument.Parse(
+            System.Text.Json.JsonSerializer.Serialize(new
+            {
+                id = _holder.Did,
+                membership = "active"
+            }));
+        string credential = JwtVcJsonCredential.Create(_issuer.Did, _holder.Did, Type,
+            Context, subject.RootElement, _issuer.Seed, _clock.GetUtcNow().AddSeconds(-5),
+            _clock.GetUtcNow().AddMinutes(5));
+        return OpenId4VpJwtVcJsonDirectPost.CreateHolderBoundResponseForm(
+            requestJwt, _verifier.Did, Callback, Type, Context,
+            credential, _holder.Did, _holder.Seed, _clock);
+    }
+
     private string SignedRequest(PresentationChallenge challenge) =>
         OpenId4VpJwtVcJsonDirectPost.CreateSignedRequest(
             challenge, _verifier.Did, _verifier.Seed, Callback, Type, Context, _clock);
