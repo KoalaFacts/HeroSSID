@@ -320,6 +320,29 @@ public sealed class JwtVcJsonDirectPostRevocationTests
         Assert.Equal(JsonValueKind.Undefined, denied.ValueKind);
     }
 
+    [Fact]
+    public void FractionalSecondIncidentCutoffCannotBeRoundedBackwards()
+    {
+        string oldStatus = Snapshot([]);
+        _clock.Advance(TimeSpan.FromMilliseconds(500));
+        DateTimeOffset cutoff = _clock.GetUtcNow();
+        Guid tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, _issuer.Did);
+        string original = Request(challenge);
+        string form = BoundForm(original, Issue("active"));
+        string sameSecondStatus = Snapshot([]);
+
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            CheckBoundWithCutoff(form, oldStatus, original, Pin(original),
+                tenant, challenge.Nonce, store, cutoff, out var denied));
+        Assert.Equal(JsonValueKind.Undefined, denied.ValueKind);
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            CheckBoundWithCutoff(form, sameSecondStatus, original, Pin(original),
+                tenant, challenge.Nonce, store, cutoff, out var replay));
+        Assert.Equal(JsonValueKind.Undefined, replay.ValueKind);
+    }
+
     private RevocationSnapshotCheckResult CheckBoundWithCutoff(
         string form, string status, string request, string pin, Guid tenant,
         string nonce, IPresentationChallengeStore store, DateTimeOffset cutoff,
