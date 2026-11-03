@@ -132,11 +132,11 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
             challenge, _verifier.Did, _verifier.Seed, Callback, Type, Context, _clock);
 
     private string ByReferenceLaunch(string requestJwt) =>
-        TestOnlyRequestUriAdapter.Create(requestJwt, RequestUri, _verifier.Did,
+        OpenId4VpJwtVcJsonRequestUri.CreateWalletInvocation(requestJwt, RequestUri, _verifier.Did,
             Callback, Type, Context, _clock);
 
     private Task<string?> Resolve(string launch, Uri independentlyTrustedUri, HttpClient http) =>
-        TestOnlyRequestUriAdapter.FetchAsync(launch, independentlyTrustedUri, http,
+        OpenId4VpJwtVcJsonRequestUri.FetchVerifiedRequestAsync(launch, independentlyTrustedUri, http,
             _verifier.Did, Callback, Type, Context, _clock);
 
     private static HttpResponseMessage JwtResponse(string request) =>
@@ -176,17 +176,4 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
         }
     }
 
-    // Tests-only stub: proves genuine xUnit runtime failure, not a compiler error.
-    // Replace with the public SDK adapter after observing the red run.
-    private static class TestOnlyRequestUriAdapter
-    {
-        public static string Create(string requestJwt, Uri requestUri, string verifierDid,
-            Uri callback, string type, Uri context, TimeProvider clock) =>
-            throw new NotSupportedException("Request URI GET not implemented");
-
-        public static Task<string?> FetchAsync(string launch, Uri requestUri,
-            HttpClient http, string verifierDid, Uri callback, string type,
-            Uri context, TimeProvider clock) =>
-            throw new NotSupportedException("Request URI GET not implemented");
-    }
 }
