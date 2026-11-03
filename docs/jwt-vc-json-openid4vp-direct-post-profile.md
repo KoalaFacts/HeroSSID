@@ -59,9 +59,9 @@ This authenticates the original verifier's Ed25519 Request Object, the
 context, checks that the form has the original challenge's canonical state,
 and submits the unchanged URL-encoded VP body as
 `application/x-www-form-urlencoded` with POST. The SDK's safe default
-creates its own short-lived `HttpClientHandler`: no redirects, cookies,
+creates its own short-lived `SocketsHttpHandler`: no redirects, cookies,
 proxy, automatic credentials, client TLS certificate selection or automatic
-decompression; normal TLS server verification and certificate revocation
+decompression or W3C Activity header/baggage propagation; normal TLS server verification and certificate revocation
 checks are retained. There is a 15-second default whole-response deadline
 (maximum 30 seconds), 180,000-byte maximum form and 4,096-byte maximum JSON
 receipt. Only HTTP 200 with a bounded JSON object from the exact callback
