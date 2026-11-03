@@ -367,21 +367,60 @@ public static class JwtVcJsonCredential
     private static bool HasMatchingXmlDateTime(JsonElement vc, string name, long signedEpoch)
     {
         if (!StrictJwtReader.TryGetString(vc, name, out string dateTime) ||
-            dateTime.Length > 64 ||
-            // XML Schema permits time zone offsets as well as Z, but an
-            // unspecified local zone cannot map unambiguously to JWT NumericDate.
-            !(dateTime.EndsWith('Z') ||
-                (dateTime.Length >= 6 &&
-                    (dateTime[^6] == '+' || dateTime[^6] == '-') &&
-                    dateTime[^3] == ':')))
+            dateTime.Length > 64 || dateTime.Length < 20)
+        {
+            return false;
+        }
+
+        // XmlConvert's AllXsd parser also accepts date-only values, which
+        // must not be confused with VC1.1's required xsd:dateTime lexical
+        // form. Check a *complete* calendar date, time and explicit zone first.
+        ReadOnlySpan<char> value = dateTime.AsSpan();
+        bool utc = value[^1] == 'Z';
+        int zoneLength = utc ? 1 : 6;
+        int end = value.Length - zoneLength;
+        if (end < 19 ||
+            (utc ? value[^1] != 'Z' :
+                (value[^6] != '+' && value[^6] != '-') || value[^3] != ':' ||
+                !AllAsciiDigits(value.Slice(value.Length - 5, 2)) ||
+                !AllAsciiDigits(value.Slice(value.Length - 2, 2))) ||
+            value[4] != '-' || value[7] != '-' || value[10] != 'T' ||
+            value[13] != ':' || value[16] != ':' ||
+            !AllAsciiDigits(value[..4]) ||
+            !AllAsciiDigits(value.Slice(5, 2)) ||
+            !AllAsciiDigits(value.Slice(8, 2)) ||
+            !AllAsciiDigits(value.Slice(11, 2)) ||
+            !AllAsciiDigits(value.Slice(14, 2)) ||
+            !AllAsciiDigits(value.Slice(17, 2)) ||
+            // The signed JWT NumericDate has whole-second precision.
+            // Never allow XmlConvert to round a nonzero sub-tick fraction
+            // into equality with that authenticated instant.
+            (end > 19 &&
+                (value[19] != '.' || end == 20 ||
+                 !AllZeroDigits(value.Slice(20, end - 20)))))
+        {
+            return false;
+        }
+
+        bool isEndOfDay = value[11] == '2' && value[12] == '4';
+        if (isEndOfDay &&
+            (value[14] != '0' || value[15] != '0' ||
+             value[17] != '0' || value[18] != '0'))
         {
             return false;
         }
 
         try
         {
-            return System.Xml.XmlConvert.ToDateTimeOffset(dateTime) ==
-                DateTimeOffset.FromUnixTimeSeconds(signedEpoch);
+            // XML Schema 1.1 permits 24:00:00 to denote the following
+            // midnight. XmlConvert rejects this valid lexical representation;
+            // normalize only this exact end-of-day case, then apply the offset.
+            DateTimeOffset parsed = isEndOfDay
+                ? System.Xml.XmlConvert.ToDateTimeOffset(
+                    string.Concat(dateTime.AsSpan(0, 11), "00",
+                        dateTime.AsSpan(13))).AddDays(1)
+                : System.Xml.XmlConvert.ToDateTimeOffset(dateTime);
+            return parsed == DateTimeOffset.FromUnixTimeSeconds(signedEpoch);
         }
         catch (FormatException)
         {
@@ -391,6 +430,32 @@ public static class JwtVcJsonCredential
         {
             return false;
         }
+    }
+
+    private static bool AllAsciiDigits(ReadOnlySpan<char> value)
+    {
+        foreach (char digit in value)
+        {
+            if (digit is < '0' or > '9')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool AllZeroDigits(ReadOnlySpan<char> value)
+    {
+        foreach (char digit in value)
+        {
+            if (digit != '0')
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool HasExactArray(JsonElement element, string name, string first, string second)

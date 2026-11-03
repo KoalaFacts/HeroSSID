@@ -15,7 +15,7 @@ namespace HeroSSID.Credentials.Tests;
 /// </summary>
 public sealed class JwtVcJsonEmbeddedMetadataTests
 {
-    private static readonly DateTimeOffset Now = new(2026, 11, 4, 1, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset Now = new(2026, 11, 4, 0, 5, 0, TimeSpan.Zero);
     private const string CredentialType = "MembershipCredential";
     private const string CredentialId = "https://issuer.example/credentials/member-123";
     private static readonly Uri Vocabulary = new("https://issuer.example/context/membership/v1");
@@ -56,6 +56,8 @@ public sealed class JwtVcJsonEmbeddedMetadataTests
     [InlineData("unbound-extra-property")]
     [InlineData("legacy-header")]
     [InlineData("wrong-signature")]
+    [InlineData("date-only-midnight")]
+    [InlineData("subtick-fraction")]
     public void ConflictingOrUnpinnedEmbeddedClaimsNeverReleaseSubject(
         string variant)
     {
@@ -67,6 +69,22 @@ public sealed class JwtVcJsonEmbeddedMetadataTests
         Assert.Throws<CryptographicException>(() =>
             JwtVcJsonRevocationSnapshot.Create(_issuer.Did, [jwt],
                 _issuer.Seed, Now, new FixedClock(Now)));
+    }
+
+    [Theory]
+    [InlineData("end-of-day")]
+    [InlineData("timezone-offset")]
+    [InlineData("zero-fraction")]
+    public void IndependentIssuerAcceptsExactlyEquivalentXmlDateTimeLexicalForms(string variant)
+    {
+        string jwt = SignExternal(variant: variant);
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out var claims));
+        Assert.Equal("active", claims.GetProperty("membership").GetString());
+        string revoked = JwtVcJsonRevocationSnapshot.Create(_issuer.Did, [jwt],
+            _issuer.Seed, Now, new FixedClock(Now));
+        Assert.Equal(RevocationSnapshotCheckResult.Revoked,
+            JwtVcJsonRevocationSnapshot.Check(revoked, jwt, _issuer.Did, Now));
     }
 
     [Fact]
@@ -83,7 +101,9 @@ public sealed class JwtVcJsonEmbeddedMetadataTests
 
     private string SignExternal(bool issuerAsObject = false, string? variant = null)
     {
-        long notBefore = Now.AddMinutes(-1).ToUnixTimeSeconds();
+        long notBefore = variant is "end-of-day" or "date-only-midnight"
+            ? Now.AddMinutes(-5).ToUnixTimeSeconds()
+            : Now.AddMinutes(-1).ToUnixTimeSeconds();
         long expires = Now.AddMinutes(5).ToUnixTimeSeconds();
         var vc = new Dictionary<string, object>(StringComparer.Ordinal)
         {
@@ -130,6 +150,27 @@ public sealed class JwtVcJsonEmbeddedMetadataTests
                 break;
             case "unbound-extra-property":
                 vc["credentialStatus"] = new { id = "https://evil.example/status/1" };
+                break;
+            case "date-only-midnight":
+                vc["issuanceDate"] = "2026-11-04Z";
+                break;
+            case "subtick-fraction":
+                vc["issuanceDate"] = DateTimeOffset.FromUnixTimeSeconds(notBefore)
+                    .ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture) +
+                    ".000000001Z";
+                break;
+            case "end-of-day":
+                vc["issuanceDate"] = "2026-11-03T24:00:00Z";
+                break;
+            case "timezone-offset":
+                vc["issuanceDate"] = DateTimeOffset.FromUnixTimeSeconds(notBefore)
+                    .ToOffset(TimeSpan.FromHours(11))
+                    .ToString("yyyy-MM-dd'T'HH:mm:sszzz", CultureInfo.InvariantCulture);
+                break;
+            case "zero-fraction":
+                vc["issuanceDate"] = DateTimeOffset.FromUnixTimeSeconds(notBefore)
+                    .ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture) +
+                    ".000000000Z";
                 break;
         }
 
