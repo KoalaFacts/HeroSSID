@@ -363,8 +363,94 @@ public sealed class JwtVcJsonCredentialTests
             JwtVcJsonRevocationSnapshot.Check(clean, jwt, _other.Did, Now));
     }
 
+    [Fact]
+    public void IndependentVc11JwtCanRepresentHolderIdOnlyInSignedSubClaim()
+    {
+        // VC Data Model 1.1 REC 6.3.1 maps credentialSubject.id to sub.
+        // A standards-shaped external issuer need not duplicate this field in vc.
+        // The holder DID still comes from an independently pinned expectation,
+        // not an arbitrary unverified claim in the incoming JWT.
+        string jwt = SignExternalJwt(null,
+            "https://issuer.example/credentials/sub-only", "JWT",
+            includeKid: false, omitSubjectId: true);
+
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out JsonElement claims));
+        Assert.False(claims.TryGetProperty("id", out _));
+        Assert.Equal("active", claims.GetProperty("membership").GetString());
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _other.Did,
+            CredentialType, Vocabulary, Now, out JsonElement foreign));
+        Assert.Equal(JsonValueKind.Undefined, foreign.ValueKind);
+
+        string[] segments = jwt.Split('.');
+        segments[1] = Base64UrlEncoder.Encode(
+            Base64UrlEncoder.DecodeString(segments[1]).Replace(
+                "active", "admin", StringComparison.Ordinal));
+        Assert.False(JwtVcJsonCredential.TryVerify(string.Join('.', segments),
+            _issuer.Did, _holder.Did, CredentialType, Vocabulary, Now, out _));
+    }
+
+    [Fact]
+    public void IndependentVc11JwtWithSubOnlyCanBeRevokedUsingOriginalIssuerSignature()
+    {
+        string jwt = SignExternalJwt(null,
+            "https://issuer.example/credentials/sub-only-revoked", "JWT",
+            includeKid: false, omitSubjectId: true);
+        var clock = new FixedClock(Now);
+        string revoked = JwtVcJsonRevocationSnapshot.Create(
+            _issuer.Did, [jwt], _issuer.Seed, Now, clock);
+        Assert.Equal(RevocationSnapshotCheckResult.Revoked,
+            JwtVcJsonRevocationSnapshot.Check(revoked, jwt, _issuer.Did, Now));
+        string clean = JwtVcJsonRevocationSnapshot.Create(
+            _issuer.Did, [], _issuer.Seed, Now, clock);
+        Assert.Equal(RevocationSnapshotCheckResult.NotListed,
+            JwtVcJsonRevocationSnapshot.Check(clean, jwt, _issuer.Did, Now));
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            JwtVcJsonRevocationSnapshot.Check(clean, jwt, _other.Did, Now));
+    }
+
+    [Fact]
+    public void ConflictingExplicitSubjectIdCannotBeReplacedByJwtSub()
+    {
+        string jwt = SignExternalJwt(null,
+            "https://issuer.example/credentials/sub-conflict", "JWT",
+            omitSubjectId: false, subjectIdOverride: _other.Did);
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out var claims));
+        Assert.Equal(JsonValueKind.Undefined, claims.ValueKind);
+        Assert.Throws<CryptographicException>(() =>
+            JwtVcJsonRevocationSnapshot.Create(_issuer.Did, [jwt],
+                _issuer.Seed, Now, new FixedClock(Now)));
+    }
+
+    [Fact]
+    public void LegacyVcJwtCannotOmitSubjectIdOrBypassPinnedHolder()
+    {
+        // The sub-only VC1.1 mapping is intentionally limited to typ=JWT.
+        string legacy = SignExternalJwt(null,
+            "https://issuer.example/credentials/legacy-sub-only", "vc+jwt",
+            omitSubjectId: true);
+        Assert.False(JwtVcJsonCredential.TryVerify(legacy, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out _));
+        Assert.Throws<CryptographicException>(() =>
+            JwtVcJsonRevocationSnapshot.Create(_issuer.Did, [legacy],
+                _issuer.Seed, Now, new FixedClock(Now)));
+
+        // Even a correctly signed normative JWT cannot hide a present
+        // but empty nested identifier behind its valid signed sub.
+        string emptyId = SignExternalJwt(null,
+            "https://issuer.example/credentials/empty-sub-id", "JWT",
+            subjectIdOverride: string.Empty);
+        Assert.False(JwtVcJsonCredential.TryVerify(emptyId, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out _));
+        Assert.Throws<CryptographicException>(() =>
+            JwtVcJsonRevocationSnapshot.Create(_issuer.Did, [emptyId],
+                _issuer.Seed, Now, new FixedClock(Now)));
+    }
+
     private string SignExternalJwt(long? signatureIssuedAt, string credentialId,
-        string tokenType = "vc+jwt", bool includeKid = true, string? headerKidOverride = null)
+        string tokenType = "vc+jwt", bool includeKid = true, string? headerKidOverride = null,
+        bool omitSubjectId = false, string? subjectIdOverride = null)
     {
         string kid = _issuer.Did + "#" + _issuer.Did["did:key:".Length..];
         string header = includeKid
@@ -384,7 +470,9 @@ public sealed class JwtVcJsonCredentialTests
                 ["@context"] = new[] { "https://www.w3.org/2018/credentials/v1",
                     Vocabulary.AbsoluteUri },
                 ["type"] = new[] { "VerifiableCredential", CredentialType },
-                ["credentialSubject"] = new { id = _holder.Did, membership = "active" }
+                ["credentialSubject"] = omitSubjectId
+                    ? new { membership = "active" }
+                    : (object)new { id = subjectIdOverride ?? _holder.Did, membership = "active" }
             }
         };
         if (signatureIssuedAt is long issued)
