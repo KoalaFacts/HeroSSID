@@ -156,6 +156,8 @@ Authorized cancellation now also immediately retires the matching volatile
 Request Object by exact tenant, verifier audience and nonce. This releases
 host capacity without waiting for its JWT expiry; unrelated active requests
 remain available. Recovery applies to the publishing process only. It does
-not change the independent PostgreSQL challenge or make the host distributed. It is **not** independent
+not change the independent PostgreSQL challenge or make the host distributed.
+
+Neither the HTTP integration suite nor this fix establishes independent
 Wallet interoperability, a full OpenID4VP conformance test, user consent,
 live non-revocation, personal identity proof or business authorization.
