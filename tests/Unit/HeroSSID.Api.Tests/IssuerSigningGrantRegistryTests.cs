@@ -110,6 +110,38 @@ public sealed class IssuerSigningGrantRegistryTests
     }
 
     [Fact]
+    public void MalformedSubjectClaimGrantPolicyFailsStartup()
+    {
+        using var issuer = Key.Create(SignatureAlgorithm.Ed25519);
+        string did = DidFromKey(issuer);
+
+        var duplicate = Entries(did);
+        duplicate["IssuerSigningGrants:Grants:0:SubjectClaimNames:0"] = "membership";
+        duplicate["IssuerSigningGrants:Grants:0:SubjectClaimNames:1"] = "membership";
+        Assert.Throws<InvalidOperationException>(() => Registry(duplicate));
+
+        var empty = Entries(did);
+        empty["IssuerSigningGrants:Grants:0:SubjectClaimNames:0"] = "";
+        Assert.Throws<InvalidOperationException>(() => Registry(empty));
+
+        var nested = Entries(did);
+        nested["IssuerSigningGrants:Grants:0:SubjectClaimNames:0:Injected"] = "admin";
+        Assert.Throws<InvalidOperationException>(() => Registry(nested));
+
+        var unsafeName = Entries(did);
+        unsafeName["IssuerSigningGrants:Grants:0:SubjectClaimNames:0"] = "@context";
+        Assert.Throws<InvalidOperationException>(() => Registry(unsafeName));
+
+        var oversized = Entries(did);
+        for (int index = 0; index < 33; index++)
+        {
+            oversized[$"IssuerSigningGrants:Grants:0:SubjectClaimNames:{index}"] =
+                $"Claim{index}";
+        }
+        Assert.Throws<InvalidOperationException>(() => Registry(oversized));
+    }
+
+    [Fact]
     public void MalformedOrOrphanedOrDuplicateSecurityPolicyFailsStartup()
     {
         using var issuer = Key.Create(SignatureAlgorithm.Ed25519);

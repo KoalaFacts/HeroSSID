@@ -106,3 +106,49 @@ This does not inspect or approve the truth, value or allowed fields of the
 **not** the receiving application's business authorization, verified human
 identity, holder control, user consent, credential revocation, or external
 wallet conformance. Operators must synchronize policy across every replica.
+
+
+## Optional top-level credential subject claim-name restriction
+
+Even an approved issuer client holding a permitted signing key and an allowed
+credential type can otherwise include arbitrary subject property names.
+Operators may opt into a separate **top-level** claim-name allowlist for each
+exact tenant + OAuth client + issuer DID grant:
+
+```json
+{
+  "IssuerSigningGrants": {
+    "EnforcedTenants": ["11111111-1111-1111-1111-111111111111"],
+    "Grants": [{
+      "TenantId": "11111111-1111-1111-1111-111111111111",
+      "ClientId": "membership-issuer",
+      "IssuerDid": "did:key:z6Mkj...",
+      "CredentialTypes": ["MembershipCredential"],
+      "SubjectClaimNames": ["membership", "memberSince"]
+    }]
+  }
+}
+```
+
+The DID above is illustrative; use the exact independently approved canonical
+Ed25519 `did:key`. The optional `SubjectClaimNames` setting accepts 1–32
+unique case-sensitive names of 1–64 Unicode letters/digits, underscore or
+hyphen, starting with a letter. Empty, duplicate, sparse, nested, unknown or
+oversized configuration fails host startup. The allowlist is checked **before**
+issuer lookup, private-key access, signing and persistence on all three HTTP
+issuance routes. An unapproved field produces 404 without a signed JWT.
+For VC1.1 and VC2 the `credentialSubject.id` holder identifier is intrinsic
+and separately checked against the actual holder DID by the format signer;
+it need not be enrolled in `SubjectClaimNames`. Legacy JWT `claims.id`
+requires explicit enrollment like other legacy claim names. An absent
+`SubjectClaimNames` list preserves the previous client/issuer/type grant.
+
+**Boundary:** this only limits property **names at the first subject level**.
+It does not restrict values, nested object contents, semantic equivalence,
+user-created vocabulary, truthfulness, context definitions or downstream
+authorization. A malicious client could still place misleading information
+inside an approved field; operators should approve narrow credential types
+and rely on separate claim schema/value validation where required. It does not
+prove real identity, holder private-key control, consent, status freshness or
+third-party wallet interoperability. Synchronize the trusted host policy
+across replicas.
