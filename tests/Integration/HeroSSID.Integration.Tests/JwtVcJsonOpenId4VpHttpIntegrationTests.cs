@@ -77,6 +77,21 @@ public sealed class JwtVcJsonOpenId4VpHttpIntegrationTests(DatabaseFixture fixtu
             signed, verifierDid, new Uri(ResponseUri), TypeIri, Context, credential,
             holderDid, holderSeed, TimeProvider.System);
 
+        // A published original request must not be bypassed via the legacy,
+        // unbound verification route. A malicious caller with verification
+        // scope must not receive claims or spend the live hosted challenge.
+        using var legacyDowngrade = await PostAsync(client, VerifyRoute, new
+        {
+            verifierDid, nonce, form = unbound, revocationSnapshot = status,
+            expectedCredentialType = TypeIri, subjectContextUri = Context.AbsoluteUri
+        }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, legacyDowngrade.StatusCode);
+        var legacyDowngradeBody = await legacyDowngrade.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Equal("Invalid", legacyDowngradeBody.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null,
+            legacyDowngradeBody.GetProperty("verifiedSubject").ValueKind);
+
         using var rejected = await PostAsync(client, HostedVerifyRoute, new
         {
             verifierDid, nonce, form = unbound, revocationSnapshot = status,
