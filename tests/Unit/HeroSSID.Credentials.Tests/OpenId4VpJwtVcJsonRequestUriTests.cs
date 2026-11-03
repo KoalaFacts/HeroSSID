@@ -473,6 +473,81 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
         return string.Join("\n", headers);
     }
 
+    [Fact]
+    public async Task PinnedBaseResolvesOpaqueRequestAndAuthenticatesSignedVerifier()
+    {
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.IssueHosted(Guid.NewGuid(),
+            "decentralized_identifier:" + _verifier.Did, _issuer.Did);
+        string jwt = SignedRequest(challenge);
+        var trustedBase = new Uri("https://verifier.example/oid4vp/requests/");
+        var runtimeUri = new Uri(trustedBase, new string('a', 43));
+        string launch = OpenId4VpJwtVcJsonRequestUri.CreateWalletInvocation(
+            jwt, runtimeUri, _verifier.Did, Callback, Type, Context, _clock);
+
+        using var handler = new ProbeHandler(request =>
+        {
+            Assert.Equal(runtimeUri, request.RequestUri);
+            Assert.Equal(HttpMethod.Get, request.Method);
+            return JwtResponse(jwt);
+        });
+        using var http = new HttpClient(handler);
+        Assert.Equal(jwt, await OpenId4VpJwtVcJsonRequestUri.FetchVerifiedRequestFromTrustedBaseAsync(
+            launch, trustedBase, http, _verifier.Did, Callback, Type, Context, _clock));
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Fact]
+    public async Task PinnedBaseRejectsUntrustedHostAndSiblingPathWithoutNetwork()
+    {
+        var challenge = new InMemoryPresentationChallengeStore(_clock).IssueHosted(
+            Guid.NewGuid(), "decentralized_identifier:" + _verifier.Did, _issuer.Did);
+        string jwt = SignedRequest(challenge);
+        var trustedBase = new Uri("https://verifier.example/oid4vp/requests/");
+        var otherHost = new Uri("https://evil.example/oid4vp/requests/" + new string('a', 43));
+        var siblingPath = new Uri("https://verifier.example/oid4vp/other/" + new string('a', 43));
+        using var handler = new ProbeHandler(_ => JwtResponse(jwt));
+        using var http = new HttpClient(handler);
+
+        foreach (Uri badUri in new[] { otherHost, siblingPath })
+        {
+            string launch = OpenId4VpJwtVcJsonRequestUri.CreateWalletInvocation(
+                jwt, badUri, _verifier.Did, Callback, Type, Context, _clock);
+            Assert.Null(await OpenId4VpJwtVcJsonRequestUri.FetchVerifiedRequestFromTrustedBaseAsync(
+                launch, trustedBase, http, _verifier.Did, Callback, Type, Context, _clock));
+        }
+        Assert.Equal(0, handler.Calls);
+    }
+
+    [Fact]
+    public async Task PinnedBaseRejectsMalformedOpaqueReferencesAndExtraQueryBeforeNetwork()
+    {
+        var challenge = new InMemoryPresentationChallengeStore(_clock).IssueHosted(
+            Guid.NewGuid(), "decentralized_identifier:" + _verifier.Did, _issuer.Did);
+        string jwt = SignedRequest(challenge);
+        var trustedBase = new Uri("https://verifier.example/oid4vp/requests/");
+        var runtimeUri = new Uri(trustedBase, new string('a', 43));
+        string launch = OpenId4VpJwtVcJsonRequestUri.CreateWalletInvocation(
+            jwt, runtimeUri, _verifier.Did, Callback, Type, Context, _clock);
+        using var handler = new ProbeHandler(_ => JwtResponse(jwt));
+        using var http = new HttpClient(handler);
+
+        foreach (string bad in new[]
+        {
+            launch + "&request_uri=duplicate",
+            launch + "#fragment",
+            launch[..^1],
+            launch[..^1] + "%2F",
+            launch.Replace("request_uri=", "request_uri=%25", StringComparison.Ordinal),
+            launch.Replace("client_id=", "client_id=evil&client_id=", StringComparison.Ordinal)
+        })
+        {
+            Assert.Null(await OpenId4VpJwtVcJsonRequestUri.FetchVerifiedRequestFromTrustedBaseAsync(
+                bad, trustedBase, http, _verifier.Did, Callback, Type, Context, _clock));
+        }
+        Assert.Equal(0, handler.Calls);
+    }
+
     private string HolderBoundForm(string requestJwt)
     {
         using var subject = System.Text.Json.JsonDocument.Parse(
