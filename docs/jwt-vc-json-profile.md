@@ -13,6 +13,46 @@ This is a **real issuer-signed JWT VC 1.1 credential** intended for the OpenID4V
 - signed `vc.@context=["https://www.w3.org/2018/credentials/v1", pinnedVersionedHttpsVocabulary]` (not `vc.context`), `vc.type=["VerifiableCredential", expectedType]` and `vc.credentialSubject.id=holderDid`;
 - a **15-minute maximum** encoded validity interval, a bounded subject and a bounded JWT. Normal `DateTimeOffset` fractional-second arguments are accepted: `iat` and `nbf` round **up** to the next whole second, and `exp` rounds **down**, so the JWT cannot be valid before the requested start or at/after the requested end. An interval that becomes empty, or exceeds 900 encoded seconds, is rejected. Near-second boundaries can shorten the usable interval by up to almost two seconds.
 
+### Issuer-assigned signed credential identifiers (opt-in)
+
+The original eight-argument `JwtVcJsonCredential.Create` contract is preserved and
+continues issuing credentials **without** a `jti`. For applications that need
+a portable identifier, the nine-argument overload adds a final
+`Uri credentialId`. It signs the issuer-supplied absolute HTTPS URI into
+the **original JWT `jti`** (VC1.1 §6.3.1's credential `id` mapping).
+The identifier is limited to 2,048 characters, cannot have URI userinfo,
+and undergoes the same bounded checks as an independently issued `jti`.
+Invalid HTTP, credential-bearing userinfo or oversized identifiers fail at issuance;
+the normal genuine issuer-DID Ed25519 signature and validity checks still apply.
+
+The separate `TryVerify(..., out JsonElement verifiedSubject,
+out string? verifiedCredentialId)` overload returns the **exact signed `jti`
+string only after** successful pinned issuer, holder, signature, vocabulary,
+type and time validation. It returns `null` if the authentic VC contains no
+`jti`, and returns both outputs empty/default on any failure.
+This permits a relying party to correlate an issuer statement without
+reinterpreting unsigned request metadata. Neither HeroSSID nor callers
+should dereference `jti` as a side effect of verification; a syntactically
+valid HTTPS URI does **not** establish issuer ownership of that domain,
+real-world identity, holder-key possession, revocation, consent or business
+authority. The URI comes from the issuer, **not** from a verifier's own
+trust policy or a standardized registry.
+
+```csharp
+// Independent issuer controls issuerSeed; verifier pins issuerDid separately.
+var credentialId = new Uri("https://issuer.example/credentials/member-123");
+string jwtWithId = JwtVcJsonCredential.Create(
+    issuerDid, holderDid, "MembershipCredential", vocabulary,
+    document.RootElement, issuerSeed, now.AddSeconds(-1),
+    now.AddMinutes(10), credentialId);
+
+// Verifier: only use the returned identifier after success.
+bool valid = JwtVcJsonCredential.TryVerify(jwtWithId,
+    trustedIssuerDid, expectedHolderDid, "MembershipCredential",
+    vocabulary, DateTimeOffset.UtcNow, out var verifiedClaims,
+    out string? verifiedCredentialId);
+```
+
 An independent verifier calls `JwtVcJsonCredential.TryVerify(jwt, trustedIssuerDid, expectedHolderDid, expectedCredentialType, expectedSubjectContextUri, clock, out claims)`. All policy parameters must be independently configured: **never use the credential's claimed issuer as its own trust anchor**. It checks the genuine Ed25519 signature under the **independently pinned issuer `did:key`**, and an exact matching `kid` **when present**, together with the bounded, unambiguous nested JSON structure, the expected holder/type/context, `nbf` and `exp` before returning any subject claims. Tampered, foreign, expired, premature, legacy/private and VC2-direct tokens fail closed. It does not network-fetch an arbitrary `@context` and does not perform JSON-LD expansion or semantic validation of the custom vocabulary; the relying party must have reviewed/pinned the specified context and vocabulary.
 
 ## Preventing subject-level vocabulary shadowing
