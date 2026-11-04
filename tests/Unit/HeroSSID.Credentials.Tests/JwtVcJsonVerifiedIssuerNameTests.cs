@@ -30,7 +30,7 @@ public sealed class JwtVcJsonVerifiedIssuerNameTests
 
         Assert.True(Verify(jwt, issuer.Did, holder.Did,
             out JsonElement claims, out string? id, out string? name));
-        Assert.Equal(true, claims.GetProperty("member").GetBoolean());
+        Assert.True(claims.GetProperty("member").GetBoolean());
         Assert.Equal(credentialId.AbsoluteUri, id);
         Assert.Equal("Membership Office", name);
     }
@@ -52,7 +52,7 @@ public sealed class JwtVcJsonVerifiedIssuerNameTests
 
         Assert.True(Verify(unnamed, issuer.Did, holder.Did,
             out JsonElement unnamedClaims, out string? unnamedId, out string? unnamedName));
-        Assert.Equal(true, unnamedClaims.GetProperty("member").GetBoolean());
+        Assert.True(unnamedClaims.GetProperty("member").GetBoolean());
         Assert.Null(unnamedId);
         Assert.Null(unnamedName);
 
