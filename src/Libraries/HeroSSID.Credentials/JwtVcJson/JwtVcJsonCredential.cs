@@ -308,6 +308,27 @@ public static class JwtVcJsonCredential
             out verifiedSubject, out _, out _, out _, out _, expectedAudience);
     }
 
+    /// <summary>
+    /// Authenticate the original issuer-signed VC1.1 JWT with an independently
+    /// pinned HTTPS recipient, retaining signed validity for downstream caches.
+    /// This private credential audience restriction does not prove holder
+    /// possession, consent, recipient identity or business authorization.
+    /// All outputs are reset on false.
+    /// </summary>
+    public static bool TryVerifyForAudienceWithValidity(string jwt, string trustedIssuerDid,
+        string expectedHolderDid, string expectedCredentialType,
+        Uri expectedSubjectContextUri, Uri expectedAudience, DateTimeOffset now,
+        out JsonElement verifiedSubject, out string? verifiedCredentialId,
+        out string? verifiedIssuerName, out DateTimeOffset? verifiedNotBefore,
+        out DateTimeOffset? verifiedExpiresAt)
+    {
+        ArgumentNullException.ThrowIfNull(expectedAudience);
+        return TryVerifyCore(jwt, trustedIssuerDid, expectedHolderDid,
+            expectedCredentialType, expectedSubjectContextUri, now,
+            out verifiedSubject, out verifiedCredentialId, out verifiedIssuerName,
+            out verifiedNotBefore, out verifiedExpiresAt, expectedAudience);
+    }
+
     private static bool TryVerifyCore(string jwt, string trustedIssuerDid, string expectedHolderDid,
         string expectedCredentialType, Uri expectedSubjectContextUri,
         DateTimeOffset now, out JsonElement verifiedSubject, out string? verifiedCredentialId,

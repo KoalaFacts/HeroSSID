@@ -72,6 +72,145 @@ public sealed class JwtVcJsonAudienceHttpTests
         Assert.Equal(StatusCodes.Status400BadRequest, result.Status);
     }
 
+
+    [Fact]
+    public async Task AudienceAuthenticatedSignatureAndRecipientAreRequiredBeforeClaimDisclosure()
+    {
+        var (seed, issuerDid) = NewIdentity();
+        var (_, holderDid) = NewIdentity();
+        var (_, foreignDid) = NewIdentity();
+        var subject = JsonSerializer.SerializeToElement(new { id = holderDid, membership = "active" });
+        string credential = JwtVcJsonCredential.CreateForAudience(issuerDid, holderDid,
+            CredentialType, Vocabulary, subject, seed, Now.AddMinutes(-1), Now.AddMinutes(5),
+            Audience);
+        var request = NewRequest(credential, issuerDid, holderDid, Audience);
+
+        var accepted = await ExecuteAsync(JwtVcJsonCredentialVerificationEndpoint.VerifyForAudience(
+            request, new FixedClock(Now))).ConfigureAwait(true);
+        Assert.Equal(StatusCodes.Status200OK, accepted.Status);
+        Assert.Equal("SignedButStatusUnchecked", accepted.Body.GetProperty("status").GetString());
+        Assert.Equal("active", accepted.Body.GetProperty("verifiedSubject")
+            .GetProperty("membership").GetString());
+        Assert.Equal(Now.AddMinutes(-1), accepted.Body.GetProperty("verifiedNotBefore")
+            .GetDateTimeOffset());
+        Assert.Equal(Now.AddMinutes(5), accepted.Body.GetProperty("verifiedExpiresAt")
+            .GetDateTimeOffset());
+
+        string unbound = JwtVcJsonCredential.Create(issuerDid, holderDid,
+            CredentialType, Vocabulary, subject, seed, Now.AddMinutes(-1), Now.AddMinutes(5));
+        string[] parts = credential.Split('.');
+        parts[1] = Base64UrlEncoder.Encode(Ed25519JwtSigner.ExtractPayload(credential)
+            .Replace("active", "administrator", StringComparison.Ordinal));
+        foreach (var denied in new[]
+        {
+            NewRequest(credential, issuerDid, holderDid, new Uri("https://stranger.example/rp")),
+            NewRequest(credential, foreignDid, holderDid, Audience),
+            NewRequest(credential, issuerDid, foreignDid, Audience),
+            NewRequest(unbound, issuerDid, holderDid, Audience),
+            NewRequest(string.Join('.', parts), issuerDid, holderDid, Audience)
+        })
+        {
+            var result = await ExecuteAsync(
+                JwtVcJsonCredentialVerificationEndpoint.VerifyForAudience(
+                    denied, new FixedClock(Now))).ConfigureAwait(true);
+            Assert.Equal("Invalid", result.Body.GetProperty("status").GetString());
+            Assert.Equal(JsonValueKind.Null, result.Body.GetProperty("verifiedSubject").ValueKind);
+            Assert.Equal(JsonValueKind.Null, result.Body.GetProperty("verifiedExpiresAt").ValueKind);
+        }
+
+        // The pre-existing no-audience route cannot accept a recipient-scoped JWT.
+        var old = await ExecuteAsync(JwtVcJsonCredentialVerificationEndpoint.Verify(
+            new VerifyJwtVcJsonCredentialRequest
+            {
+                Credential = credential, TrustedIssuerDid = issuerDid,
+                ExpectedHolderDid = holderDid, ExpectedCredentialType = CredentialType,
+                SubjectContextUri = Vocabulary
+            }, new FixedClock(Now))).ConfigureAwait(true);
+        Assert.Equal("Invalid", old.Body.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task RecipientStatusIsPinnedToActualIssuerAndDoesNotReleaseRevokedClaims()
+    {
+        var (seed, issuerDid) = NewIdentity();
+        var (_, holderDid) = NewIdentity();
+        var (foreignSeed, foreignDid) = NewIdentity();
+        var subject = JsonSerializer.SerializeToElement(new { id = holderDid, membership = "active" });
+        string credential = JwtVcJsonCredential.CreateForAudience(issuerDid, holderDid,
+            CredentialType, Vocabulary, subject, seed, Now.AddMinutes(-1), Now.AddMinutes(5),
+            Audience);
+        var clock = new FixedClock(Now);
+        string clean = JwtVcJsonRevocationSnapshot.Create(issuerDid, [], seed, Now, clock);
+        string revoked = JwtVcJsonRevocationSnapshot.Create(issuerDid, [credential],
+            seed, Now, clock);
+        string foreign = JwtVcJsonRevocationSnapshot.Create(foreignDid, [],
+            foreignSeed, Now, clock);
+
+        var accepted = await ExecuteAsync(
+            JwtVcJsonCredentialVerificationEndpoint.VerifyForAudienceWithStatus(
+                NewRequest(credential, issuerDid, holderDid, Audience, clean),
+                clock)).ConfigureAwait(true);
+        Assert.Equal("SignedNotListed", accepted.Body.GetProperty("status").GetString());
+        Assert.Equal("active", accepted.Body.GetProperty("verifiedSubject")
+            .GetProperty("membership").GetString());
+
+        foreach (var (snapshot, expected) in new[] { (revoked, "Revoked"), (foreign, "Invalid") })
+        {
+            var denied = await ExecuteAsync(
+                JwtVcJsonCredentialVerificationEndpoint.VerifyForAudienceWithStatus(
+                    NewRequest(credential, issuerDid, holderDid, Audience, snapshot),
+                    clock)).ConfigureAwait(true);
+            Assert.Equal(expected, denied.Body.GetProperty("status").GetString());
+            Assert.Equal(JsonValueKind.Null, denied.Body.GetProperty("verifiedSubject").ValueKind);
+            Assert.Equal(JsonValueKind.Null, denied.Body.GetProperty("verifiedNotBefore").ValueKind);
+        }
+
+        var stale = await ExecuteAsync(
+            JwtVcJsonCredentialVerificationEndpoint.VerifyForAudienceWithStatus(
+                NewRequest(credential, issuerDid, holderDid, Audience, clean,
+                    Now.AddTicks(1)), clock)).ConfigureAwait(true);
+        Assert.Equal(StatusCodes.Status400BadRequest, stale.Status);
+
+        var ignored = await ExecuteAsync(
+            JwtVcJsonCredentialVerificationEndpoint.VerifyForAudience(
+                NewRequest(credential, issuerDid, holderDid, Audience, clean),
+                clock)).ConfigureAwait(true);
+        Assert.Equal(StatusCodes.Status400BadRequest, ignored.Status);
+
+        var missing = await ExecuteAsync(
+            JwtVcJsonCredentialVerificationEndpoint.VerifyForAudience(
+                NewRequest(credential, issuerDid, holderDid, null),
+                clock)).ConfigureAwait(true);
+        Assert.Equal(StatusCodes.Status400BadRequest, missing.Status);
+
+        var missingStatus = await ExecuteAsync(
+            JwtVcJsonCredentialVerificationEndpoint.VerifyForAudienceWithStatus(
+                NewRequest(credential, issuerDid, holderDid, Audience), clock))
+            .ConfigureAwait(true);
+        Assert.Equal(StatusCodes.Status400BadRequest, missingStatus.Status);
+
+        var legacy = await ExecuteAsync(
+            JwtVcJsonCredentialVerificationEndpoint.VerifyWithStatus(
+                new VerifyJwtVcJsonCredentialWithStatusRequest
+                {
+                    Credential = credential, TrustedIssuerDid = issuerDid,
+                    ExpectedHolderDid = holderDid, ExpectedCredentialType = CredentialType,
+                    SubjectContextUri = Vocabulary, ExpectedAudience = Audience,
+                    RevocationSnapshot = clean
+                }, clock)).ConfigureAwait(true);
+        Assert.Equal(StatusCodes.Status400BadRequest, legacy.Status);
+    }
+
+    private static VerifyJwtVcJsonForAudienceRequest NewRequest(
+        string credential, string issuerDid, string holderDid, Uri? audience,
+        string? snapshot = null, DateTimeOffset? cutoff = null) => new()
+    {
+        Credential = credential, TrustedIssuerDid = issuerDid,
+        ExpectedHolderDid = holderDid, ExpectedCredentialType = CredentialType,
+        SubjectContextUri = Vocabulary, ExpectedAudience = audience,
+        RevocationSnapshot = snapshot, MinimumStatusObservedAt = cutoff
+    };
+
     private static async Task<(int Status, JsonElement Body)> ExecuteAsync(IResult result)
     {
         using var services = new ServiceCollection().AddLogging().BuildServiceProvider();
