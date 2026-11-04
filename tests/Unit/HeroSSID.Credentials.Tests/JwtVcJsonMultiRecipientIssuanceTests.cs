@@ -36,7 +36,7 @@ public sealed class JwtVcJsonMultiRecipientIssuanceTests
 
         using var document = JsonDocument.Parse(Ed25519JwtSigner.ExtractPayload(jwt));
         string[]? audience = document.RootElement.GetProperty("aud")
-            .EnumerateArray().Select(static item => item.GetString()).ToArray();
+            .EnumerateArray().Select(static item => item.GetString()!).ToArray();
         Assert.Equal([RecipientA.AbsoluteUri, RecipientB.AbsoluteUri], audience);
 
         Assert.True(JwtVcJsonCredential.TryVerifyForAudience(jwt, issuer.Did, holder.Did,
