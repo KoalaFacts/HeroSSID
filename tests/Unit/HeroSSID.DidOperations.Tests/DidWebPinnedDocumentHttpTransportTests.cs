@@ -196,6 +196,13 @@ public sealed class DidWebPinnedDocumentHttpTransportTests
     [InlineData("2001:db8::1", false)]
     [InlineData("3fff::1", false)]
     [InlineData("3fff:0fff::1", false)]
+    // 2001::/23 is reserved for IETF assignments and is not globally
+    // reachable by default; isolated HTTPS document GET fails closed for
+    // the entire range, including special-purpose public exceptions.
+    [InlineData("2001:0:ffff::1", false)]
+    [InlineData("2001:100::1", false)]
+    [InlineData("2001:1ff:ffff::1", false)]
+    [InlineData("2001:200::1", true)]
     [InlineData("2001::1", false)]
     [InlineData("2002:c0a8:0101::1", false)]
     [InlineData("2001:20::1", false)]
