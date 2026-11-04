@@ -1,6 +1,6 @@
 using System.Reflection;
-using System.Text;
 using System.Text.Json;
+using HeroSSID.Credentials.CredentialRevocation;
 using HeroSSID.Credentials.JwtVcJson;
 using HeroSSID.Credentials.Utilities;
 using NSec.Cryptography;
@@ -63,6 +63,79 @@ public sealed class JwtVcJsonExactValidityTests
         Assert.False(JwtVcJsonCredential.TryVerify(jwt, issuer.Did, holder.Did,
             CredentialType, Vocabulary, validUntil, out var expired));
         Assert.Equal(JsonValueKind.Undefined, expired.ValueKind);
+    }
+
+    [Fact]
+    public void ExactIssuerJtiAndOriginalSignatureRevocationPreserveIssuerTrustBoundary()
+    {
+        var issuer = NewIdentity();
+        var holder = NewIdentity();
+        var outsider = NewIdentity();
+        DateTimeOffset start = new(2026, 11, 4, 1, 0, 0, TimeSpan.Zero);
+        start = start.AddTicks(1_234_567);
+        DateTimeOffset end = start.AddMinutes(10).AddTicks(7);
+        var credentialId = new Uri("https://issuer.example/credentials/exact-123");
+        using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
+            new { membership = "active" }));
+        string jwt = JwtVcJsonCredential.CreateWithExactValidity(
+            issuer.Did, holder.Did, CredentialType, Vocabulary,
+            subject.RootElement, issuer.Seed, start, end, credentialId);
+
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, issuer.Did, holder.Did,
+            CredentialType, Vocabulary, start.AddSeconds(1), out var claims,
+            out string? signedIdentifier));
+        Assert.Equal(credentialId.AbsoluteUri, signedIdentifier);
+        Assert.Equal("active", claims.GetProperty("membership").GetString());
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, outsider.Did, holder.Did,
+            CredentialType, Vocabulary, start.AddSeconds(1), out var foreign,
+            out string? foreignIdentifier));
+        Assert.Equal(JsonValueKind.Undefined, foreign.ValueKind);
+        Assert.Null(foreignIdentifier);
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, issuer.Did, outsider.Did,
+            CredentialType, Vocabulary, start.AddSeconds(1), out _));
+
+        DateTimeOffset observedAt = start.AddSeconds(1);
+        string revoked = JwtVcJsonRevocationSnapshot.Create(
+            issuer.Did, [jwt], issuer.Seed, observedAt, new FixedClock(observedAt));
+        Assert.Equal(RevocationSnapshotCheckResult.Revoked,
+            JwtVcJsonRevocationSnapshot.Check(revoked, jwt, issuer.Did, observedAt));
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            JwtVcJsonRevocationSnapshot.Check(revoked, jwt, outsider.Did, observedAt));
+
+        string[] components = jwt.Split('.');
+        components[1] = Base64UrlEncoder.Encode(
+            Base64UrlEncoder.DecodeString(components[1]).Replace(
+                "active", "admin", StringComparison.Ordinal));
+        Assert.False(JwtVcJsonCredential.TryVerify(string.Join('.', components),
+            issuer.Did, holder.Did, CredentialType, Vocabulary,
+            observedAt, out _));
+    }
+
+    [Fact]
+    public void ExactIssuerRejectsInvalidWindowLongWindowAndWrongIssuerSeed()
+    {
+        var issuer = NewIdentity();
+        var holder = NewIdentity();
+        var outsider = NewIdentity();
+        DateTimeOffset start = new(2026, 11, 4, 1, 0, 0, TimeSpan.Zero);
+        start = start.AddTicks(9_999_999);
+        using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
+            new { id = holder.Did, membership = "active" }));
+
+        Assert.Throws<ArgumentException>(() => JwtVcJsonCredential.CreateWithExactValidity(
+            issuer.Did, holder.Did, CredentialType, Vocabulary,
+            subject.RootElement, issuer.Seed, start, start));
+        Assert.Throws<ArgumentException>(() => JwtVcJsonCredential.CreateWithExactValidity(
+            issuer.Did, holder.Did, CredentialType, Vocabulary,
+            subject.RootElement, issuer.Seed, start, start.AddMinutes(15).AddTicks(1)));
+        Assert.Throws<ArgumentException>(() => JwtVcJsonCredential.CreateWithExactValidity(
+            issuer.Did, holder.Did, CredentialType, Vocabulary,
+            subject.RootElement, outsider.Seed, start, start.AddTicks(1)));
+    }
+
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 
     private static (byte[] Seed, string Did) NewIdentity()
