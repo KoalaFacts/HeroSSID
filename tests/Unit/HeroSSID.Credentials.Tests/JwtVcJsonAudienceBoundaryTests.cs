@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using HeroSSID.Credentials.CredentialRevocation;
 using HeroSSID.Credentials.JwtVcJson;
 using HeroSSID.Credentials.Utilities;
 using NSec.Cryptography;
@@ -123,6 +124,39 @@ public sealed class JwtVcJsonAudienceBoundaryTests
             new Uri("https://user@verifier.example/rp")));
         Assert.Throws<ArgumentException>(() => IssueWithAudience(issuer, holder,
             new Uri("https://verifier.example/rp#fragment")));
+    }
+
+    [Fact]
+    public void IssuerCanRevokeTheExactOriginalAudienceBoundJwtWithoutOverridingRecipientPin()
+    {
+        var issuer = NewIdentity();
+        var holder = NewIdentity();
+        string revokedJwt = IssueWithAudience(issuer, holder, Recipient);
+        string unlistedJwt = IssueWithAudience(issuer, holder, OtherRecipient);
+
+        // The private issuer-signed export authenticates the original token
+        // and its digest; it does not decide which audience may use the VC.
+        string snapshot = JwtVcJsonRevocationSnapshot.Create(issuer.Did,
+            [revokedJwt], issuer.Seed, Now, new FixedClock(Now));
+        Assert.Equal(RevocationSnapshotCheckResult.Revoked,
+            JwtVcJsonRevocationSnapshot.Check(snapshot, revokedJwt,
+                issuer.Did, Now));
+        Assert.Equal(RevocationSnapshotCheckResult.NotListed,
+            JwtVcJsonRevocationSnapshot.Check(snapshot, unlistedJwt,
+                issuer.Did, Now));
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            JwtVcJsonRevocationSnapshot.Check(snapshot, revokedJwt,
+                NewIdentity().Did, Now));
+
+        // Issuer non-listing is not a permission to ignore recipient policy.
+        Assert.False(Verify(unlistedJwt, issuer.Did, holder.Did,
+            Recipient, out var wrongRecipient));
+        Assert.Equal(JsonValueKind.Undefined, wrongRecipient.ValueKind);
+    }
+
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 
     private static string IssueWithAudience(
