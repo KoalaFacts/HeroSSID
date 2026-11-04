@@ -27,6 +27,42 @@ bool authenticatedForThisRecipient = JwtVcJsonCredential.TryVerifyForAudience(
 
 No subject claims are returned on failure. The ordinary `TryVerify` intentionally continues to **reject** JWTs carrying `aud`; callers must explicitly use the audience-bound API. No new HTTP endpoint, schema, persistence or release is included.
 
+## Explicit multi-recipient issuance (SDK and authenticated HTTP)
+
+For an issuer that intentionally wants **the same full-disclosure VC** to be usable by two to eight relying parties, `CreateForAudiencesWithMetadata` signs one original Ed25519 JWT with an RFC 7519 `aud` **array**, rather than issuing separate single-recipient credentials. Example:
+
+```csharp
+string jwt = JwtVcJsonCredential.CreateForAudiencesWithMetadata(
+    issuerDid, holderDid, "MembershipCredential",
+    new Uri("https://issuer.example/contexts/member/v1"),
+    credentialSubject, issuerPrivateSeed,
+    now.AddMinutes(-1), now.AddMinutes(5),
+    [new Uri("https://verifier-a.example/intake"),
+     new Uri("https://verifier-b.example/intake")],
+    credentialId: null, issuerName: null, exactValidity: true);
+```
+
+The existing authenticated, tenant-owned `POST /api/v1/credentials/jwt-vc-json/issue-for-audience` also accepts `recipientAudiences` as an **exclusive alternative** to the existing singular `recipientAudience`:
+
+```json
+{
+  "issuerDid": "<issuer did:key>",
+  "holderDid": "<holder did:key>",
+  "credentialType": "https://issuer.example/types/Membership",
+  "subjectContextUri": "https://issuer.example/contexts/member/v1",
+  "credentialSubject": {"membership": "active"},
+  "validUntil": "2026-11-04T09:10:00Z",
+  "recipientAudiences": [
+    "https://verifier-a.example/intake",
+    "https://verifier-b.example/intake"
+  ]
+}
+```
+
+The request additionally needs a genuine scoped bearer token with the tenant-owned issuer DID and any enforced per-client signing grant. Both audience fields together, neither field on the explicit route, any recipient policy on the legacy route, duplicates after URI normalization, insecure endpoints, fragments, userinfo and arrays outside the **2–8** range are rejected before signing. The independent recipient verifier and its HTTP variant already accept this signed array when the exact recipient URI, original issuer Ed25519 signature, holder, type, vocabulary and validity all match; other recipients get no claims. Existing single-audience SDK/HTTP behavior remains unchanged.
+
+**Privacy warning:** Every included recipient can receive the *same fully disclosed* claims if the holder presents them. Multi-recipient `aud` is an issuer-signed statement of intended recipient(s), not a holder proof or consent grant. The integrating Wallet must independently obtain actual human/agent disclosure approval and sign any holder presentation. It is an **application-specific** VC-level restriction, not a claim of VC1.1-standard credential audience semantics, OpenID4VP wallet interop, revocation freshness, real identity, or business authorization.
+
 ## Signed wire profile and independent tests
 
 * Standard VC 1.1 `typ=JWT` (or absent `typ` on independently signed JWTs), Ed25519 `alg=EdDSA`; independently pinned issuer and holder `did:key`, HTTPS vocabulary and credential type; max 15-minute validity as elsewhere in the opt-in VC1.1 SDK.
