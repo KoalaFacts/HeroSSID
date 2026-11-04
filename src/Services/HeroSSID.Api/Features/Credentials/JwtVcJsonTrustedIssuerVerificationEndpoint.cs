@@ -37,6 +37,26 @@ internal static class JwtVcJsonTrustedIssuerVerificationEndpoint
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
+        credentials.MapPost("/jwt-vc-json/verify-trusted-issuers-for-audience", VerifyForAudience)
+            .RequireAuthorization(OperationScopes.CredentialVerify)
+            .WithName("VerifyJwtVcJsonTrustedIssuersForAudience")
+            .WithSummary("Verify recipient-bound VC1.1 JWT against independent historical/current issuer pins")
+            .Produces<VerifyJwtVcJsonTrustedIssuersResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
+        credentials.MapPost("/jwt-vc-json/verify-trusted-issuers-for-audience-with-status", VerifyForAudienceWithStatus)
+            .RequireAuthorization(OperationScopes.CredentialVerify)
+            .WithName("VerifyJwtVcJsonTrustedIssuersForAudienceWithStatus")
+            .WithSummary("Verify recipient-bound VC1.1 JWT and private status from its actual signer")
+            .Produces<VerifyJwtVcJsonTrustedIssuersResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
     }
 
     /// <summary>
@@ -111,6 +131,93 @@ internal static class JwtVcJsonTrustedIssuerVerificationEndpoint
         };
     }
 
+    /// <summary>
+    /// A caller must explicitly pin its own HTTPS recipient and an issuer trust
+    /// list. Neither the JWT's aud nor iss establishes recipient or issuer trust.
+    /// Existing no-audience endpoints reject this request field.
+    /// </summary>
+    internal static IResult VerifyForAudience(
+        [FromBody] VerifyJwtVcJsonTrustedIssuersRequest request,
+        [FromServices] TimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        if (!TryValidate(request, withStatus: false, out string[] issuers, requireAudience: true))
+        {
+            return InvalidRequest();
+        }
+
+        var outcome = JwtVcJsonTrustedIssuerVerifier.CheckForAudience(
+            request.Credential!, issuers, request.ExpectedHolderDid!,
+            request.ExpectedCredentialType!, request.SubjectContextUri!,
+            request.ExpectedAudience!, clock.GetUtcNow(), out string signer, out var subject);
+        return outcome == JwtVcJsonTrustedIssuerCheckResult.SignedButStatusUnchecked
+            ? Results.Ok(new VerifyJwtVcJsonTrustedIssuersResponse(
+                "SignedButStatusUnchecked", signer, subject))
+            : InvalidCredential();
+    }
+
+    /// <summary>
+    /// Require genuine recipient-bound issuer signature and original-signer
+    /// private status; optional verifier-owned cutoff rejects pre-incident
+    /// status. This does not prove status completeness or holder control.
+    /// </summary>
+    internal static IResult VerifyForAudienceWithStatus(
+        [FromBody] VerifyJwtVcJsonTrustedIssuersRequest request,
+        [FromServices] TimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        if (!TryValidate(request, withStatus: true, out string[] issuers, requireAudience: true))
+        {
+            return InvalidRequest();
+        }
+
+        DateTimeOffset now = clock.GetUtcNow();
+        if (request.MinimumStatusObservedAt is DateTimeOffset cutoff &&
+            (cutoff < DateTimeOffset.UnixEpoch || cutoff > now))
+        {
+            return InvalidRequest();
+        }
+
+        var result = request.MinimumStatusObservedAt is DateTimeOffset minimum
+            ? JwtVcJsonTrustedIssuerVerifier.CheckForAudienceWithStatusAfterObservationCutoff(
+                request.Credential!, request.RevocationSnapshot!, issuers,
+                request.ExpectedHolderDid!, request.ExpectedCredentialType!,
+                request.SubjectContextUri!, request.ExpectedAudience!, now, minimum,
+                out _, out _)
+            : JwtVcJsonTrustedIssuerVerifier.CheckForAudienceWithStatus(
+                request.Credential!, request.RevocationSnapshot!, issuers,
+                request.ExpectedHolderDid!, request.ExpectedCredentialType!,
+                request.SubjectContextUri!, request.ExpectedAudience!, now,
+                out _, out _);
+
+        // On success, retrieve only the signer/claims authenticated by the
+        // same one-shot SDK verification; avoid independently parsing JWT iss.
+        if (result == JwtVcJsonTrustedIssuerCheckResult.Revoked)
+        {
+            return Results.Ok(new VerifyJwtVcJsonTrustedIssuersResponse("Revoked", null, null));
+        }
+
+        if (result != JwtVcJsonTrustedIssuerCheckResult.SignedNotListed)
+        {
+            return InvalidCredential();
+        }
+
+        // The original SDK call above already proved status; rerun the bound
+        // signature path only to obtain its output for successful disclosure.
+        var signerCheck = JwtVcJsonTrustedIssuerVerifier.CheckForAudience(
+            request.Credential!, issuers, request.ExpectedHolderDid!,
+            request.ExpectedCredentialType!, request.SubjectContextUri!,
+            request.ExpectedAudience!, now, out string signer, out var subject);
+        return signerCheck == JwtVcJsonTrustedIssuerCheckResult.SignedButStatusUnchecked
+            ? Results.Ok(new VerifyJwtVcJsonTrustedIssuersResponse(
+                "SignedNotListed", signer, subject))
+            : InvalidCredential();
+    }
+
     private static bool TryVerifyOriginalSigner(
         VerifyJwtVcJsonTrustedIssuersRequest request, string[] issuers,
         DateTimeOffset now, out string authenticatedIssuer, out JsonElement subject)
@@ -139,13 +246,14 @@ internal static class JwtVcJsonTrustedIssuerVerificationEndpoint
 
     private static bool TryValidate(
         VerifyJwtVcJsonTrustedIssuersRequest request, bool withStatus,
-        out string[] issuers)
+        out string[] issuers, bool requireAudience = false)
     {
         issuers = [];
         string? credential = request.Credential;
         string? holder = request.ExpectedHolderDid;
         string? type = request.ExpectedCredentialType;
         Uri? context = request.SubjectContextUri;
+        Uri? audience = request.ExpectedAudience;
         string? status = request.RevocationSnapshot;
         IReadOnlyCollection<string>? trusted = request.TrustedIssuerDids;
 
@@ -161,7 +269,13 @@ internal static class JwtVcJsonTrustedIssuerVerificationEndpoint
             context is null || !context.IsAbsoluteUri ||
             context.Scheme != Uri.UriSchemeHttps || context.Host.Length == 0 ||
             context.UserInfo.Length != 0 || context.Fragment.Length != 0 ||
-            context.AbsoluteUri.Length > 2048)
+            context.AbsoluteUri.Length > 2048 ||
+            (requireAudience &&
+                (audience is null || !audience.IsAbsoluteUri ||
+                 audience.Scheme != Uri.UriSchemeHttps || audience.Host.Length == 0 ||
+                 audience.UserInfo.Length != 0 || audience.Fragment.Length != 0 ||
+                 audience.AbsoluteUri.Length > 2048)) ||
+            (!requireAudience && audience is not null))
         {
             return false;
         }
@@ -225,6 +339,7 @@ public sealed record class VerifyJwtVcJsonTrustedIssuersRequest
     public string? ExpectedHolderDid { get; init; }
     public string? ExpectedCredentialType { get; init; }
     public Uri? SubjectContextUri { get; init; }
+    public Uri? ExpectedAudience { get; init; }
     public string? RevocationSnapshot { get; init; }
 
     /// <summary>Verifier-owned optional signed-status observation lower bound, UTC instant.</summary>
