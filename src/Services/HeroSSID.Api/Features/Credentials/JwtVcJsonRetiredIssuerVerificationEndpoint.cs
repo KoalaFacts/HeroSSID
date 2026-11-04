@@ -62,6 +62,27 @@ internal static class JwtVcJsonRetiredIssuerVerificationEndpoint
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
+        credentials.MapPost("/jwt-vc-json/verify-for-audience-with-denylist",
+                VerifyForAudienceWithDenylist)
+            .RequireAuthorization(OperationScopes.CredentialVerify)
+            .WithName("VerifyJwtVcJsonForAudienceWithDenylist")
+            .WithSummary("Pin the verifier's signed HTTPS recipient and block denied original active/retired VC1.1 JWTs")
+            .Produces<VerifyJwtVcJsonTrustedIssuersResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
+        credentials.MapPost("/jwt-vc-json/verify-for-audience-with-denylist-and-status",
+                VerifyForAudienceWithDenylistAndStatus)
+            .RequireAuthorization(OperationScopes.CredentialVerify)
+            .WithName("VerifyJwtVcJsonForAudienceWithDenylistAndStatus")
+            .WithSummary("Pin signed recipient, verifier-owned emergency denial and genuine original-signer status")
+            .Produces<VerifyJwtVcJsonTrustedIssuersResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
     }
 
     internal static IResult Verify(
@@ -84,20 +105,32 @@ internal static class JwtVcJsonRetiredIssuerVerificationEndpoint
         [FromServices] TimeProvider clock) =>
         VerifyCore(request, clock, withStatus: true, withDenylist: true);
 
+    internal static IResult VerifyForAudienceWithDenylist(
+        [FromBody] VerifyJwtVcJsonActiveAndRetiredRequest request,
+        [FromServices] TimeProvider clock) =>
+        VerifyCore(request, clock, withStatus: false, withDenylist: true,
+            withAudience: true);
+
+    internal static IResult VerifyForAudienceWithDenylistAndStatus(
+        [FromBody] VerifyJwtVcJsonActiveAndRetiredRequest request,
+        [FromServices] TimeProvider clock) =>
+        VerifyCore(request, clock, withStatus: true, withDenylist: true,
+            withAudience: true);
+
     private static IResult VerifyCore(
         VerifyJwtVcJsonActiveAndRetiredRequest request, TimeProvider clock,
-        bool withStatus, bool withDenylist)
+        bool withStatus, bool withDenylist, bool withAudience = false)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(clock);
 
-        if (!TryValidate(request, withStatus, withDenylist,
+        if (!TryValidate(request, withStatus, withDenylist, withAudience,
                 out string[] active, out JwtVcJsonRetiredCredentialPin[] retired,
                 out string[] denied))
         {
             return Results.Problem(
                 title: "Invalid Request",
-                detail: "Supply bounded original VC1.1 JWT and independent active/retired issuer, holder, HTTPS type/context policies. Status is required only on status routes; exact-JWT denylist policy is mandatory only on dedicated denylist routes and forbidden on legacy routes.",
+                detail: "Supply bounded original VC1.1 JWT and independent active/retired issuer, holder, HTTPS type/context policies. Status and recipient pins are required only on matching explicit routes; exact-JWT denylist is mandatory only on its dedicated routes. Legacy routes reject extra policy fields.",
                 statusCode: StatusCodes.Status400BadRequest);
         }
 
@@ -112,17 +145,38 @@ internal static class JwtVcJsonRetiredIssuerVerificationEndpoint
 
         if (withDenylist)
         {
-            var result = withStatus
-                ? JwtVcJsonVerifierDenylist.CheckWithStatus(
-                    request.Credential!, request.RevocationSnapshot!, active, retired,
-                    denied, request.ExpectedHolderDid!, request.ExpectedCredentialType!,
-                    request.SubjectContextUri!, clock.GetUtcNow(),
-                    out verifiedIssuer, out verifiedSubject)
-                : JwtVcJsonVerifierDenylist.Check(
-                    request.Credential!, active, retired, denied,
-                    request.ExpectedHolderDid!, request.ExpectedCredentialType!,
-                    request.SubjectContextUri!, clock.GetUtcNow(),
-                    out verifiedIssuer, out verifiedSubject);
+            JwtVcJsonVerifierPolicyResult result;
+            if (withAudience)
+            {
+                // SDK enforces the genuine Ed25519 issuer signature, exact signed
+                // JWT aud and independently provisioned active/retired trust before
+                // any verified subject escapes this HTTP boundary.
+                result = withStatus
+                    ? JwtVcJsonVerifierDenylist.CheckForAudienceWithStatus(
+                        request.Credential!, request.RevocationSnapshot!, active, retired,
+                        denied, request.ExpectedHolderDid!, request.ExpectedCredentialType!,
+                        request.SubjectContextUri!, request.ExpectedAudience!, clock.GetUtcNow(),
+                        out verifiedIssuer, out verifiedSubject)
+                    : JwtVcJsonVerifierDenylist.CheckForAudience(
+                        request.Credential!, active, retired, denied,
+                        request.ExpectedHolderDid!, request.ExpectedCredentialType!,
+                        request.SubjectContextUri!, request.ExpectedAudience!, clock.GetUtcNow(),
+                        out verifiedIssuer, out verifiedSubject);
+            }
+            else
+            {
+                result = withStatus
+                    ? JwtVcJsonVerifierDenylist.CheckWithStatus(
+                        request.Credential!, request.RevocationSnapshot!, active, retired,
+                        denied, request.ExpectedHolderDid!, request.ExpectedCredentialType!,
+                        request.SubjectContextUri!, clock.GetUtcNow(),
+                        out verifiedIssuer, out verifiedSubject)
+                    : JwtVcJsonVerifierDenylist.Check(
+                        request.Credential!, active, retired, denied,
+                        request.ExpectedHolderDid!, request.ExpectedCredentialType!,
+                        request.SubjectContextUri!, clock.GetUtcNow(),
+                        out verifiedIssuer, out verifiedSubject);
+            }
             status = result.ToString();
             disclose = result is JwtVcJsonVerifierPolicyResult.SignedButStatusUnchecked
                 or JwtVcJsonVerifierPolicyResult.SignedNotListed;
@@ -154,7 +208,7 @@ internal static class JwtVcJsonRetiredIssuerVerificationEndpoint
 
     private static bool TryValidate(
         VerifyJwtVcJsonActiveAndRetiredRequest request, bool withStatus,
-        bool withDenylist, out string[] active,
+        bool withDenylist, bool withAudience, out string[] active,
         out JwtVcJsonRetiredCredentialPin[] retired, out string[] denied)
     {
         active = [];
@@ -183,6 +237,23 @@ internal static class JwtVcJsonRetiredIssuerVerificationEndpoint
             request.RetiredCredentialPins.Count > MaximumRetiredPins ||
             request.ActiveIssuerDids.Count == 0 && request.RetiredCredentialPins.Count == 0)
         {
+            return false;
+        }
+
+        if (withAudience)
+        {
+            if (request.ExpectedAudience is not { IsAbsoluteUri: true } audience ||
+                audience.Scheme != Uri.UriSchemeHttps || audience.Host.Length == 0 ||
+                audience.UserInfo.Length != 0 || audience.Fragment.Length != 0 ||
+                audience.AbsoluteUri.Length > 2048)
+            {
+                return false;
+            }
+        }
+        else if (request.ExpectedAudience is not null)
+        {
+            // Never ignore a caller's independently pinned recipient on an
+            // older no-audience route, even when its JWT is otherwise valid.
             return false;
         }
 
@@ -306,5 +377,6 @@ public sealed record class VerifyJwtVcJsonActiveAndRetiredRequest
     public string? ExpectedHolderDid { get; init; }
     public string? ExpectedCredentialType { get; init; }
     public Uri? SubjectContextUri { get; init; }
+    public Uri? ExpectedAudience { get; init; }
     public string? RevocationSnapshot { get; init; }
 }
