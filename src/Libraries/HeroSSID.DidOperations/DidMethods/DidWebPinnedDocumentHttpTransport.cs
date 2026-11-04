@@ -225,12 +225,18 @@ public static class DidWebPinnedDocumentHttpTransport
             return false; // RFC 9637 documentation prefix 3fff::/20.
         }
 
+        if (bytes[0] == 0x20 && bytes[1] == 0x01 &&
+            (bytes[2] & 0xfe) == 0)
+        {
+            // IANA's IETF protocol assignment 2001::/23 is non-global by
+            // default. Even its more-specific public exceptions are rejected
+            // here: this conservative HTTPS fetch must not silently adopt
+            // new protocol allocations as ordinary issuer destinations.
+            return false;
+        }
+
         return !(bytes[0] == 0x20 && bytes[1] == 0x01 &&
-            ((bytes[2] == 0x0d && bytes[3] == 0xb8) || // Documentation.
-             (bytes[2] == 0x00 && bytes[3] == 0x00) || // Teredo.
-             (bytes[2] == 0x00 && bytes[3] == 0x02) || // Benchmark.
-             (bytes[2] == 0x00 && (bytes[3] & 0xf0) is 0x10 or 0x20)));
-             // ORCHID/ORCHIDv2 non-routable overlays.
+            bytes[2] == 0x0d && bytes[3] == 0xb8); // Documentation.
     }
 
     private static async ValueTask<Stream> ConnectPublicOnlyAsync(
