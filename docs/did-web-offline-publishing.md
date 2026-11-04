@@ -263,3 +263,67 @@ This implements a constrained shape permitted by the W3C
 issuer trust, legal identity, Agent delegation, business authorisation or
 third-party Wallet interoperability. No database/schema, production
 publishing, actual DNS, secrets, deployment or package release is involved.
+
+
+## Successor-only retirement after two-key overlap (opt-in)
+
+Following an explicitly operator-approved two-key overlap, an issuer that
+controls the HTTPS publication location can **retire** the original did:web
+verification method instead of leaving a compromised or superseded old key
+advertised indefinitely. This implements a narrow DID Core 1.0 document
+**publication and pinned equality** profile; it does not change any
+credential verifier's trusted issuer list.
+
+```csharp
+using HeroSSID.DidOperations.DidMethods;
+
+// All three values must be preapproved independently of any incoming JWT,
+// VC, remote DID document, or claimed identity.
+const string did = "did:web:issuer.example.org:organisations:acme";
+string retiredOldKeyDocument =
+    DidWebPinnedKeyRetirement.CreateRetirementDocument(
+        did, pinnedOldPublicKey, pinnedSuccessorPublicKey);
+Uri publishAt = DidWebMethod.GetDocumentUri(did);
+// Operator securely replaces the previous TWO-key did.json with this ONE-key
+// document at https://issuer.example.org/organisations/acme/did.json.
+
+// Independent relying party, using its separately enrolled pins:
+bool nowPublished =
+    await DidWebPinnedKeyRetirement.FetchAndMatchWithIsolatedTransportAsync(
+        did, pinnedOldPublicKey, pinnedSuccessorPublicKey,
+        cancellationToken: cancellationToken);
+if (!nowPublished)
+{
+    // Do not treat the old method as removed or trust the purported successor.
+}
+```
+
+The expected document retains the original DID URI, DID Core contexts,
+`#key-2` method identifier, successor Ed25519 key and only its
+`authentication` / `assertionMethod` references. It removes `#key-1`
+from both the verification methods and the advertised relationships.
+Old-key-only and two-key overlap documents explicitly **fail** the retired
+profile; neither the original single-key matcher nor the overlap matcher
+silently treats a retirement document as one of their earlier phases.
+Duplicate JSON properties, unknown service/delegation capabilities, wrong
+controllers, swapped key material and malformed JSON also fail.
+
+`FetchAndMatchAsync(did, oldPin, successorPin, auditedHttpClient, ...)` is
+available when an integrating application supplies its own audited
+credential-free/non-redirecting HTTPS transport. The default isolated method
+reuses the exact 16-KiB response limit, strict UTF-8/media-type handling,
+30-second maximum deadline, canonical URL, no-proxy/no-cookie/no-redirect
+policy, public-only DNS pin-before-connect and ordinary TLS verification from
+the existing published-document fetch. It cannot make an injected redirecting
+handler safe, and egress/NAT/DNS integrity remain the operator's responsibility.
+
+**Trust boundary:** Neither this publication nor the published content
+establishes whether the old signing key is compromised or when earlier
+credentials were issued. Published method retirement can affect DID-based
+proof checks, but HeroSSID's existing credential verification paths do not
+automatically infer trust changes from `did:web` documents. An application
+must independently decide whether to accept historical original JWTs,
+maintain exact retired-issuer pins, update its own issuer allowlist and apply
+revocation/incident policy. No private-key custody, real identity, domain
+ownership, actual end-user consent, Agent/business authority, third-party
+Wallet test, DID hosting or production deployment is performed.
