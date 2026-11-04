@@ -20,7 +20,7 @@ An authenticated caller with the exact OAuth scope **`credential:verify`** sends
 
 These DIDs are placeholders, not real signing keys. The verifier **must obtain the trusted issuer DID, expected subject and type, and approved versioned HTTPS context from its own policy**, never from the JWT it is checking. The custom type is a globally expanded HTTPS IRI (rather than an undefined JSON-LD compact term). The subject context must be an absolute HTTPS URI without user-info or fragment. Neither endpoint downloads or JSON-LD-expands arbitrary contexts.
 
-The server verifies the actual Ed25519 issuer signature, any present JOSE `kid` against the pinned `did:key`, nested VC1.1 `vc.@context`/`vc.type`, JWT `sub` holder binding (including an explicitly matching nested `credentialSubject.id` if supplied), signed time bounds, type and vocabulary before releasing verified subject JSON.
+The server verifies the actual Ed25519 issuer signature, any present JOSE `kid` against the pinned `did:key`, nested VC1.1 `vc.@context`/`vc.type`, JWT `sub` holder binding (including an explicitly matching nested `credentialSubject.id` if supplied), signed time bounds, type and vocabulary before releasing verified subject JSON. On the two single-issuer routes, an optional signed descriptive `vc.issuer.name` can be released as `verifiedIssuerName` **only after** all those checks. An absent name yields `null`; failure or revocation also returns `null`. The name is not issuer legal identity, user consent, holder key proof or authorization. Render it as escaped untrusted display text.
 
 For independently issued, **normative VC Data Model 1.1 `typ=JWT` or omitted-`typ`** credentials, the verifier also accepts the W3C §6.3.1 **"in addition to" JWT mapping**: optional redundant `vc.issuer` (matching issuer DID string or an exact `{"id":"did:key:..."}` object), `vc.id` (matching signed `jti`), and XML date-time `vc.issuanceDate`/`vc.expirationDate` (exact instants matching signed `nbf`/`exp`). These signed fields cannot override independently pinned issuer, holder, subject vocabulary, type or dates; conflicts, unknown `vc` members and the historical private `vc+jwt` shape with extra fields fail closed. Issuer status export authenticates **the unchanged original JWT** with the same metadata rules; these internal checks are not independent third-party Wallet interoperability or standard conformance certification.
 
@@ -42,13 +42,14 @@ A successful signature verification responds with HTTP **200**:
 {
   "status": "SignedButStatusUnchecked",
   "verifiedSubject": {"id": "did:key:z...holder", "membership": "active"},
-  "verifiedCredentialId": "https://issuer.example/credentials/member-123"
+  "verifiedCredentialId": "https://issuer.example/credentials/member-123",
+  "verifiedIssuerName": "Membership Office"
 }
 ```
 
 For this **single-issuer** route, `verifiedCredentialId` is the exact authenticated `jti` of the issuer-signed VC1.1 JWT, if present; otherwise it is `null`. It is released only after the independently pinned issuer signature, holder, type, context and validity checks succeed. The HTTPS URI is an **issuer-assigned identifier**, not evidence of domain control, actual identity or authorization. The verifier does not dereference it. The other historical/retired/denylist routes retain their existing response contracts.
 
-A malformed, forged, expired, wrong-issuer, wrong-holder, wrong-type or wrong-vocabulary **credential** with otherwise valid bounded request parameters returns HTTP **200** with `{"status":"Invalid","verifiedSubject":null,"verifiedCredentialId":null}`. Missing/oversized credential or malformed policy inputs return **400**; anonymous requests return **401** and insufficient-scope requests **403**. The JWT and status snapshot are limited to 65,536 characters each, issuer/holder inputs to 255 characters, custom type to 128 and vocabulary URI to 2,048.
+A malformed, forged, expired, wrong-issuer, wrong-holder, wrong-type or wrong-vocabulary **credential** with otherwise valid bounded request parameters returns HTTP **200** with `{"status":"Invalid","verifiedSubject":null,"verifiedCredentialId":null,"verifiedIssuerName":null}`. Missing/oversized credential or malformed policy inputs return **400**; anonymous requests return **401** and insufficient-scope requests **403**. The JWT and status snapshot are limited to 65,536 characters each, issuer/holder inputs to 255 characters, custom type to 128 and vocabulary URI to 2,048.
 
 ## Optional issuer-signed private revocation snapshot
 
@@ -71,9 +72,9 @@ Use the same request with one additional field:
 
 The server first authenticates the original credential using the caller's pinned issuer/holder/type/context policy. It then authenticates the snapshot signed by **that same pinned issuer**, with its format, freshness (60-second limit) and digest of the **exact signed credential bytes**. The snapshot cannot choose its own trusted issuer. Responses:
 
-- `SignedNotListed` — authentic credential and fresh issuer-signed snapshot without its digest; releases the verified subject and optional **signed `jti`**.
-- `Revoked` — authentic credential's digest occurs in the signed snapshot; **never** releases subject or credential ID.
-- `Invalid` — credential or snapshot cannot be authenticated, is stale or has incorrect policy/format; **never** releases subject or credential ID.
+- `SignedNotListed` — authentic credential and fresh issuer-signed snapshot without its digest; releases the verified subject, optional **signed `jti`** and optional **signed descriptive name**.
+- `Revoked` — authentic credential's digest occurs in the signed snapshot; **never** releases subject, credential ID or issuer name.
+- `Invalid` — credential or snapshot cannot be authenticated, is stale or has incorrect policy/format; **never** releases subject, credential ID or issuer name.
 
 A missing snapshot fails **400**. This is a private issuer-distributed export, **not** W3C Bitstring Status List or live non-revocation verification. Even `SignedNotListed` depends on the issuer supplying a **complete authoritative revocation set**, which HeroSSID cannot infer or publish from this request. No snapshot is created or stored by these verification endpoints.
 

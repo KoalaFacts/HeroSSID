@@ -46,7 +46,22 @@ public static class JwtVcJsonCredential
         string expectedCredentialType, Uri expectedSubjectContextUri,
         DateTimeOffset now, out JsonElement verifiedSubject, out string? verifiedCredentialId)
         => TryVerifyCore(jwt, trustedIssuerDid, expectedHolderDid, expectedCredentialType,
-            expectedSubjectContextUri, now, out verifiedSubject, out verifiedCredentialId);
+            expectedSubjectContextUri, now, out verifiedSubject, out verifiedCredentialId, out _);
+
+    /// <summary>
+    /// Return original Ed25519-signed VC1.1 descriptive issuer metadata only
+    /// after verifying the independently pinned issuer, holder, type, vocabulary
+    /// and expiry. On failure clear ALL outputs. Display names do not prove a
+    /// legal identity, holder key control, issuer status or business authority.
+    /// </summary>
+    public static bool TryVerifyWithIssuerName(string jwt, string trustedIssuerDid,
+        string expectedHolderDid, string expectedCredentialType,
+        Uri expectedSubjectContextUri, DateTimeOffset now,
+        out JsonElement verifiedSubject, out string? verifiedCredentialId,
+        out string? verifiedIssuerName)
+        => TryVerifyCore(jwt, trustedIssuerDid, expectedHolderDid, expectedCredentialType,
+            expectedSubjectContextUri, now, out verifiedSubject,
+            out verifiedCredentialId, out verifiedIssuerName);
 
     /// <summary>
     /// Sign a short-lived, fully disclosed JWT VC 1.1 with the issuer's own Ed25519 seed.
@@ -229,16 +244,18 @@ public static class JwtVcJsonCredential
         string expectedCredentialType, Uri expectedSubjectContextUri,
         DateTimeOffset now, out JsonElement verifiedSubject) =>
         TryVerifyCore(jwt, trustedIssuerDid, expectedHolderDid, expectedCredentialType,
-            expectedSubjectContextUri, now, out verifiedSubject, out _);
+            expectedSubjectContextUri, now, out verifiedSubject, out _, out _);
 
     private static bool TryVerifyCore(string jwt, string trustedIssuerDid, string expectedHolderDid,
         string expectedCredentialType, Uri expectedSubjectContextUri,
-        DateTimeOffset now, out JsonElement verifiedSubject, out string? verifiedCredentialId)
+        DateTimeOffset now, out JsonElement verifiedSubject, out string? verifiedCredentialId,
+        out string? verifiedIssuerName)
     {
         ArgumentNullException.ThrowIfNull(jwt);
         ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
         verifiedSubject = default;
         verifiedCredentialId = null;
+        verifiedIssuerName = null;
 
         if (!OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(trustedIssuerDid, out var issuerPublicKey) ||
             !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(expectedHolderDid, out _) ||
@@ -273,6 +290,13 @@ public static class JwtVcJsonCredential
         verifiedCredentialId = payload.TryGetProperty("jti", out var identifier)
             ? identifier.GetString()
             : null;
+        // The exact signed VC issuer object has already passed strict shape
+        // and pinned issuer-DID checks; never decode display text before this.
+        verifiedIssuerName = vc.TryGetProperty("issuer", out var embeddedIssuer) &&
+            embeddedIssuer.ValueKind == JsonValueKind.Object &&
+            embeddedIssuer.TryGetProperty("name", out var name)
+                ? name.GetString()
+                : null;
         return true;
     }
 
