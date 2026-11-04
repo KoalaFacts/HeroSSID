@@ -66,4 +66,29 @@ The cutoff is verifier-supplied policy; neither signature nor `iat` proves
 the completeness or actual observation time of upstream status records.
 See [the authenticated HTTP cutoff contract](jwt-vc-json-http-verify-profile.md#verifier-owned-post-incident-observation-cutoff-opt-in).
 
+## Authenticated HTTP: verified original-signer metadata
+
+The four authenticated `credential:verify` multi-issuer routes
+(`verify-trusted-issuers` and `verify-trusted-issuers-for-audience`,
+each with optional `-with-status`) now return signed
+`verifiedCredentialId`, descriptive `verifiedIssuerName`,
+`verifiedNotBefore` and `verifiedExpiresAt` on successful verification.
+The authenticated issuer DID, verified subject and status are unchanged.
+Missing signed optional fields return JSON `null`; validity preserves
+the exact JWT `nbf`/`exp` at 100ns precision for downstream cache limits.
+
+All metadata is rechecked against the original Ed25519 signature and the
+**actual** independently trusted signer. Audience-bearing JWTs must also
+match the relying party's separately pinned HTTPS recipient. The
+`-with-status` routes release these fields **only after** valid
+original-signer signed status; invalid, revoked, stale, forged, wrong
+recipient and untrusted inputs disclose no subject, issuer or metadata.
+`SignedButStatusUnchecked` does not check revocation and
+`SignedNotListed` is not proof of live, complete status.
+
+An issuer-signed name is descriptive, not a verified legal identity.
+A JWT signature is not holder-key control, consent, Agent delegation or
+business authorization. Internal HTTP contract tests are not third-party
+wallet interoperation or general VC/OpenID4VP certification.
+
 No schema, database operation, remote resolution, enrollment, production deployment or package publication is performed by these SDK calls. See the [VC1.1 JWT credential format](jwt-vc-json-profile.md), [HTTP equivalent](jwt-vc-json-http-verify-profile.md) and [project vision](VISION.md).

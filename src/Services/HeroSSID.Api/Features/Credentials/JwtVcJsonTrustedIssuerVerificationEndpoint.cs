@@ -75,10 +75,10 @@ internal static class JwtVcJsonTrustedIssuerVerificationEndpoint
             return InvalidRequest();
         }
 
-        return TryVerifyOriginalSigner(request, issuers, clock.GetUtcNow(),
-                out string authenticatedIssuer, out var subject)
-            ? Results.Ok(new VerifyJwtVcJsonTrustedIssuersResponse(
-                "SignedButStatusUnchecked", authenticatedIssuer, subject))
+        DateTimeOffset now = clock.GetUtcNow();
+        return TryVerifyOriginalSigner(request, issuers, now,
+                out string authenticatedIssuer, out _)
+            ? VerifiedResult(request, authenticatedIssuer, now, "SignedButStatusUnchecked")
             : InvalidCredential();
     }
 
@@ -107,7 +107,7 @@ internal static class JwtVcJsonTrustedIssuerVerificationEndpoint
         }
 
         if (!TryVerifyOriginalSigner(request, issuers, now,
-                out string authenticatedIssuer, out var subject))
+                out string authenticatedIssuer, out _))
         {
             return InvalidCredential();
         }
@@ -123,8 +123,7 @@ internal static class JwtVcJsonTrustedIssuerVerificationEndpoint
         return status switch
         {
             RevocationSnapshotCheckResult.NotListed =>
-                Results.Ok(new VerifyJwtVcJsonTrustedIssuersResponse(
-                    "SignedNotListed", authenticatedIssuer, subject)),
+                VerifiedResult(request, authenticatedIssuer, now, "SignedNotListed"),
             RevocationSnapshotCheckResult.Revoked =>
                 Results.Ok(new VerifyJwtVcJsonTrustedIssuersResponse("Revoked", null, null)),
             _ => InvalidCredential()
@@ -148,13 +147,13 @@ internal static class JwtVcJsonTrustedIssuerVerificationEndpoint
             return InvalidRequest();
         }
 
+        DateTimeOffset now = clock.GetUtcNow();
         var outcome = JwtVcJsonTrustedIssuerVerifier.CheckForAudience(
             request.Credential!, issuers, request.ExpectedHolderDid!,
             request.ExpectedCredentialType!, request.SubjectContextUri!,
-            request.ExpectedAudience!, clock.GetUtcNow(), out string signer, out var subject);
+            request.ExpectedAudience!, now, out string signer, out _);
         return outcome == JwtVcJsonTrustedIssuerCheckResult.SignedButStatusUnchecked
-            ? Results.Ok(new VerifyJwtVcJsonTrustedIssuersResponse(
-                "SignedButStatusUnchecked", signer, subject))
+            ? VerifiedResult(request, signer, now, "SignedButStatusUnchecked")
             : InvalidCredential();
     }
 
@@ -183,27 +182,66 @@ internal static class JwtVcJsonTrustedIssuerVerificationEndpoint
         }
 
         string signer;
-        JsonElement subject;
         var result = request.MinimumStatusObservedAt is DateTimeOffset minimum
             ? JwtVcJsonTrustedIssuerVerifier.CheckForAudienceWithStatusAfterObservationCutoff(
                 request.Credential!, request.RevocationSnapshot!, issuers,
                 request.ExpectedHolderDid!, request.ExpectedCredentialType!,
                 request.SubjectContextUri!, request.ExpectedAudience!, now, minimum,
-                out signer, out subject)
+                out signer, out _)
             : JwtVcJsonTrustedIssuerVerifier.CheckForAudienceWithStatus(
                 request.Credential!, request.RevocationSnapshot!, issuers,
                 request.ExpectedHolderDid!, request.ExpectedCredentialType!,
                 request.SubjectContextUri!, request.ExpectedAudience!, now,
-                out signer, out subject);
+                out signer, out _);
         return result switch
         {
             JwtVcJsonTrustedIssuerCheckResult.SignedNotListed =>
-                Results.Ok(new VerifyJwtVcJsonTrustedIssuersResponse(
-                    "SignedNotListed", signer, subject)),
+                VerifiedResult(request, signer, now, "SignedNotListed"),
             JwtVcJsonTrustedIssuerCheckResult.Revoked =>
                 Results.Ok(new VerifyJwtVcJsonTrustedIssuersResponse("Revoked", null, null)),
             _ => InvalidCredential()
         };
+    }
+
+    /// <summary>
+    /// Disclose the actual original signer's signed metadata only after the
+    /// verifier-owned trust/recipient and optional status gates succeeded.
+    /// Revalidate with the authenticated DID and same clock; never trust
+    /// JWT-provided issuer or recipient names as policy. Fail closed on drift.
+    /// </summary>
+    private static IResult VerifiedResult(
+        VerifyJwtVcJsonTrustedIssuersRequest request, string signer,
+        DateTimeOffset now, string status)
+    {
+        JsonElement subject;
+        string? credentialId;
+        string? issuerName;
+        DateTimeOffset? notBefore;
+        DateTimeOffset? expiresAt;
+
+        bool verified;
+        if (request.ExpectedAudience is Uri audience)
+        {
+            verified = JwtVcJsonCredential.TryVerifyForAudienceWithValidity(
+                request.Credential!, signer, request.ExpectedHolderDid!,
+                request.ExpectedCredentialType!, request.SubjectContextUri!,
+                audience, now, out subject, out credentialId,
+                out issuerName, out notBefore, out expiresAt);
+        }
+        else
+        {
+            verified = JwtVcJsonCredential.TryVerifyWithValidity(
+                request.Credential!, signer, request.ExpectedHolderDid!,
+                request.ExpectedCredentialType!, request.SubjectContextUri!,
+                now, out subject, out credentialId,
+                out issuerName, out notBefore, out expiresAt);
+        }
+
+        return verified
+            ? Results.Ok(new VerifyJwtVcJsonTrustedIssuersResponse(
+                status, signer, subject, credentialId, issuerName,
+                notBefore, expiresAt))
+            : InvalidCredential();
     }
 
     private static bool TryVerifyOriginalSigner(
@@ -334,6 +372,11 @@ public sealed record class VerifyJwtVcJsonTrustedIssuersRequest
     public DateTimeOffset? MinimumStatusObservedAt { get; init; }
 }
 
-/// <summary>Neither signer nor subject can be disclosed on a rejected JWT/status.</summary>
+/// <summary>
+/// Disclose signed metadata only after all verifier-owned gates succeed.
+/// Descriptive issuer names do not certify legal identity or authority.
+/// </summary>
 public sealed record VerifyJwtVcJsonTrustedIssuersResponse(
-    string Status, string? VerifiedIssuerDid, JsonElement? VerifiedSubject);
+    string Status, string? VerifiedIssuerDid, JsonElement? VerifiedSubject,
+    string? VerifiedCredentialId = null, string? VerifiedIssuerName = null,
+    DateTimeOffset? VerifiedNotBefore = null, DateTimeOffset? VerifiedExpiresAt = null);
