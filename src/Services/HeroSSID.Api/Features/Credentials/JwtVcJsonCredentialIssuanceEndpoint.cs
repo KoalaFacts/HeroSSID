@@ -115,9 +115,16 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
                  identifier.AbsoluteUri.Length > 2048)) ||
             request.CredentialSubject.ValueKind is not (JsonValueKind.Object or JsonValueKind.Array) ||
             validUntil == DateTimeOffset.MinValue ||
-            // A legacy caller cannot unknowingly lose its requested recipient pin.
-            ((request.RecipientAudience is not null) != requireAudience) ||
-            (requireAudience && !ValidRecipient(request.RecipientAudience)))
+            // Exactly one of the single-recipient or multi-recipient forms
+            // is permitted on this opt-in route. Legacy routes fail closed.
+            (!requireAudience && (request.RecipientAudience is not null ||
+                request.RecipientAudiences is not null)) ||
+            (requireAudience &&
+                ((request.RecipientAudience is null) == (request.RecipientAudiences is null))) ||
+            (request.RecipientAudience is not null &&
+                !ValidRecipient(request.RecipientAudience)) ||
+            (request.RecipientAudiences is not null &&
+                !ValidRecipients(request.RecipientAudiences))
         {
             return InvalidRequest();
         }
@@ -171,7 +178,16 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
                     ? now
                     : DateTimeOffset.FromUnixTimeSeconds(now.ToUnixTimeSeconds());
                 string jwt;
-                if (requireAudience)
+                if (requireAudience && request.RecipientAudiences is { } recipients)
+                {
+                    // The genuine issuer key signs the complete explicitly bounded
+                    // recipient set. No legacy or no-audience route may ignore it.
+                    jwt = JwtVcJsonCredential.CreateForAudiencesWithMetadata(issuerDid,
+                        holderDid, credentialType, context, request.CredentialSubject,
+                        seed, signingStart, validUntil, recipients, request.CredentialId,
+                        request.IssuerName, request.ExactValidity);
+                }
+                else if (requireAudience)
                 {
                     // The issuer seed remains tenant-owned and is erased below.
                     // A recipient-bound JWT cannot be verified by legacy unpinned routes.
@@ -252,9 +268,28 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
         uri.Fragment.Length == 0 &&
         uri.AbsoluteUri.Length <= 2048;
 
+    private static bool ValidRecipients(Uri[] recipients)
+    {
+        if (recipients.Length is < 2 or > 8)
+        {
+            return false;
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (Uri? recipient in recipients)
+        {
+            if (!ValidRecipient(recipient) || !seen.Add(recipient!.AbsoluteUri))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static IResult InvalidRequest() => Results.Problem(
         title: "Invalid Request",
-        detail: "An active tenant-owned issuer, external did:key holder, HTTPS credential type and vocabulary, optional bounded HTTPS credential ID, an optional nonblank control-free issuer name of at most 128 characters, one object or one-element object array with absent or matching holder id, and expiry within 15 minutes are required. The opt-in recipient route additionally requires a canonical HTTPS recipient and permits the same bounded ID, issuer name and exact-validity options; the legacy route rejects recipient policy.",
+        detail: "An active tenant-owned issuer, external did:key holder, HTTPS credential type and vocabulary, optional bounded HTTPS credential ID, an optional nonblank control-free issuer name of at most 128 characters, one object or one-element object array with absent or matching holder id, and expiry within 15 minutes are required. The opt-in recipient route requires either one HTTPS recipient or an explicit array of two to eight distinct HTTPS recipients, plus optional bounded ID, issuer name and exact-validity options; the legacy route rejects recipient policy.",
         statusCode: StatusCodes.Status400BadRequest);
 }
 
@@ -273,6 +308,12 @@ public sealed class IssueJwtVcJsonCredentialRequest
     /// A signed aud is not standard VC1.1 presentation audience binding.
     /// </summary>
     public Uri? RecipientAudience { get; init; }
+    /// <summary>
+    /// Exclusive alternative to RecipientAudience, only on issue-for-audience:
+    /// two to eight canonical distinct HTTPS recipient URLs. They are signed as
+    /// RFC 7519 aud array. Each verifier still pins its own intended URI.
+    /// </summary>
+    public Uri[]? RecipientAudiences { get; init; }
     public JsonElement CredentialSubject { get; init; }
     public DateTimeOffset? ValidUntil { get; init; }
     /// <summary>
