@@ -182,40 +182,28 @@ internal static class JwtVcJsonTrustedIssuerVerificationEndpoint
             return InvalidRequest();
         }
 
+        string signer;
+        JsonElement subject;
         var result = request.MinimumStatusObservedAt is DateTimeOffset minimum
             ? JwtVcJsonTrustedIssuerVerifier.CheckForAudienceWithStatusAfterObservationCutoff(
                 request.Credential!, request.RevocationSnapshot!, issuers,
                 request.ExpectedHolderDid!, request.ExpectedCredentialType!,
                 request.SubjectContextUri!, request.ExpectedAudience!, now, minimum,
-                out _, out _)
+                out signer, out subject)
             : JwtVcJsonTrustedIssuerVerifier.CheckForAudienceWithStatus(
                 request.Credential!, request.RevocationSnapshot!, issuers,
                 request.ExpectedHolderDid!, request.ExpectedCredentialType!,
                 request.SubjectContextUri!, request.ExpectedAudience!, now,
-                out _, out _);
-
-        // On success, retrieve only the signer/claims authenticated by the
-        // same one-shot SDK verification; avoid independently parsing JWT iss.
-        if (result == JwtVcJsonTrustedIssuerCheckResult.Revoked)
+                out signer, out subject);
+        return result switch
         {
-            return Results.Ok(new VerifyJwtVcJsonTrustedIssuersResponse("Revoked", null, null));
-        }
-
-        if (result != JwtVcJsonTrustedIssuerCheckResult.SignedNotListed)
-        {
-            return InvalidCredential();
-        }
-
-        // The original SDK call above already proved status; rerun the bound
-        // signature path only to obtain its output for successful disclosure.
-        var signerCheck = JwtVcJsonTrustedIssuerVerifier.CheckForAudience(
-            request.Credential!, issuers, request.ExpectedHolderDid!,
-            request.ExpectedCredentialType!, request.SubjectContextUri!,
-            request.ExpectedAudience!, now, out string signer, out var subject);
-        return signerCheck == JwtVcJsonTrustedIssuerCheckResult.SignedButStatusUnchecked
-            ? Results.Ok(new VerifyJwtVcJsonTrustedIssuersResponse(
-                "SignedNotListed", signer, subject))
-            : InvalidCredential();
+            JwtVcJsonTrustedIssuerCheckResult.SignedNotListed =>
+                Results.Ok(new VerifyJwtVcJsonTrustedIssuersResponse(
+                    "SignedNotListed", signer, subject)),
+            JwtVcJsonTrustedIssuerCheckResult.Revoked =>
+                Results.Ok(new VerifyJwtVcJsonTrustedIssuersResponse("Revoked", null, null)),
+            _ => InvalidCredential()
+        };
     }
 
     private static bool TryVerifyOriginalSigner(
