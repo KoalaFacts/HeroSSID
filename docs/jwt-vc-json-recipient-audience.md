@@ -1,6 +1,6 @@
 # Recipient-pinned VC 1.1 JWT (SDK, opt-in)
 
-This is an **opt-in** recipient-restricted issuer statement using RFC 7519's registered `aud` claim in a W3C VC Data Model 1.1 `jwt_vc_json`-shaped credential. It is not a replacement for OpenID4VP signed requests, holder-signed presentations, revocation policy or actual user consent. Both signer and verifier must already know their trust anchors.
+This is an **opt-in HeroSSID application profile** restricting the recipient of an issuer-signed JWT VC 1.1 using RFC 7519's registered `aud` claim. **It is not a standardized VC1.1 credential audience binding.** [VC Data Model 1.1 §6.3.1](https://www.w3.org/TR/vc-data-model-1.1/#json-web-token) assigns normative `aud` semantics to **verifiable presentations** (the verifier intended by the holder), not to issuer-signed credentials. This optional credential-level use is application-specific and cannot be advertised as standards-based third-party wallet interoperability. It is not a replacement for OpenID4VP signed requests, holder-signed presentations, revocation policy or actual user consent. Both signer and verifier must already know their trust anchors.
 
 ## Executable .NET 10 entry points
 
