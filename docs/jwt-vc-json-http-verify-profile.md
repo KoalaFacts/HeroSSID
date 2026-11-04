@@ -49,6 +49,19 @@ A successful signature verification responds with HTTP **200**:
 
 For this **single-issuer** route, `verifiedCredentialId` is the exact authenticated `jti` of the issuer-signed VC1.1 JWT, if present; otherwise it is `null`. It is released only after the independently pinned issuer signature, holder, type, context and validity checks succeed. The HTTPS URI is an **issuer-assigned identifier**, not evidence of domain control, actual identity or authorization. The verifier does not dereference it. The other historical/retired/denylist routes retain their existing response contracts.
 
+On these **two single-issuer HTTP verification routes**, success additionally returns
+`verifiedNotBefore` and `verifiedExpiresAt` as UTC ISO-8601 timestamps derived
+from the original issuer-signed JWT `nbf`/`exp`, preserving up to 100-nanosecond
+precision (including RFC 7519 fractional NumericDate). `Invalid` and `Revoked`
+return both values as `null`, together with null subject, credential ID and
+issuer name. SDK callers can use
+`JwtVcJsonCredential.TryVerifyWithValidity(..., out verifiedNotBefore,
+out verifiedExpiresAt)` for the same behavior. A relying party may use the
+authenticated end time as an **upper bound on its own cached verification
+result**, not as a grant of access: issuer trust, holder proof, authorization and
+current revocation policy remain independent and must be re-evaluated where
+appropriate. Other HTTP verification profiles are intentionally unchanged.
+
 A malformed, forged, expired, wrong-issuer, wrong-holder, wrong-type or wrong-vocabulary **credential** with otherwise valid bounded request parameters returns HTTP **200** with `{"status":"Invalid","verifiedSubject":null,"verifiedCredentialId":null,"verifiedIssuerName":null}`. Missing/oversized credential or malformed policy inputs return **400**; anonymous requests return **401** and insufficient-scope requests **403**. The JWT and status snapshot are limited to 65,536 characters each, issuer/holder inputs to 255 characters, custom type to 128 and vocabulary URI to 2,048.
 
 ## Optional issuer-signed private revocation snapshot

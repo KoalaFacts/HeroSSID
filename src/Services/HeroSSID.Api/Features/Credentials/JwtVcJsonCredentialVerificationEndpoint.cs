@@ -58,14 +58,16 @@ internal static class JwtVcJsonCredentialVerificationEndpoint
             return InvalidRequest(false);
         }
 
-        bool valid = JwtVcJsonCredential.TryVerifyWithIssuerName(request.Credential!,
+        bool valid = JwtVcJsonCredential.TryVerifyWithValidity(request.Credential!,
             request.TrustedIssuerDid!, request.ExpectedHolderDid!,
             request.ExpectedCredentialType!, request.SubjectContextUri!,
             clock.GetUtcNow(), out var subject, out string? credentialId,
-            out string? issuerName);
+            out string? issuerName, out DateTimeOffset? validFrom,
+            out DateTimeOffset? validUntil);
         return Results.Ok(valid
             ? new VerifyJwtVcJsonCredentialResponse(
-                "SignedButStatusUnchecked", subject, credentialId, issuerName)
+                "SignedButStatusUnchecked", subject, credentialId, issuerName,
+                validFrom, validUntil)
             : new VerifyJwtVcJsonCredentialResponse("Invalid", null));
     }
 
@@ -94,10 +96,11 @@ internal static class JwtVcJsonCredentialVerificationEndpoint
             return InvalidRequest(true);
         }
 
-        if (!JwtVcJsonCredential.TryVerifyWithIssuerName(request.Credential!,
+        if (!JwtVcJsonCredential.TryVerifyWithValidity(request.Credential!,
             request.TrustedIssuerDid!, request.ExpectedHolderDid!,
             request.ExpectedCredentialType!, request.SubjectContextUri!,
-            now, out var subject, out string? credentialId, out string? issuerName))
+            now, out var subject, out string? credentialId, out string? issuerName,
+            out DateTimeOffset? validFrom, out DateTimeOffset? validUntil))
         {
             return Results.Ok(new VerifyJwtVcJsonCredentialResponse("Invalid", null));
         }
@@ -114,7 +117,8 @@ internal static class JwtVcJsonCredentialVerificationEndpoint
         {
             RevocationSnapshotCheckResult.NotListed =>
                 Results.Ok(new VerifyJwtVcJsonCredentialResponse(
-                    "SignedNotListed", subject, credentialId, issuerName)),
+                    "SignedNotListed", subject, credentialId, issuerName,
+                    validFrom, validUntil)),
             RevocationSnapshotCheckResult.Revoked =>
                 Results.Ok(new VerifyJwtVcJsonCredentialResponse("Revoked", null)),
             _ => Results.Ok(new VerifyJwtVcJsonCredentialResponse("Invalid", null))
@@ -179,9 +183,12 @@ public sealed class VerifyJwtVcJsonCredentialWithStatusRequest
 }
 
 /// <summary>
- /// Verified subject, credential ID and descriptive issuer name are null on
- /// failure or revoked status. Name is not issuer trust or legal identity.
+ /// All verified subject, ID, issuer-name and original signed temporal
+ /// outputs are null on rejection/revocation. Times bound downstream caches,
+ /// but do not prove holder control, live status or authorization.
  /// </summary>
 public sealed record VerifyJwtVcJsonCredentialResponse(
     string Status, JsonElement? VerifiedSubject, string? VerifiedCredentialId = null,
-    string? VerifiedIssuerName = null);
+    string? VerifiedIssuerName = null,
+    DateTimeOffset? VerifiedNotBefore = null,
+    DateTimeOffset? VerifiedExpiresAt = null);
