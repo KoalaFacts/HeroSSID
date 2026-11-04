@@ -84,7 +84,7 @@ public sealed class JwtVcJsonAudienceDenylistHttpTests
                 request with { DeniedCredentialSha256 = [Digest(jwt)] },
                 "DeniedByVerifier").ConfigureAwait(true);
             await AssertHiddenAsync("VerifyForAudienceWithDenylist",
-                request with { ExpectedAudience = WrongRecipient },
+                WithAudience(request, WrongRecipient),
                 "Invalid").ConfigureAwait(true);
             await AssertHiddenAsync("VerifyForAudienceWithDenylist",
                 request with { ExpectedHolderDid = active.Did },
@@ -134,9 +134,9 @@ public sealed class JwtVcJsonAudienceDenylistHttpTests
 
         foreach (var invalid in new[]
         {
-            request with { ExpectedAudience = null },
-            request with { ExpectedAudience = new Uri("http://verifier.example/intake") },
-            request with { ExpectedAudience = new Uri("https://verifier.example/intake#frag") },
+            WithAudience(request, null),
+            WithAudience(request, new Uri("http://verifier.example/intake")),
+            WithAudience(request, new Uri("https://verifier.example/intake#frag")),
             request with { DeniedCredentialSha256 = null },
             request with { DeniedCredentialSha256 = [Digest(jwt), Digest(jwt)] },
             request with { DeniedCredentialSha256 = [Digest(jwt).ToUpperInvariant()] }
@@ -179,7 +179,7 @@ public sealed class JwtVcJsonAudienceDenylistHttpTests
 
     private static VerifyJwtVcJsonActiveAndRetiredRequest Request(
         string jwt, string activeDid, string holderDid,
-        JwtVcJsonRetiredCredentialPin? pin = null) => new()
+        JwtVcJsonRetiredCredentialPin? pin = null) => WithAudience(new()
     {
         Credential = jwt,
         ActiveIssuerDids = [activeDid],
@@ -187,9 +187,20 @@ public sealed class JwtVcJsonAudienceDenylistHttpTests
         DeniedCredentialSha256 = [],
         ExpectedHolderDid = holderDid,
         ExpectedCredentialType = Type,
-        SubjectContextUri = Context,
-        ExpectedAudience = Recipient
-    };
+        SubjectContextUri = Context
+    }, Recipient);
+
+    private static VerifyJwtVcJsonActiveAndRetiredRequest WithAudience(
+        VerifyJwtVcJsonActiveAndRetiredRequest request, Uri? audience)
+    {
+        // JSON bridges test-only RED against baseline DTO without this field.
+        // Production must explicitly bind this caller-owned policy.
+        var values = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+            JsonSerializer.Serialize(request))!;
+        values["ExpectedAudience"] = JsonSerializer.SerializeToElement(audience);
+        return JsonSerializer.Deserialize<VerifyJwtVcJsonActiveAndRetiredRequest>(
+            JsonSerializer.Serialize(values))!;
+    }
 
     private static async Task AssertHiddenAsync(string method,
         VerifyJwtVcJsonActiveAndRetiredRequest request, string expected)
