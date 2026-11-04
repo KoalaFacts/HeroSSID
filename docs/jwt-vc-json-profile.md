@@ -13,6 +13,44 @@ This is a **real issuer-signed JWT VC 1.1 credential** intended for the OpenID4V
 - signed `vc.@context=["https://www.w3.org/2018/credentials/v1", pinnedVersionedHttpsVocabulary]` (not `vc.context`), `vc.type=["VerifiableCredential", expectedType]`, and `vc.credentialSubject` with either the exact `id=holderDid` or no nested `id` (the signed JWT `sub` supplies that identifier);
 - a **15-minute maximum** encoded validity interval, a bounded subject and a bounded JWT. Normal `DateTimeOffset` fractional-second arguments are accepted: `iat` and `nbf` round **up** to the next whole second, and `exp` rounds **down**, so the JWT cannot be valid before the requested start or at/after the requested end. An interval that becomes empty, or exceeds 900 encoded seconds, is rejected. Near-second boundaries can shorten the usable interval by up to almost two seconds.
 
+### Opt-in signed issuer name for organisational credentials (SDK)
+
+`JwtVcJsonCredential.CreateWithIssuerName(issuerDid, holderDid,
+credentialType, vocabulary, credentialSubject, issuerSeed, validFrom,
+validUntil, issuerName)` signs an opt-in W3C VC1.1
+`vc.issuer: { "id": "<issuer did:key>", "name": "<display name>" }` object
+inside the **original Ed25519-signed JWT**, using the same 15-minute
+whole-second, subject, type, and vocabulary restrictions as `Create`.
+The original `Create` output **does not change**. The name must be
+nonempty, non-whitespace, at most 128 .NET characters and control-free.
+
+```csharp
+// Issuer signs the chosen descriptive name using its private seed.
+string jwt = JwtVcJsonCredential.CreateWithIssuerName(
+    issuerDid, holderDid, "MembershipCredential", vocabulary,
+    document.RootElement, issuerSeed, now.AddMinutes(-1),
+    now.AddMinutes(10), "Australasian Membership Office");
+
+// The verifier already knows and pins issuerDid independently.
+// A matching display name alone cannot make an issuer trusted.
+bool verified = JwtVcJsonCredential.TryVerify(jwt,
+    trustedIssuerDid, expectedHolderDid, "MembershipCredential",
+    vocabulary, now, out var verifiedSubject);
+```
+
+The issuer `id` **must** match the independently pinned signing DID; the
+display name is signed descriptive metadata only. It does **not** prove the
+legal name of a company, registered organisation status, human identity,
+holder-key control, real user consent, delegation, or business authority.
+Verification uses the genuine issuer signature and rejects unknown extra
+issuer members, malformed names, foreign issuers, and modified JWT bytes.
+Issuer-signed revocation snapshots continue to bind to the **original
+JWT**; non-listing does not prove real-time non-revocation.
+
+This is a **.NET SDK issuance option only**, not an authenticated HTTP
+issuance option, durable credential storage or external wallet interoperability
+certification. It does not claim full W3C VC/OpenID4VP conformance.
+
 ### Opt-in exact 100ns NumericDate issuance
 
 Use `JwtVcJsonCredential.CreateWithExactValidity(issuerDid, holderDid,
