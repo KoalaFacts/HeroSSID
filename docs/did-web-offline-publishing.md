@@ -221,10 +221,41 @@ unexpected capability delegation, any extra service or key, changed
 controllers/references, duplicate JSON properties, substituted bytes and
 malformed/oversized documents are rejected. The original one-key
 `DidWebPublishedKeyMatch` **does not** silently accept dual-key documents.
-The existing isolated `FetchAndMatchWithIsolatedTransportAsync` is still a
-**single-key** fetch. For overlap documents, use your own audited HTTP
-transport and pass the returned bytes to the offline matcher; the SDK
-does not host or retrieve dual-key documents on your behalf.
+The existing `FetchAndMatchWithIsolatedTransportAsync` remains a
+**single-key** fetch. To retrieve the published overlap using the identical
+bounded, isolated public-only HTTPS transport and match **both pre-pinned
+keys**, use:
+
+```csharp
+using HeroSSID.DidOperations.DidMethods;
+
+// did, pinnedOldPublicKey and pinnedSuccessorPublicKey were approved
+// independently BEFORE fetching; never accept these from untrusted claims.
+bool overlapPublished = await
+    DidWebPinnedDocumentHttpTransport.FetchAndMatchTransitionWithIsolatedTransportAsync(
+        did, pinnedOldPublicKey, pinnedSuccessorPublicKey,
+        cancellationToken: cancellationToken);
+if (!overlapPublished)
+{
+    // Reject missing, substituted or malformed published overlap documents.
+}
+```
+
+`FetchAndMatchTransitionAsync(did, oldPin, newPin, http, ...)` supports an
+independently audited injected `HttpClient`. Its handler MUST disable
+redirects, cookies, proxy, credentials and ambient request headers: the
+final-URI check cannot prevent an injected handler from following an earlier
+redirect. Both overlap routes use the existing canonical HTTPS GET, accepted
+DID JSON media types, strict UTF-8, 16-KiB response cap and 15-second
+default/30-second maximum deadline. The isolated handler refuses non-public
+DNS results before TCP connect, but operators still enforce egress and DNS
+integrity separately.
+
+A matching two-key document does not prove domain control, private-key
+possession, identity, issuer authority, past issue time or user consent. It
+does not update credential verifier trust pins or establish independent
+third-party Wallet interoperability. Actual publishing and retirement of
+the old key remain operator-controlled.
 
 This implements a constrained shape permitted by the W3C
 [DID Core 1.0 Recommendation](https://www.w3.org/TR/did-core/#verification-relationships),

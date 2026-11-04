@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Security;
+using System.Security.Cryptography;
 using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -45,6 +46,65 @@ public static class DidWebPinnedDocumentHttpTransport
             return false;
         }
 
+        return await FetchAndMatchDocumentAsync(didIdentifier, http,
+            json => DidWebPublishedKeyMatch.MatchesExpectedDocument(
+                didIdentifier, expectedPublicKey, json),
+            maximumDuration, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Retrieve an exact two-key overlap document for an independently pinned
+    /// DID and BOTH preapproved Ed25519 keys. The supplied HttpClient must
+    /// have a credential-free non-redirecting handler. This verifies only a
+    /// document shape, not private-key custody, authority or issuer trust.
+    /// </summary>
+    public static async Task<bool> FetchAndMatchTransitionAsync(
+        string didIdentifier, byte[] pinnedOldPublicKey, byte[] pinnedNewPublicKey,
+        HttpClient http, TimeSpan? maximumDuration = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(didIdentifier);
+        ArgumentNullException.ThrowIfNull(pinnedOldPublicKey);
+        ArgumentNullException.ThrowIfNull(pinnedNewPublicKey);
+        ArgumentNullException.ThrowIfNull(http);
+
+        if (!new DidWebMethod().IsValid(didIdentifier) ||
+            pinnedOldPublicKey.Length != 32 || pinnedNewPublicKey.Length != 32 ||
+            CryptographicOperations.FixedTimeEquals(
+                pinnedOldPublicKey, pinnedNewPublicKey) ||
+            http.DefaultRequestHeaders.Any())
+        {
+            return false;
+        }
+
+        return await FetchAndMatchDocumentAsync(didIdentifier, http,
+            json => DidWebPinnedKeyTransition.MatchesExpectedTransitionDocument(
+                didIdentifier, pinnedOldPublicKey, pinnedNewPublicKey, json),
+            maximumDuration, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Fetch a preapproved two-key overlap DID using a disposable isolated
+    /// HTTPS handler. Network egress and independent trust policy remain the
+    /// operator's responsibility; the successor is not promoted to trust.
+    /// </summary>
+    public static async Task<bool> FetchAndMatchTransitionWithIsolatedTransportAsync(
+        string didIdentifier, byte[] pinnedOldPublicKey, byte[] pinnedNewPublicKey,
+        TimeSpan? maximumDuration = null,
+        CancellationToken cancellationToken = default)
+    {
+        using var handler = CreateIsolatedTransportHandler();
+        using var http = new HttpClient(handler, disposeHandler: false);
+        return await FetchAndMatchTransitionAsync(
+            didIdentifier, pinnedOldPublicKey, pinnedNewPublicKey, http,
+            maximumDuration, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Shared fail-closed response path for single-key and two-key profiles.
+    private static async Task<bool> FetchAndMatchDocumentAsync(
+        string didIdentifier, HttpClient http, Func<string, bool> matches,
+        TimeSpan? maximumDuration, CancellationToken cancellationToken)
+    {
         TimeSpan duration = maximumDuration ?? TimeSpan.FromSeconds(15);
         if (duration <= TimeSpan.Zero || duration > TimeSpan.FromSeconds(30))
         {
@@ -106,8 +166,7 @@ public static class DidWebPinnedDocumentHttpTransport
             }
 
             string documentJson = s_strictUtf8.GetString(bytes, 0, count);
-            return DidWebPublishedKeyMatch.MatchesExpectedDocument(
-                didIdentifier, expectedPublicKey, documentJson);
+            return matches(documentJson);
         }
         catch (HttpRequestException)
         {
@@ -127,26 +186,6 @@ public static class DidWebPinnedDocumentHttpTransport
             return false;
         }
     }
-
-
-    /// <summary>
-    /// Fetch a two-key overlap DID document and compare against two independently pinned keys.
-    /// The injected HttpClient must use a separately audited credential-free no-redirect handler.
-    /// </summary>
-    public static Task<bool> FetchAndMatchTransitionAsync(
-        string didIdentifier, byte[] pinnedOldPublicKey, byte[] pinnedNewPublicKey,
-        HttpClient http, TimeSpan? maximumDuration = null,
-        CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException("Two-key published-document transport is not yet implemented.");
-
-    /// <summary>
-    /// Fetch a preapproved two-key DID overlap document using isolated public-only HTTPS.
-    /// </summary>
-    public static Task<bool> FetchAndMatchTransitionWithIsolatedTransportAsync(
-        string didIdentifier, byte[] pinnedOldPublicKey, byte[] pinnedNewPublicKey,
-        TimeSpan? maximumDuration = null,
-        CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException("Two-key isolated HTTPS transport is not yet implemented.");
 
     private static bool IsAllowedContentType(MediaTypeHeaderValue? value)
     {
