@@ -13,7 +13,7 @@ public sealed class DidWebPinnedDocumentHttpTransportTests
     {
         (string did, byte[] key, string json) = Document();
         int calls = 0;
-        using var http = Client(request =>
+        using var handler = new FakeHandler(request =>
         {
             calls++;
             Assert.Equal("https://issuer.example.org/.well-known/did.json",
@@ -22,6 +22,7 @@ public sealed class DidWebPinnedDocumentHttpTransportTests
             Assert.Null(request.Headers.Authorization);
             return JsonResponse(json);
         });
+        using var http = new HttpClient(handler, disposeHandler: false);
 
         Assert.True(await DidWebPinnedDocumentHttpTransport.FetchAndMatchAsync(
             did, key, http, cancellationToken: TestContext.Current.CancellationToken));
@@ -34,12 +35,13 @@ public sealed class DidWebPinnedDocumentHttpTransportTests
         (string did, byte[] key, string json) = Document("did:web:issuer.example.org:teams:acme");
         using Key other = Key.Create(SignatureAlgorithm.Ed25519);
         byte[] substituted = other.PublicKey.Export(KeyBlobFormat.RawPublicKey);
-        using var http = Client(request =>
+        using var handler = new FakeHandler(request =>
         {
             Assert.Equal("https://issuer.example.org/teams/acme/did.json",
                 request.RequestUri!.AbsoluteUri);
             return JsonResponse(json);
         });
+        using var http = new HttpClient(handler, disposeHandler: false);
 
         Assert.False(await DidWebPinnedDocumentHttpTransport.FetchAndMatchAsync(
             did, substituted, http, cancellationToken: TestContext.Current.CancellationToken));
@@ -52,10 +54,11 @@ public sealed class DidWebPinnedDocumentHttpTransportTests
     public async Task FailsClosedOnNonSuccessStatus(HttpStatusCode status)
     {
         (string did, byte[] key, string json) = Document();
-        using var http = Client(_ => new HttpResponseMessage(status)
+        using var handler = new FakeHandler(_ => new HttpResponseMessage(status)
         {
             Content = new StringContent(json, Encoding.UTF8, "application/did+ld+json")
         });
+        using var http = new HttpClient(handler, disposeHandler: false);
         Assert.False(await DidWebPinnedDocumentHttpTransport.FetchAndMatchAsync(
             did, key, http, cancellationToken: TestContext.Current.CancellationToken));
     }
@@ -66,10 +69,11 @@ public sealed class DidWebPinnedDocumentHttpTransportTests
     public async Task RejectsUnexpectedContentType(string contentType)
     {
         (string did, byte[] key, string json) = Document();
-        using var http = Client(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        using var handler = new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(json, Encoding.UTF8, contentType)
         });
+        using var http = new HttpClient(handler, disposeHandler: false);
         Assert.False(await DidWebPinnedDocumentHttpTransport.FetchAndMatchAsync(
             did, key, http, cancellationToken: TestContext.Current.CancellationToken));
     }
@@ -78,14 +82,16 @@ public sealed class DidWebPinnedDocumentHttpTransportTests
     public async Task RejectsOversizedUnannouncedBodiesAndWrongKey()
     {
         (string did, byte[] key, string json) = Document();
-        using var tooLarge = Client(_ => JsonResponse(
+        using var largeHandler = new FakeHandler(_ => JsonResponse(
             new string(' ', 16_385) + json));
+        using var tooLarge = new HttpClient(largeHandler, disposeHandler: false);
         Assert.False(await DidWebPinnedDocumentHttpTransport.FetchAndMatchAsync(
             did, key, tooLarge, cancellationToken: TestContext.Current.CancellationToken));
 
-        using var malicious = Client(_ => JsonResponse(
+        using var maliciousHandler = new FakeHandler(_ => JsonResponse(
             json.Replace("issuer.example.org", "attacker.example.org",
                 StringComparison.Ordinal)));
+        using var malicious = new HttpClient(maliciousHandler, disposeHandler: false);
         Assert.False(await DidWebPinnedDocumentHttpTransport.FetchAndMatchAsync(
             did, key, malicious, cancellationToken: TestContext.Current.CancellationToken));
     }
@@ -95,11 +101,12 @@ public sealed class DidWebPinnedDocumentHttpTransportTests
     {
         (string did, byte[] key, string json) = Document();
         int calls = 0;
-        using var http = Client(_ =>
+        using var handler = new FakeHandler(_ =>
         {
             calls++;
             return JsonResponse(json);
         });
+        using var http = new HttpClient(handler, disposeHandler: false);
         http.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", "private-token");
         Assert.False(await DidWebPinnedDocumentHttpTransport.FetchAndMatchAsync(
@@ -111,13 +118,14 @@ public sealed class DidWebPinnedDocumentHttpTransportTests
     public async Task RefusesResponseFromDifferentFinalUri()
     {
         (string did, byte[] key, string json) = Document();
-        using var http = Client(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        using var handler = new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
         {
             RequestMessage = new HttpRequestMessage(
                 HttpMethod.Get, "https://attacker.example.org/did.json"),
             Content = new StringContent(json, Encoding.UTF8,
                 "application/did+ld+json")
         });
+        using var http = new HttpClient(handler, disposeHandler: false);
         Assert.False(await DidWebPinnedDocumentHttpTransport.FetchAndMatchAsync(
             did, key, http, cancellationToken: TestContext.Current.CancellationToken));
     }
@@ -127,30 +135,17 @@ public sealed class DidWebPinnedDocumentHttpTransportTests
     {
         (string _, byte[] key, string json) = Document();
         int calls = 0;
-        using var http = Client(_ =>
+        using var handler = new FakeHandler(_ =>
         {
             calls++;
             return JsonResponse(json);
         });
+        using var http = new HttpClient(handler, disposeHandler: false);
         Assert.False(await DidWebPinnedDocumentHttpTransport.FetchAndMatchAsync(
             "did:web:127.0.0x1", key, http, cancellationToken: TestContext.Current.CancellationToken));
         Assert.False(await DidWebPinnedDocumentHttpTransport.FetchAndMatchAsync(
             "did:web:issuer.example.org", key[..31], http, cancellationToken: TestContext.Current.CancellationToken));
         Assert.Equal(0, calls);
-    }
-
-    private static HttpClient Client(Func<HttpRequestMessage, HttpResponseMessage> send)
-    {
-        var handler = new FakeHandler(send);
-        try
-        {
-            return new HttpClient(handler, disposeHandler: true);
-        }
-        catch
-        {
-            handler.Dispose();
-            throw;
-        }
     }
 
     private static HttpResponseMessage JsonResponse(string json) =>
