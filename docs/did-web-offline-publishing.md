@@ -143,8 +143,12 @@ the preapproved hostname for each new TCP connection, refuses empty or mixed
 public/private DNS answer sets, and establishes TCP directly to a validated
 public IPv4/IPv6 address without a second DNS lookup. Loopback, RFC1918,
 shared/metadata/link-local, documentation, benchmark, multicast and selected
-tunnel/overlay destinations are denied before connect. Normal HTTPS SNI and
-certificate validation continue to use the original domain. This deliberately
+tunnel/overlay destinations are denied before connect. The entire IETF
+protocol-assignment block `2001::/23` is also denied, **including its
+globally reachable specific-purpose exceptions**, rather than silently trusting
+future registry additions. Ordinary public issuer hosts should use globally
+allocated unicast ranges outside this block. Normal HTTPS SNI and certificate
+validation continue to use the original domain. This deliberately
 conservative filter may reject split-horizon/private-only issuers; use an
 independently audited caller-supplied transport only under explicit network
 controls. `IsPublicEgressAddress(IPAddress)` exposes the exact filter for
