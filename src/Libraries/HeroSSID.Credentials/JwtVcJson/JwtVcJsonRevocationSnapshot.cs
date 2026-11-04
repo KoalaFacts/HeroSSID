@@ -67,7 +67,12 @@ public static class JwtVcJsonRevocationSnapshot
             digests.Add(Digest(credentialJwt));
         }
 
-        long issuedAt = observedAt.ToUnixTimeSeconds();
+        // Preserve the actual issuer-observed instant to 100ns in the PRIVATE
+        // signed status format. Whole-second truncation made a genuinely fresh
+        // post-incident observation fail a verifier-owned fractional cutoff.
+        // Earlier integer NumericDate snapshots remain valid input.
+        decimal issuedAt = (decimal)(observedAt.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks) /
+            TimeSpan.TicksPerSecond;
         string header = JsonSerializer.Serialize(new { alg = "EdDSA", typ = SnapshotType });
         string payload = JsonSerializer.Serialize(new
         {
@@ -85,7 +90,7 @@ public static class JwtVcJsonRevocationSnapshot
             throw new CryptographicException("Status signer does not control the specified issuer did:key.");
         }
 
-        if (clock.GetUtcNow().ToUnixTimeSeconds() >= issuedAt + MaximumAgeSeconds)
+        if (clock.GetUtcNow() >= observedAt.AddSeconds(MaximumAgeSeconds))
         {
             throw new ArgumentException("Revocation snapshot expired during signing.", nameof(observedAt));
         }
@@ -110,6 +115,15 @@ public static class JwtVcJsonRevocationSnapshot
         ArgumentNullException.ThrowIfNull(snapshotJwt);
         ArgumentNullException.ThrowIfNull(credentialJwt);
 
+        // Compare the original signed NumericDate and verifier-owned cutoff
+        // without rounding either clock backwards to whole seconds.
+        decimal nowSeconds = (decimal)(now.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks) /
+            TimeSpan.TicksPerSecond;
+        decimal? minimumSeconds = minimumObservedAt is DateTimeOffset cutoffInstant
+            ? (decimal)(cutoffInstant.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks) /
+                TimeSpan.TicksPerSecond
+            : null;
+
         if (!OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(trustedIssuerDid, out var issuerKey) ||
             !IsAuthenticIssuerCredential(credentialJwt, trustedIssuerDid, issuerKey) ||
             !StrictJwtReader.TryRead(snapshotJwt, SnapshotType, MaximumSnapshotLength, out var snapshot) ||
@@ -122,12 +136,13 @@ public static class JwtVcJsonRevocationSnapshot
             !snapshot.TryGetProperty("version", out var version) ||
             version.ValueKind != JsonValueKind.Number || !version.TryGetInt32(out var value) ||
             value != 1 ||
-            !StrictJwtReader.TryGetTimestamp(snapshot, "iat", out long issuedAt) ||
-            !StrictJwtReader.TryGetTimestamp(snapshot, "exp", out long expiresAt) ||
-            issuedAt > now.ToUnixTimeSeconds() ||
-            (minimumObservedAt is DateTimeOffset cutoff &&
-                DateTimeOffset.FromUnixTimeSeconds(issuedAt) < cutoff) ||
-            expiresAt <= now.ToUnixTimeSeconds() ||
+            !JwtVcJsonCredential.TryGetSignedNumericDate(snapshot, "iat",
+                normative: true, out decimal issuedAt) ||
+            !JwtVcJsonCredential.TryGetSignedNumericDate(snapshot, "exp",
+                normative: true, out decimal expiresAt) ||
+            issuedAt > nowSeconds ||
+            (minimumSeconds is decimal cutoff && issuedAt < cutoff) ||
+            expiresAt <= nowSeconds ||
             expiresAt - issuedAt != MaximumAgeSeconds ||
             !snapshot.TryGetProperty("revoked", out var revoked) ||
             revoked.ValueKind != JsonValueKind.Array || revoked.GetArrayLength() > MaximumEntries)

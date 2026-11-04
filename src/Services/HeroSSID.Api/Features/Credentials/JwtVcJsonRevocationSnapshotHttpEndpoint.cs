@@ -138,8 +138,7 @@ internal static class JwtVcJsonRevocationSnapshotHttpEndpoint
 
                     // Return no stale export even if signing and validation
                     // consumed the remainder of its 60-second validity window.
-                    if (clock.GetUtcNow().ToUnixTimeSeconds() >=
-                        observedAt.ToUnixTimeSeconds() + 60)
+                    if (clock.GetUtcNow() >= observedAt.AddSeconds(60))
                     {
                         return Unavailable();
                     }

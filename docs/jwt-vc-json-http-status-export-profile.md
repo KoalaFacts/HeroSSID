@@ -56,9 +56,14 @@ credential using `JwtVcJsonRevocationSnapshot.Check` or
 `POST /api/v1/credentials/jwt-vc-json/verify-with-status`. For a
 holder-signed `direct_post`, the verifier backend supplies this snapshot
 to its authenticated `/jwt-vc-json/openid4vp/verify-response` route.
-The snapshot's signed `iat` and `exp` establish a **maximum 60-second
-observation-to-expiry window**. Do not cache or reissue an old observation
-under a later timestamp.
+The snapshot's signed `iat` and `exp` preserve the issuer-reported
+observation to 100ns and establish an **exact 60-second
+observation-to-expiry window**. Older issuer-signed whole-second snapshots
+remain readable; a relying party may independently pin a fractional
+post-incident cutoff and will reject any older snapshot without rounding
+that cutoff backward. Do not cache or reissue an old observation under a
+later timestamp. These fractional timestamps are privately defined status
+metadata, not a W3C status-list conformance claim.
 
 ## Explicit failure and trust rules
 
