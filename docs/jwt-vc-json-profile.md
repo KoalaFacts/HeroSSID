@@ -188,8 +188,13 @@ in the integrating Wallet, and a one-use challenge.
 
 Zero or multiple subject entries, non-object entries, conflicting explicit
 IDs, nested `@context` shadowing, oversized original arrays and legacy
-`typ=vc+jwt` arrays are rejected. Issuer `Create` continues producing
-the original object form, rather than silently changing existing issuance.
+`typ=vc+jwt` arrays are rejected. Issuer `Create` and `CreateWithExactValidity` now also accept an explicit
+**single-element array** input and sign that array unchanged. Object-form
+inputs continue producing the original object form; there is no implicit
+serialization change for existing callers. Each array must contain exactly
+one object, with either no nested `id` (JWT `sub` supplies it) or exactly
+the independently supplied holder DID. Multiple or empty arrays, non-object
+entries, conflicting IDs and nested contexts remain rejected during issuance.
 This is a **single-holder interoperability subset**, not general multi-subject
 VC support, third-party wallet testing, or a credential-status standard.
 The returning subject object is only an authenticated view of a member of

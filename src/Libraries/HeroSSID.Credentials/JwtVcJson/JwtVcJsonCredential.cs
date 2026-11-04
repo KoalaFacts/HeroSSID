@@ -119,11 +119,10 @@ public static class JwtVcJsonCredential
             issuerPrivateKey.All(static b => b == 0) ||
             issued < 0 || expires <= issued ||
             expires - issued > MaximumValiditySeconds ||
-            credentialSubject.ValueKind != JsonValueKind.Object ||
-            // VC1.1 JWT sub is the authoritative subject ID. Do not invent a
-            // nested id when the issuer intentionally leaves it out; reject
-            // an explicit conflicting value exactly as the verifier does.
-            !HasBoundSubject(credentialSubject, holderDid, isNormativeJwt: true) ||
+            // VC1.1 allows one object or an array containing exactly one object.
+            // Keep the exact wire representation; never normalize an
+            // ambiguous/multiple-subject array or rewrite a conflicting id.
+            !HasIssuableSubject(credentialSubject, holderDid) ||
             StrictJwtReader.HasEmbeddedContext(credentialSubject) ||
             Encoding.UTF8.GetByteCount(credentialSubject.GetRawText()) > MaximumSubjectBytes)
         {
@@ -286,6 +285,24 @@ public static class JwtVcJsonCredential
         }
 
         return true;
+    }
+
+    private static bool HasIssuableSubject(JsonElement encodedSubject, string holderDid)
+    {
+        JsonElement subject = encodedSubject;
+        if (encodedSubject.ValueKind == JsonValueKind.Array)
+        {
+            if (encodedSubject.GetArrayLength() != 1 ||
+                encodedSubject[0].ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            subject = encodedSubject[0];
+        }
+
+        return subject.ValueKind == JsonValueKind.Object &&
+            HasBoundSubject(subject, holderDid, isNormativeJwt: true);
     }
 
     private static bool HasBoundSubject(JsonElement subject, string holderDid, bool isNormativeJwt)
