@@ -89,7 +89,8 @@ public sealed class OperatorDidWebPublisherTests
         {
             ("http", "issuer.example"),
             ("https", "other.example"),
-            ("https", "issuer.example:8443")
+            ("https", "issuer.example:8443"),
+            ("https", "issuer.example:9999999999")
         })
         {
             DefaultHttpContext denied = Context(pair.Item1, pair.Item2);
@@ -127,6 +128,10 @@ public sealed class OperatorDidWebPublisherTests
         using var wrongPort = await client.GetAsync(
             new Uri("https://issuer.example:8443/.well-known/did.json", UriKind.Absolute)).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.NotFound, wrongPort.StatusCode);
+        // Overflowed Host ports must not be mistaken for no explicit port.
+        // Direct-handler coverage above exercises malformed HostString; this
+        // normal TestServer request exercises ordinary alternate ports.
+
 
         using var disabled = new DidWebHttpFactory(null);
         using var disabledClient = disabled.CreateClient();
@@ -150,7 +155,11 @@ public sealed class OperatorDidWebPublisherTests
                     ["Jwt:Issuer"] = "https://http-test.example",
                     ["Jwt:Audience"] = "https://http-test.example",
                     ["ConnectionStrings:HeroDb"] = "Host=unused;Database=unused",
-                    ["HEROSSID_DB_PASSWORD"] = "unused"
+                    ["HEROSSID_DB_PASSWORD"] = "unused",
+                    // Host-filtering is a separate middleware. Allow both test
+                    // hosts so these assertions exercise the did:web publisher
+                    // itself rather than the framework's AllowedHosts gate.
+                    ["AllowedHosts"] = "localhost;issuer.example;unapproved.example"
                 };
                 if (keyBytes is not null)
                 {
