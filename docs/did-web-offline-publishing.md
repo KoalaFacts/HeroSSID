@@ -175,3 +175,60 @@ a trusted issuer, actual private-key possession, legal identity, live
 revocation, human consent, Agent authority or third-party wallet
 interoperability. It neither changes existing `did:key` issuer verification
 nor automatically promotes a retrieved key into trust.
+
+## Offline two-key publication overlap (opt-in)
+
+For an operator-planned `did:web` key change, the SDK can prepare a **DID
+Core 1.0** document that explicitly lists both the old and successor Ed25519
+verification methods at the same DID. The established `did:web` and its
+canonical HTTPS publication URI remain unchanged. This is a deliberately
+restricted dual-key overlap profile, not a signing-key recovery, private-key
+possession proof, permission to use a key, or automatic trust transition.
+
+```csharp
+using HeroSSID.DidOperations.DidMethods;
+
+// Both 32-byte public keys and this DID must be preapproved by your operator.
+// The caller separately retains and protects the corresponding private keys.
+const string did = "did:web:issuer.example.org:organisations:acme";
+string documentToPublish = DidWebPinnedKeyTransition.CreateTransitionDocument(
+    did, pinnedOldPublicKey, pinnedSuccessorPublicKey);
+Uri uri = DidWebMethod.GetDocumentUri(did);
+// https://issuer.example.org/organisations/acme/did.json
+// Operator publishes documentToPublish at this exact URI, via controlled HTTPS.
+
+// A different verifier, after independently fetching the document using
+// audited HTTPS/DNS/SSRF protections, can check both *pre-enrolled* pins:
+bool exactOverlap = DidWebPinnedKeyTransition.MatchesExpectedTransitionDocument(
+    did, pinnedOldPublicKey, pinnedSuccessorPublicKey, fetchedDocument);
+if (!exactOverlap)
+{
+    // Reject substitution, reordered key identities, extra capabilities, etc.
+}
+```
+
+The generated `verificationMethod` set uses `#key-1` for the previously
+pinned key and `#key-2` for the independently pinned successor. **Both are
+advertised as active** by the DID document's `authentication` and
+`assertionMethod` arrays throughout the overlap. Operators must decide
+**when** to publish the dual-key document, prove their private key possession
+separately, and retire the old method and update relying-party key trust under
+their own policy. The library does not automatically enable a verifier to
+trust a successor or accept credentials signed by either method.
+
+Only the precise generated two-key profile passes the opt-in matcher:
+unexpected capability delegation, any extra service or key, changed
+controllers/references, duplicate JSON properties, substituted bytes and
+malformed/oversized documents are rejected. The original one-key
+`DidWebPublishedKeyMatch` **does not** silently accept dual-key documents.
+The existing isolated `FetchAndMatchWithIsolatedTransportAsync` is still a
+**single-key** fetch. For overlap documents, use your own audited HTTP
+transport and pass the returned bytes to the offline matcher; the SDK
+does not host or retrieve dual-key documents on your behalf.
+
+This implements a constrained shape permitted by the W3C
+[DID Core 1.0 Recommendation](https://www.w3.org/TR/did-core/#verification-relationships),
+**not** proof of complete DID/did:web method conformance, key custody,
+issuer trust, legal identity, Agent delegation, business authorisation or
+third-party Wallet interoperability. No database/schema, production
+publishing, actual DNS, secrets, deployment or package release is involved.
