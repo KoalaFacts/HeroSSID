@@ -130,7 +130,16 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
                     ? now
                     : DateTimeOffset.FromUnixTimeSeconds(now.ToUnixTimeSeconds());
                 string jwt;
-                if (request.ExactValidity)
+                if (request.IssuerName is not null)
+                {
+                    // A descriptive issuer name is signed by the same tenant-owned
+                    // Ed25519 key, never an external source of issuer trust.
+                    jwt = JwtVcJsonCredential.CreateWithIssuerName(issuerDid,
+                        holderDid, credentialType, context, request.CredentialSubject,
+                        seed, signingStart, validUntil, request.IssuerName,
+                        request.CredentialId, request.ExactValidity);
+                }
+                else if (request.ExactValidity)
                 {
                     jwt = request.CredentialId is Uri exactId
                         ? JwtVcJsonCredential.CreateWithExactValidity(issuerDid,
@@ -187,7 +196,7 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
 
     private static IResult InvalidRequest() => Results.Problem(
         title: "Invalid Request",
-        detail: "An active tenant-owned issuer, external did:key holder, HTTPS credential type and vocabulary, optional bounded HTTPS credential ID, one object or one-element object array with absent or matching holder id, and expiry within 15 minutes are required.",
+        detail: "An active tenant-owned issuer, external did:key holder, HTTPS credential type and vocabulary, optional bounded HTTPS credential ID, an optional nonblank control-free issuer name of at most 128 characters, one object or one-element object array with absent or matching holder id, and expiry within 15 minutes are required.",
         statusCode: StatusCodes.Status400BadRequest);
 }
 
@@ -207,6 +216,11 @@ public sealed class IssueJwtVcJsonCredentialRequest
     /// legacy whole-second HTTP validity. Defaults to false.
     /// </summary>
     public bool ExactValidity { get; init; }
+    /// <summary>
+    /// Optional signed descriptive VC1.1 vc.issuer.name. Never a trust anchor,
+    /// proof of legal organisation identity or authorization.
+    /// </summary>
+    public string? IssuerName { get; init; }
 }
 
 /// <summary>Issuer-signed JWT only: no holder proof, live revocation or business authority.</summary>

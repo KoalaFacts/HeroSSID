@@ -35,6 +35,29 @@ holder-key proof, consent or third-party Wallet interoperability.
 
 The example DIDs are placeholders and are not valid real keys. Use a genuinely generated DID and choose a future `validUntil` **no more than 15 minutes after the server's current time**. The supplied `credentialSubject` may omit its nested `id` because W3C VC Data Model 1.1 JWT encoding represents that identifier in the genuine signed JWT `sub` claim. If an explicit nested `id` is supplied, it **must exactly equal** `holderDid`; conflicting, null or empty values are rejected (400). HeroSSID does not invent a nested `id` in the signed subject. Both forms, with or without optional `credentialId`/signed `jti`, are exercised through the authenticated HTTP contract tests. The custom type must be an absolute HTTPS IRI rather than an undefined compact term, matching the controlled OpenID4VP DCQL type policy. The HTTPS subject context is a versioned vocabulary pinned independently by the relying party; the library does not fetch or JSON-LD-expand it.
 
+### Optional issuer-signed organisation display name
+
+An authenticated issuer may supply an optional `"issuerName":
+"Australasian Membership Office"` string in the existing request. The
+same enrolled tenant-owned Ed25519 issuer key signs the exact
+`vc.issuer: {"id":"<issuer did:key>","name":"<issuerName>"}`
+object in the original VC1.1 JWT. The verifier still **independently pins
+issuer DID, holder DID, type and vocabulary**, verifies the original
+signature, and checks validity before releasing the subject. The display
+name does **not** verify a legal entity, company registration, identity
+vetting, delegated rights, or an Agent's business authority.
+
+The optional name must contain non-whitespace text, be at most 128 .NET
+characters, and have no control characters. Blank, overlong or
+control-containing names return 400; absent/null `issuerName` retains
+the original compact issuance unchanged. This is compatible with
+either `exactValidity` setting and the optional issuer-signed HTTPS
+`credentialId` (`jti`). Authentication, issuer ownership, signing-grant
+policy, quota, zeroization, revocation and status boundaries are unchanged.
+Successful HTTP issuance alone does not establish real user consent,
+holder-private-key possession, third-party Wallet interoperability or
+credential acceptance by any verifier.
+
 ### Optional exact JWT validity for non-.NET issuers
 
 Set `"exactValidity": true` when the authenticated caller needs the JWT's

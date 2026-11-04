@@ -79,6 +79,23 @@ public static class JwtVcJsonCredential
     }
 
     /// <summary>
+    /// Authenticated issuer adapters may opt into the descriptive issuer object
+    /// while independently selecting exact or whole-second validity and an
+    /// optional issuer-signed HTTPS credential ID. These are signed assertions,
+    /// never proof of legal identity or authority. Existing overloads are unchanged.
+    /// </summary>
+    public static string CreateWithIssuerName(string issuerDid, string holderDid,
+        string credentialType, Uri subjectContextUri, JsonElement credentialSubject,
+        byte[] issuerPrivateKey, DateTimeOffset validFrom, DateTimeOffset validUntil,
+        string issuerName, Uri? credentialId, bool exactValidity)
+    {
+        ArgumentNullException.ThrowIfNull(issuerName);
+        return CreateCore(issuerDid, holderDid, credentialType, subjectContextUri,
+            credentialSubject, issuerPrivateKey, validFrom, validUntil,
+            credentialId, exactValidity, issuerName);
+    }
+
+    /// <summary>
     /// Opt-in VC1.1 JWT issuance retaining the exact caller-supplied validity
     /// instants as RFC 7519 NumericDate fractions down to 100 nanoseconds.
     /// Unlike Create, this does not round inward to whole seconds. The original
