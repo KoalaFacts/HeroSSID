@@ -25,6 +25,7 @@ public sealed class JwtVcJsonAudienceDenylistHttpTests
     private static readonly Uri Context = new("https://issuer.example/contexts/member/v1");
     private static readonly Uri Recipient = new("https://verifier.example/intake");
     private static readonly Uri WrongRecipient = new("https://other.example/intake");
+    private static readonly Uri AnotherAllowedRecipient = new("https://second.example/intake");
     private const string Type = "https://issuer.example/credentials#Member";
 
     [Fact]
@@ -245,7 +246,7 @@ public sealed class JwtVcJsonAudienceDenylistHttpTests
             issuer.Did, holderDid, Type, Context,
             JsonSerializer.SerializeToElement(new { id = holderDid, role }),
             issuer.Seed, Now.AddMinutes(-1), Now.AddMinutes(5),
-            [Recipient, WrongRecipient], null, null, exactValidity: false);
+            [Recipient, AnotherAllowedRecipient], null, null, exactValidity: false);
 
     private static string Snapshot((byte[] Seed, string Did) issuer,
         IReadOnlyCollection<string> revoked) =>
