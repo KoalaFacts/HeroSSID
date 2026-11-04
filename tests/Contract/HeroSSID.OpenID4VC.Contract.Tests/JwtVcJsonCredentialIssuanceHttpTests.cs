@@ -156,7 +156,7 @@ public sealed class JwtVcJsonCredentialIssuanceHttpTests(AspireWebApplicationFac
         string issuerDid = await CreateDidAsync(token).ConfigureAwait(true);
         using var holder = Key.Create(SignatureAlgorithm.Ed25519);
         string holderDid = DidFromKey(holder.PublicKey.Export(KeyBlobFormat.RawPublicKey));
-        string[] invalidNames = ["", "   ", "Contains\\nNewline",
+        string[] invalidNames = ["", "   ", "Contains\nNewline",
             new string('X', 129)];
 
         foreach (string issuerName in invalidNames)
