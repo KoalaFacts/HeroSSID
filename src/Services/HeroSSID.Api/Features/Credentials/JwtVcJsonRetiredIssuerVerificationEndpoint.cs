@@ -242,7 +242,8 @@ internal static class JwtVcJsonRetiredIssuerVerificationEndpoint
 
         if (withAudience)
         {
-            if (request.ExpectedAudience is not { IsAbsoluteUri: true } audience ||
+            Uri? audience = request.ExpectedAudience;
+            if (audience is not { IsAbsoluteUri: true } ||
                 audience.Scheme != Uri.UriSchemeHttps || audience.Host.Length == 0 ||
                 audience.UserInfo.Length != 0 || audience.Fragment.Length != 0 ||
                 audience.AbsoluteUri.Length > 2048)
