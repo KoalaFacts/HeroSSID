@@ -103,6 +103,78 @@ public sealed class JwtVcJsonCredentialIssuanceHttpTests(AspireWebApplicationFac
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AuthenticatedIssuerSignsDescriptiveNameIntoOriginalVc11Jwt(bool exactValidity)
+    {
+        // A remote relying party can verify the original issuer signature, not merely
+        // trust an HTTP response or unverified display text.
+        string token = await GetTokenAsync("did:manage credential:issue").ConfigureAwait(true);
+        string issuerDid = await CreateDidAsync(token).ConfigureAwait(true);
+        using var holder = Key.Create(SignatureAlgorithm.Ed25519);
+        string holderDid = DidFromKey(holder.PublicKey.Export(KeyBlobFormat.RawPublicKey));
+        const string issuerName = "Australasian Membership Office";
+        const string credentialId = "https://issuer.example/credentials/descriptive-issuer";
+
+        using var issued = await PostAsync(Endpoint, new
+        {
+            issuerDid,
+            holderDid,
+            credentialType = CredentialType,
+            subjectContextUri = Vocabulary,
+            credentialSubject = new { id = holderDid, membership = "active" },
+            validUntil = DateTimeOffset.UtcNow.AddMinutes(5),
+            credentialId,
+            exactValidity,
+            issuerName
+        }, token).ConfigureAwait(true);
+
+        string jwt = await SetupResponse.ReadRequiredStringAsync(
+            issued, HttpStatusCode.Created, "Issue named VC1.1 JWT", "credential")
+            .ConfigureAwait(true);
+        using var signed = JsonDocument.Parse(Ed25519JwtSigner.ExtractPayload(jwt));
+        var vc = signed.RootElement.GetProperty("vc");
+        Assert.Equal(issuerDid, vc.GetProperty("issuer").GetProperty("id").GetString());
+        Assert.Equal(issuerName, vc.GetProperty("issuer").GetProperty("name").GetString());
+        Assert.Equal(credentialId, signed.RootElement.GetProperty("jti").GetString());
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, issuerDid, holderDid,
+            CredentialType, Vocabulary, DateTimeOffset.UtcNow, out var claims,
+            out string? verifiedCredentialId));
+        Assert.Equal("active", claims.GetProperty("membership").GetString());
+        Assert.Equal(credentialId, verifiedCredentialId);
+        using var differentIssuer = Key.Create(SignatureAlgorithm.Ed25519);
+        string wrongDid = DidFromKey(differentIssuer.PublicKey.Export(KeyBlobFormat.RawPublicKey));
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, wrongDid, holderDid,
+            CredentialType, Vocabulary, DateTimeOffset.UtcNow, out _));
+    }
+
+    [Fact]
+    public async Task AuthenticatedIssuerRejectsMalformedDescriptiveNameWithoutIssuing()
+    {
+        string token = await GetTokenAsync("did:manage credential:issue").ConfigureAwait(true);
+        string issuerDid = await CreateDidAsync(token).ConfigureAwait(true);
+        using var holder = Key.Create(SignatureAlgorithm.Ed25519);
+        string holderDid = DidFromKey(holder.PublicKey.Export(KeyBlobFormat.RawPublicKey));
+        string[] invalidNames = ["", "   ", "Contains\\nNewline",
+            new string('X', 129)];
+
+        foreach (string issuerName in invalidNames)
+        {
+            using var issued = await PostAsync(Endpoint, new
+            {
+                issuerDid,
+                holderDid,
+                credentialType = CredentialType,
+                subjectContextUri = Vocabulary,
+                credentialSubject = new { id = holderDid, membership = "active" },
+                validUntil = DateTimeOffset.UtcNow.AddMinutes(5),
+                issuerName
+            }, token).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.BadRequest, issued.StatusCode);
+        }
+    }
+
     [Fact]
     public async Task AuthenticatedIssuerSignsVc11JwtForUnenrolledHolder()
     {
