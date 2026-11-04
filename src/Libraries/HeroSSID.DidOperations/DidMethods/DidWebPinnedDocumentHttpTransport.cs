@@ -219,6 +219,12 @@ public static class DidWebPinnedDocumentHttpTransport
             return false; // 6to4 IPv4 tunnel destinations.
         }
 
+        if (bytes[0] == 0x3f && bytes[1] == 0xff &&
+            (bytes[2] & 0xf0) == 0x00)
+        {
+            return false; // RFC 9637 documentation prefix 3fff::/20.
+        }
+
         return !(bytes[0] == 0x20 && bytes[1] == 0x01 &&
             ((bytes[2] == 0x0d && bytes[3] == 0xb8) || // Documentation.
              (bytes[2] == 0x00 && bytes[3] == 0x00) || // Teredo.
