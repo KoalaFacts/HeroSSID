@@ -75,7 +75,7 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
                  string.IsNullOrWhiteSpace(identifier.Host) ||
                  identifier.UserInfo.Length != 0 ||
                  identifier.AbsoluteUri.Length > 2048)) ||
-            request.CredentialSubject.ValueKind != JsonValueKind.Object ||
+            request.CredentialSubject.ValueKind is not (JsonValueKind.Object or JsonValueKind.Array) ||
             validUntil == DateTimeOffset.MinValue)
         {
             return InvalidRequest();
@@ -187,7 +187,7 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
 
     private static IResult InvalidRequest() => Results.Problem(
         title: "Invalid Request",
-        detail: "An active tenant-owned issuer, external did:key holder, HTTPS credential type and vocabulary, optional bounded HTTPS credential ID, subject with absent or matching holder id, and expiry within 15 minutes are required.",
+        detail: "An active tenant-owned issuer, external did:key holder, HTTPS credential type and vocabulary, optional bounded HTTPS credential ID, one object or one-element object array with absent or matching holder id, and expiry within 15 minutes are required.",
         statusCode: StatusCodes.Status400BadRequest);
 }
 

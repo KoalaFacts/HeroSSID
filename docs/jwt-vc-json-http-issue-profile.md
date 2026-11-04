@@ -22,6 +22,17 @@ This endpoint makes the existing **issuer-signed W3C VC Data Model 1.1 JWT** ava
 }
 ```
 
+The `credentialSubject` may alternatively be a one-element JSON array,
+for example `[{"membership":"active"}]` or
+`[{"id":"did:key:z...holder","membership":"active"}]`. The authenticated
+issuer preserves the exact array under the genuine signed
+`vc.credentialSubject`; the single-subject SDK verifier returns its one
+authenticated object after independently pinned issuer/holder/signature
+checks. Empty or multiple-subject arrays, foreign nested IDs and nested
+`@context` overrides are rejected (400). This is intentionally a
+single-holder VC1.1 subset, not general multi-subject issuance,
+holder-key proof, consent or third-party Wallet interoperability.
+
 The example DIDs are placeholders and are not valid real keys. Use a genuinely generated DID and choose a future `validUntil` **no more than 15 minutes after the server's current time**. The supplied `credentialSubject` may omit its nested `id` because W3C VC Data Model 1.1 JWT encoding represents that identifier in the genuine signed JWT `sub` claim. If an explicit nested `id` is supplied, it **must exactly equal** `holderDid`; conflicting, null or empty values are rejected (400). HeroSSID does not invent a nested `id` in the signed subject. Both forms, with or without optional `credentialId`/signed `jti`, are exercised through the authenticated HTTP contract tests. The custom type must be an absolute HTTPS IRI rather than an undefined compact term, matching the controlled OpenID4VP DCQL type policy. The HTTPS subject context is a versioned vocabulary pinned independently by the relying party; the library does not fetch or JSON-LD-expand it.
 
 ### Optional exact JWT validity for non-.NET issuers
