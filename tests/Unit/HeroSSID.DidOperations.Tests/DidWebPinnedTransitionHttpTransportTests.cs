@@ -13,14 +13,14 @@ public sealed class DidWebPinnedTransitionHttpTransportTests
     [InlineData("did:web:issuer.example.org", "https://issuer.example.org/.well-known/did.json")]
     [InlineData("did:web:issuer.example.org:organisations:acme", "https://issuer.example.org/organisations/acme/did.json")]
     public async Task FetchesExactTwoKeyOverlapWithBothIndependentlyPinnedKeys(
-        string did, string expectedUri)
+        string did, string expectedLocation)
     {
         (byte[] oldKey, byte[] newKey, string json) = Document(did);
         int calls = 0;
         using var handler = new FakeHandler(request =>
         {
             calls++;
-            Assert.Equal(expectedUri, request.RequestUri!.AbsoluteUri);
+            Assert.Equal(expectedLocation, request.RequestUri!.AbsoluteUri);
             Assert.Equal(HttpMethod.Get, request.Method);
             Assert.Null(request.Headers.Authorization);
             return Response(json);
