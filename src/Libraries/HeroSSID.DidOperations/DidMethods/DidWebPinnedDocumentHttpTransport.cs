@@ -255,23 +255,24 @@ public static class DidWebPinnedDocumentHttpTransport
         SocketException? lastSocketError = null;
         foreach (IPAddress address in addresses)
         {
-            var socket = new Socket(address.AddressFamily,
-                SocketType.Stream, ProtocolType.Tcp);
+            Socket? socket = null;
             try
             {
+                socket = new Socket(address.AddressFamily,
+                    SocketType.Stream, ProtocolType.Tcp);
                 await socket.ConnectAsync(address, context.DnsEndPoint.Port,
                     cancellationToken).ConfigureAwait(false);
-                return new NetworkStream(socket, ownsSocket: true);
+                var stream = new NetworkStream(socket, ownsSocket: true);
+                socket = null; // The returned stream now owns the connected socket.
+                return stream;
             }
             catch (SocketException ex)
             {
                 lastSocketError = ex;
-                socket.Dispose();
             }
-            catch
+            finally
             {
-                socket.Dispose();
-                throw;
+                socket?.Dispose(); // Failure and cancellation paths own the socket.
             }
         }
 
