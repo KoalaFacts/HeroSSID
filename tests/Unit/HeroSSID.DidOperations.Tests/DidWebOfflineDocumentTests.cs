@@ -39,7 +39,7 @@ public sealed class DidWebOfflineDocumentTests
         Assert.Equal("Ed25519VerificationKey2020", verification.GetProperty("type").GetString());
         string multibase = verification.GetProperty("publicKeyMultibase").GetString()!;
         Assert.StartsWith("z", multibase, StringComparison.Ordinal);
-        byte[] prefixed = SimpleBase.Base58.Bitcoin.Decode(multibase[1..]);
+        byte[] prefixed = SimpleBase.Base58.Bitcoin.Decode(multibase.Substring(1));
         Assert.Equal(34, prefixed.Length);
         Assert.Equal((byte)0xed, prefixed[0]);
         Assert.Equal((byte)0x01, prefixed[1]);
