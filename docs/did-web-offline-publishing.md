@@ -65,3 +65,43 @@ capabilities.
 
 No database schema, network service, production DNS/TLS configuration,
 issuance policy or packaging is changed by this feature.
+
+
+## Opt-in check of retrieved content against a pinned DID and public key
+
+An integrator can independently retrieve `did.json` from the **exact** URI
+returned by `DidWebMethod.GetDocumentUri(did)` and check whether its content
+matches the original single-key document profile and a **previously pinned**
+Ed25519 public key, without enrolling it as a trusted credential issuer.
+
+```csharp
+using HeroSSID.DidOperations.DidMethods;
+
+// did and publicKey must already be pinned by your application.
+// retrievedJson must come from a safely configured HTTPS fetch of the
+// precise publication URI, not from an untrusted claimant.
+bool matches = DidWebPublishedKeyMatch.MatchesExpectedDocument(
+    did, publicKey, retrievedJson);
+if (!matches)
+{
+    // Stop: the content is not this application's pinned single-key profile.
+}
+```
+
+The check ignores JSON whitespace and property order but requires an exact
+DID, expected Ed25519 multicodec key, the `#key-1` controller and
+`authentication`/`assertionMethod` references, and both declared JSON-LD
+contexts. It rejects duplicate JSON properties, unrequested capabilities,
+malformed, deeply nested or oversized content, key substitution, altered
+relationships and different identifiers. Other legitimate did:web profiles,
+including multi-key, rotated-key and service-bearing documents, are
+**intentionally unsupported by this narrow equality check**, not necessarily
+invalid DIDs.
+
+The SDK check **does not fetch HTTP content** and cannot prove which
+domain served the bytes, domain ownership, private-key control, issuer trust,
+user consent, legal identity or business authorization. The caller must pin
+both the input DID and expected public key independently, secure its own
+DNS/TLS/redirect/SSRF boundary, fetch from the canonical URL, and decide
+its own trust and key-rotation policy. No external DID resolver or third-party
+Wallet interoperability has been tested.
