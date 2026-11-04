@@ -46,6 +46,37 @@ if (outcome != JwtVcJsonTrustedIssuerCheckResult.SignedButStatusUnchecked)
 
 For a genuine, issuer-signed **private 60-second status snapshot**, call `CheckWithStatus` with the original JWT and original issuer's snapshot. Results are `SignedNotListed`, `Revoked` or `Invalid`. A signed absence does **not** prove completeness or real-time non-revocation. A compromised retired issuer key may also sign misleading status; applications need an independently trustworthy status source.
 
+## Recipient-pinned original JWTs (opt-in .NET SDK)
+
+A relying party that received a VC1.1 credential with an Ed25519-signed RFC 7519 `aud`
+must separately enroll **its exact HTTPS recipient URI**. The legacy `Check` and
+`CheckWithStatus` deliberately reject audience-bearing credentials rather than
+silently ignoring a signed restriction. Use `CheckForAudience` for an independently
+pinned active issuer or a **pre-registered exact original** retired-issuer JWT:
+
+```csharp
+var result = JwtVcJsonRetiredIssuerVerifier.CheckForAudience(
+    submittedOriginalSignedJwt, [currentIssuerDid], retired,
+    expectedHolderDid,
+    "https://issuer.example/credentials#Membership",
+    new Uri("https://issuer.example/contexts/membership/v1"),
+    new Uri("https://verifier.example/credential-intake"), // independently pinned
+    TimeProvider.System.GetUtcNow(),
+    out string authenticatedSigner, out var verifiedSubject);
+```
+
+For optional same-*actual*-signer private 60-second status, use
+`CheckForAudienceWithStatus` with the signed original JWT and signed status
+snapshot. Both methods return no authenticated issuer DID or subject on
+`Invalid` or `Revoked`. A newly signed/backdated credential from a retired
+key is still rejected unless its **different exact signed JWT SHA-256** was
+independently enrolled. Supplying the JWT's own untrusted `aud` as the
+application's recipient pin defeats the relying party's security policy.
+
+This is a bounded SDK trust policy, not an HTTP hosted endpoint, user consent
+record, independent Wallet test, live revocation guarantee, holder proof,
+real-person verification or business authorization.
+
 ## Security boundary
 
 - An independently enrolled **exact original JWT** from a retired signer succeeds while it remains valid. A newly signed/backdated JWT with the *same retired key* is denied because its byte-level signed-JWT hash differs. A current issuer's independently trusted signature remains acceptable.
