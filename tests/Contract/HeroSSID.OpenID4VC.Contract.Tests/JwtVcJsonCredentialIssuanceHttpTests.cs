@@ -93,6 +93,62 @@ public sealed class JwtVcJsonCredentialIssuanceHttpTests(AspireWebApplicationFac
             CredentialType, Vocabulary, DateTimeOffset.UtcNow, out _));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task HttpIssuerOptInRetainsExactSignedValidityWithoutBackdating(bool includeJti)
+    {
+        // The existing HTTP route rounds nbf back to the whole second and exp
+        // down. Remote callers need an explicit, wire-level opt-in to preserve
+        // the requested 100ns expiry without making a credential valid early.
+        string token = await GetTokenAsync("did:manage credential:issue")
+            .ConfigureAwait(true);
+        string issuerDid = await CreateDidAsync(token).ConfigureAwait(true);
+        using var holder = Key.Create(SignatureAlgorithm.Ed25519);
+        string holderDid = DidFromKey(holder.PublicKey.Export(KeyBlobFormat.RawPublicKey));
+        DateTimeOffset validUntil = DateTimeOffset.UtcNow.AddMinutes(5).AddTicks(123_4567);
+        DateTimeOffset beforeRequest = DateTimeOffset.UtcNow;
+        using var response = await PostAsync(Endpoint, new
+        {
+            issuerDid,
+            holderDid,
+            credentialType = CredentialType,
+            subjectContextUri = Vocabulary,
+            credentialSubject = new { membership = "active" },
+            validUntil,
+            credentialId = includeJti ? "https://issuer.example/credentials/http-exact" : null,
+            exactValidity = true
+        }, token).ConfigureAwait(true);
+        DateTimeOffset afterResponse = DateTimeOffset.UtcNow;
+        string jwt = await SetupResponse.ReadRequiredStringAsync(
+            response, HttpStatusCode.Created, "Issue exact-validity HTTP VC1.1 JWT",
+            "credential").ConfigureAwait(true);
+
+        using var signed = JsonDocument.Parse(Ed25519JwtSigner.ExtractPayload(jwt));
+        JsonElement payload = signed.RootElement;
+        decimal expiresAt = (decimal)(validUntil.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks)
+            / TimeSpan.TicksPerSecond;
+        decimal signedStart = payload.GetProperty("nbf").GetDecimal();
+        decimal requestStart = (decimal)(beforeRequest.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks)
+            / TimeSpan.TicksPerSecond;
+        decimal responseEnd = (decimal)(afterResponse.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks)
+            / TimeSpan.TicksPerSecond;
+
+        Assert.Equal(expiresAt, payload.GetProperty("exp").GetDecimal());
+        Assert.Equal(signedStart, payload.GetProperty("iat").GetDecimal());
+        Assert.InRange(signedStart, requestStart, responseEnd);
+        Assert.Equal(includeJti, payload.TryGetProperty("jti", out _));
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, issuerDid, holderDid,
+            CredentialType, Vocabulary, beforeRequest.AddSeconds(-1), out _));
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, issuerDid, holderDid,
+            CredentialType, Vocabulary, afterResponse, out var subject));
+        Assert.Equal("active", subject.GetProperty("membership").GetString());
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, issuerDid, holderDid,
+            CredentialType, Vocabulary, validUntil.AddTicks(-1), out _));
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, issuerDid, holderDid,
+            CredentialType, Vocabulary, validUntil, out _));
+    }
+
     [Fact]
     public async Task AuthenticatedHttpIssueAndVerifyReleaseOnlyAuthenticSignedCredentialIdentifier()
     {
