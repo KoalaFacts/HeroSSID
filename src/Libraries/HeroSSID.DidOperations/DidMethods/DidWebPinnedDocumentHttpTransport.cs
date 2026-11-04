@@ -128,6 +128,26 @@ public static class DidWebPinnedDocumentHttpTransport
         }
     }
 
+
+    /// <summary>
+    /// Fetch a two-key overlap DID document and compare against two independently pinned keys.
+    /// The injected HttpClient must use a separately audited credential-free no-redirect handler.
+    /// </summary>
+    public static Task<bool> FetchAndMatchTransitionAsync(
+        string didIdentifier, byte[] pinnedOldPublicKey, byte[] pinnedNewPublicKey,
+        HttpClient http, TimeSpan? maximumDuration = null,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Two-key published-document transport is not yet implemented.");
+
+    /// <summary>
+    /// Fetch a preapproved two-key DID overlap document using isolated public-only HTTPS.
+    /// </summary>
+    public static Task<bool> FetchAndMatchTransitionWithIsolatedTransportAsync(
+        string didIdentifier, byte[] pinnedOldPublicKey, byte[] pinnedNewPublicKey,
+        TimeSpan? maximumDuration = null,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Two-key isolated HTTPS transport is not yet implemented.");
+
     private static bool IsAllowedContentType(MediaTypeHeaderValue? value)
     {
         if (value is null ||
