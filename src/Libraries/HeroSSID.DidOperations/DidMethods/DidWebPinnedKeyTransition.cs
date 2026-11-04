@@ -146,7 +146,7 @@ public static class DidWebPinnedKeyTransition
         }
     }
 
-    private static bool MatchesExactly(JsonElement actual, JsonElement expected)
+    internal static bool MatchesExactly(JsonElement actual, JsonElement expected)
     {
         if (actual.ValueKind != expected.ValueKind)
         {

@@ -101,7 +101,7 @@ public static class DidWebPinnedDocumentHttpTransport
     }
 
     // Shared fail-closed response path for single-key and two-key profiles.
-    private static async Task<bool> FetchAndMatchDocumentAsync(
+    internal static async Task<bool> FetchAndMatchDocumentAsync(
         string didIdentifier, HttpClient http, Func<string, bool> matches,
         TimeSpan? maximumDuration, CancellationToken cancellationToken)
     {
