@@ -178,6 +178,54 @@ public sealed class JwtVcJsonAudienceDenylistHttpTests
         Assert.Equal(StatusCodes.Status400BadRequest, oldResult.Status);
     }
 
+    [Fact]
+    public async Task IndependentIncidentCutoffRejectsPreIncidentStatusAndUncheckedDowngrade()
+    {
+        var issuer = Identity();
+        var holder = Identity();
+        string jwt = Issue(issuer, holder.Did, "member");
+        string beforeIncident = JwtVcJsonRevocationSnapshot.Create(
+            issuer.Did, [], issuer.Seed, Now.AddSeconds(-20), new FixedClock(Now));
+        var request = WithStatusCutoff(Request(jwt, issuer.Did, holder.Did) with
+        {
+            RevocationSnapshot = beforeIncident
+        }, Now.AddSeconds(-10));
+
+        // A genuine same-issuer snapshot within its 60-second validity
+        // must NOT disclose claims if it predates the verifier's incident.
+        await AssertHiddenAsync("VerifyForAudienceWithDenylistAndStatus",
+            request, "Invalid").ConfigureAwait(true);
+
+        string afterIncident = Snapshot(issuer, []);
+        var accepted = await InvokeAsync("VerifyForAudienceWithDenylistAndStatus",
+            request with { RevocationSnapshot = afterIncident }).ConfigureAwait(true);
+        Assert.Equal("SignedNotListed", accepted.Body.GetProperty("status").GetString());
+        Assert.Equal("member", accepted.Body.GetProperty("verifiedSubject")
+            .GetProperty("role").GetString());
+
+        // A caller must not silently lose the cutoff on a status-unchecked
+        // route, including when no status JWT is submitted.
+        var downgraded = await InvokeAsync("VerifyForAudienceWithDenylist",
+            request with { RevocationSnapshot = null }).ConfigureAwait(true);
+        Assert.Equal(StatusCodes.Status400BadRequest, downgraded.Status);
+
+        var future = await InvokeAsync("VerifyForAudienceWithDenylistAndStatus",
+            WithStatusCutoff(request, Now.AddTicks(1))).ConfigureAwait(true);
+        Assert.Equal(StatusCodes.Status400BadRequest, future.Status);
+    }
+
+    private static VerifyJwtVcJsonActiveAndRetiredRequest WithStatusCutoff(
+        VerifyJwtVcJsonActiveAndRetiredRequest request, DateTimeOffset minimumObservedAt)
+    {
+        // Test-only JSON bridge preserves a compilable runtime RED before
+        // production adds this verifier-owned policy member to the DTO.
+        var values = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+            JsonSerializer.Serialize(request))!;
+        values["MinimumStatusObservedAt"] = JsonSerializer.SerializeToElement(minimumObservedAt);
+        return JsonSerializer.Deserialize<VerifyJwtVcJsonActiveAndRetiredRequest>(
+            JsonSerializer.Serialize(values))!;
+    }
+
     private static VerifyJwtVcJsonActiveAndRetiredRequest Request(
         string jwt, string activeDid, string holderDid,
         JwtVcJsonRetiredCredentialPin? pin = null) => WithAudience(new()
