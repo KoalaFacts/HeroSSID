@@ -38,6 +38,9 @@ public sealed class JwtVcJsonCredentialIssuanceHttpTests(AspireWebApplicationFac
             response, HttpStatusCode.Created, "Issue issuer-signed VC1.1 JWT", "credential").ConfigureAwait(true);
 
         using var payload = JsonDocument.Parse(Ed25519JwtSigner.ExtractPayload(credential));
+        // Existing clients do not opt in to fractional NumericDate values.
+        Assert.True(payload.RootElement.GetProperty("nbf").TryGetInt64(out _));
+        Assert.True(payload.RootElement.GetProperty("exp").TryGetInt64(out _));
         var vc = payload.RootElement.GetProperty("vc");
         Assert.Equal("https://www.w3.org/2018/credentials/v1", vc.GetProperty("@context")[0].GetString());
         Assert.Equal(CredentialType, vc.GetProperty("type")[1].GetString());
