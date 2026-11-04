@@ -69,13 +69,57 @@ public static class JwtVcJsonRetiredIssuerVerifier
             expectedSubjectContextUri, now, out verifiedIssuerDid, out verifiedSubject);
     }
 
+    /// <summary>
+    /// Require an independently pinned HTTPS recipient for an authentic active
+    /// issuer JWT or the exact pre-enrolled original JWT of a retired issuer.
+    /// The signed aud never enrolls a recipient or a retired-issuer digest.
+    /// Holder possession, status, consent and business authority are separate.
+    /// </summary>
+    public static JwtVcJsonTrustedIssuerCheckResult CheckForAudience(
+        string credentialJwt,
+        IReadOnlyCollection<string> activeIssuerDids,
+        IReadOnlyCollection<JwtVcJsonRetiredCredentialPin> retiredCredentialPins,
+        string expectedHolderDid, string expectedCredentialType,
+        Uri expectedSubjectContextUri, Uri expectedAudience,
+        DateTimeOffset now, out string verifiedIssuerDid,
+        out JsonElement verifiedSubject)
+    {
+        ArgumentNullException.ThrowIfNull(expectedAudience);
+        return CheckCore(credentialJwt, null, activeIssuerDids, retiredCredentialPins,
+            expectedHolderDid, expectedCredentialType, expectedSubjectContextUri,
+            now, out verifiedIssuerDid, out verifiedSubject, expectedAudience);
+    }
+
+    /// <summary>
+    /// Additionally authenticate a fresh private status snapshot from the
+    /// actual original JWT signer. A signed non-listing does not prove live
+    /// non-revocation; a compromised retired key is not a trusted status source.
+    /// </summary>
+    public static JwtVcJsonTrustedIssuerCheckResult CheckForAudienceWithStatus(
+        string credentialJwt, string revocationSnapshotJwt,
+        IReadOnlyCollection<string> activeIssuerDids,
+        IReadOnlyCollection<JwtVcJsonRetiredCredentialPin> retiredCredentialPins,
+        string expectedHolderDid, string expectedCredentialType,
+        Uri expectedSubjectContextUri, Uri expectedAudience,
+        DateTimeOffset now, out string verifiedIssuerDid,
+        out JsonElement verifiedSubject)
+    {
+        ArgumentNullException.ThrowIfNull(revocationSnapshotJwt);
+        ArgumentNullException.ThrowIfNull(expectedAudience);
+        return CheckCore(credentialJwt, revocationSnapshotJwt, activeIssuerDids,
+            retiredCredentialPins, expectedHolderDid, expectedCredentialType,
+            expectedSubjectContextUri, now, out verifiedIssuerDid,
+            out verifiedSubject, expectedAudience);
+    }
+
     private static JwtVcJsonTrustedIssuerCheckResult CheckCore(
         string credentialJwt, string? revocationSnapshotJwt,
         IReadOnlyCollection<string> activeIssuerDids,
         IReadOnlyCollection<JwtVcJsonRetiredCredentialPin> retiredCredentialPins,
         string expectedHolderDid, string expectedCredentialType,
         Uri expectedSubjectContextUri, DateTimeOffset now,
-        out string verifiedIssuerDid, out JsonElement verifiedSubject)
+        out string verifiedIssuerDid, out JsonElement verifiedSubject,
+        Uri? expectedAudience = null)
     {
         ArgumentNullException.ThrowIfNull(credentialJwt);
         ArgumentNullException.ThrowIfNull(activeIssuerDids);
@@ -146,7 +190,7 @@ public static class JwtVcJsonRetiredIssuerVerifier
         {
             var activeResult = Verify(credentialJwt, revocationSnapshotJwt, active,
                 expectedHolderDid, expectedCredentialType, expectedSubjectContextUri,
-                now, out verifiedIssuerDid, out verifiedSubject);
+                now, out verifiedIssuerDid, out verifiedSubject, expectedAudience);
             if (activeResult != JwtVcJsonTrustedIssuerCheckResult.Invalid)
             {
                 return activeResult;
@@ -167,7 +211,7 @@ public static class JwtVcJsonRetiredIssuerVerifier
                     return Verify(credentialJwt, revocationSnapshotJwt,
                         [pin.IssuerDid], expectedHolderDid, expectedCredentialType,
                         expectedSubjectContextUri, now,
-                        out verifiedIssuerDid, out verifiedSubject);
+                        out verifiedIssuerDid, out verifiedSubject, expectedAudience);
                 }
             }
         }
@@ -182,8 +226,23 @@ public static class JwtVcJsonRetiredIssuerVerifier
         IReadOnlyCollection<string> issuerDids, string expectedHolderDid,
         string expectedCredentialType, Uri expectedSubjectContextUri,
         DateTimeOffset now, out string verifiedIssuerDid,
-        out JsonElement verifiedSubject) =>
-        revocationSnapshotJwt is null
+        out JsonElement verifiedSubject, Uri? expectedAudience)
+    {
+        if (expectedAudience is not null)
+        {
+            return revocationSnapshotJwt is null
+                ? JwtVcJsonTrustedIssuerVerifier.CheckForAudience(credentialJwt,
+                    issuerDids, expectedHolderDid, expectedCredentialType,
+                    expectedSubjectContextUri, expectedAudience, now,
+                    out verifiedIssuerDid, out verifiedSubject)
+                : JwtVcJsonTrustedIssuerVerifier.CheckForAudienceWithStatus(
+                    credentialJwt, revocationSnapshotJwt, issuerDids,
+                    expectedHolderDid, expectedCredentialType,
+                    expectedSubjectContextUri, expectedAudience, now,
+                    out verifiedIssuerDid, out verifiedSubject);
+        }
+
+        return revocationSnapshotJwt is null
             ? JwtVcJsonTrustedIssuerVerifier.Check(credentialJwt, issuerDids,
                 expectedHolderDid, expectedCredentialType, expectedSubjectContextUri,
                 now, out verifiedIssuerDid, out verifiedSubject)
@@ -191,6 +250,7 @@ public static class JwtVcJsonRetiredIssuerVerifier
                 revocationSnapshotJwt, issuerDids, expectedHolderDid,
                 expectedCredentialType, expectedSubjectContextUri, now,
                 out verifiedIssuerDid, out verifiedSubject);
+    }
 
     private static bool ValidDid(string? did) =>
         !string.IsNullOrWhiteSpace(did) && did.Length <= MaximumDidLength &&
