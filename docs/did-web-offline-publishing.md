@@ -105,3 +105,53 @@ both the input DID and expected public key independently, secure its own
 DNS/TLS/redirect/SSRF boundary, fetch from the canonical URL, and decide
 its own trust and key-rotation policy. No external DID resolver or third-party
 Wallet interoperability has been tested.
+
+
+## Opt-in pinned HTTPS GET of the published document
+
+An integrating verifier which **already trusts and pins the exact did:web DID
+and 32-byte Ed25519 public key** may now fetch the operator's actual published
+DID document and require the same bounded single-key profile. This is an
+HTTP transport convenience over the existing offline
+`DidWebPublishedKeyMatch.MatchesExpectedDocument` comparison, not general
+DID resolution or automated trust discovery.
+
+```csharp
+using HeroSSID.DidOperations.DidMethods;
+
+// did and pinnedIssuerPublicKey were independently approved by the operator.
+// Do not accept them from a token, caller-supplied URI or attacker input.
+bool publishedKeyIsStillPinned =
+    await DidWebPinnedDocumentHttpTransport.FetchAndMatchWithIsolatedTransportAsync(
+        did, pinnedIssuerPublicKey, cancellationToken: cancellationToken);
+if (!publishedKeyIsStillPinned)
+{
+    // Reject an absent, wrong, substituted or malformed published document.
+}
+```
+
+For integration tests or applications with an independently audited transport,
+`FetchAndMatchAsync(did, pinnedKey, http, ...)` accepts a supplied
+`HttpClient`. Its handler **must** have auto-redirects, cookies, proxy,
+credentials and Activity baggage disabled. The library rejects default request
+headers before connecting and detects a different final response URI, but
+**cannot prevent an injected redirecting handler from contacting a different
+host before that check**. Prefer the provided isolated handler where suitable.
+
+The request is a credential-free GET to the exact URI returned by
+`DidWebMethod.GetDocumentUri(did)`. Responses must be HTTP 200 with
+`application/did+ld+json`, `application/did+json` or `application/json`,
+an optional UTF-8 charset, no compression, and no more than 16 KiB of strictly
+decoded UTF-8. A single 15-second deadline (configurable up to 30 seconds)
+covers headers and body. Redirects, malformed or oversized JSON, changed key,
+wrong controller/relationships or nonmatching DID fail closed. Caller-requested
+cancellation propagates.
+
+**Network trust boundary:** Do not use this as an open DID-to-URL proxy.
+Restrict calling applications to pre-approved domain/DID sets, control DNS,
+network egress and SSRF policy independently, and maintain ordinary TLS
+validation. The API does not prove DNS ownership, historical key control,
+a trusted issuer, actual private-key possession, legal identity, live
+revocation, human consent, Agent authority or third-party wallet
+interoperability. It neither changes existing `did:key` issuer verification
+nor automatically promotes a retrieved key into trust.
