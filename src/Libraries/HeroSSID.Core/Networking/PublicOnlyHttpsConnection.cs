@@ -68,6 +68,8 @@ public static class PublicOnlyHttpsConnection
     public static async ValueTask<Stream> ConnectAsync(
         SocketsHttpConnectionContext context, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(context);
+
         IPAddress[] addresses;
         try
         {
