@@ -122,19 +122,34 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
             try
             {
                 seed = encryption.Decrypt(issuer.PrivateKeyEd25519Encrypted);
-                // No validFrom is supplied by this HTTP API. Use the current
-                // whole UTC second for immediate validity. The lower-level SDK
-                // still rounds UP any explicit caller-supplied fractional start
-                // to prevent accidental backdating of requested constraints.
-                DateTimeOffset signingStart =
-                    DateTimeOffset.FromUnixTimeSeconds(now.ToUnixTimeSeconds());
-                string jwt = request.CredentialId is Uri credentialId
-                    ? JwtVcJsonCredential.Create(issuerDid, holderDid,
-                        credentialType, context, request.CredentialSubject, seed,
-                        signingStart, validUntil, credentialId)
-                    : JwtVcJsonCredential.Create(issuerDid, holderDid,
-                        credentialType, context, request.CredentialSubject, seed,
-                        signingStart, validUntil);
+                // Preserve existing callers' whole-second HTTP issuance.
+                // The explicit opt-in starts at the actual server observation
+                // and preserves the caller's exact expiry to 100ns, avoiding
+                // the legacy route's up-to-one-second start backdating.
+                DateTimeOffset signingStart = request.ExactValidity
+                    ? now
+                    : DateTimeOffset.FromUnixTimeSeconds(now.ToUnixTimeSeconds());
+                string jwt;
+                if (request.ExactValidity)
+                {
+                    jwt = request.CredentialId is Uri exactId
+                        ? JwtVcJsonCredential.CreateWithExactValidity(issuerDid,
+                            holderDid, credentialType, context, request.CredentialSubject,
+                            seed, signingStart, validUntil, exactId)
+                        : JwtVcJsonCredential.CreateWithExactValidity(issuerDid,
+                            holderDid, credentialType, context, request.CredentialSubject,
+                            seed, signingStart, validUntil);
+                }
+                else
+                {
+                    jwt = request.CredentialId is Uri credentialId
+                        ? JwtVcJsonCredential.Create(issuerDid, holderDid,
+                            credentialType, context, request.CredentialSubject, seed,
+                            signingStart, validUntil, credentialId)
+                        : JwtVcJsonCredential.Create(issuerDid, holderDid,
+                            credentialType, context, request.CredentialSubject, seed,
+                            signingStart, validUntil);
+                }
 
                 if (clock.GetUtcNow() >= validUntil)
                 {
@@ -187,6 +202,11 @@ public sealed class IssueJwtVcJsonCredentialRequest
     public Uri? CredentialId { get; init; }
     public JsonElement CredentialSubject { get; init; }
     public DateTimeOffset? ValidUntil { get; init; }
+    /// <summary>
+    /// Opt in to exact 100ns issuer-signed nbf/iat/exp instead of the
+    /// legacy whole-second HTTP validity. Defaults to false.
+    /// </summary>
+    public bool ExactValidity { get; init; }
 }
 
 /// <summary>Issuer-signed JWT only: no holder proof, live revocation or business authority.</summary>
