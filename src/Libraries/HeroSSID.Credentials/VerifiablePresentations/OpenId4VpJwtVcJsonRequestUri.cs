@@ -4,6 +4,8 @@ using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 
+using HeroSSID.Core.Networking;
+
 namespace HeroSSID.Credentials.VerifiablePresentations;
 
 /// <summary>
@@ -198,6 +200,7 @@ public static class OpenId4VpJwtVcJsonRequestUri
         PreAuthenticate = false,
         AutomaticDecompression = DecompressionMethods.None,
         ActivityHeadersPropagator = null,
+        ConnectCallback = PublicOnlyHttpsConnection.ConnectAsync,
         SslOptions = new SslClientAuthenticationOptions
         {
             CertificateRevocationCheckMode = X509RevocationMode.Online
