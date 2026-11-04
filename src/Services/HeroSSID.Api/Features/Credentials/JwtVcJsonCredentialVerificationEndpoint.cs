@@ -58,12 +58,14 @@ internal static class JwtVcJsonCredentialVerificationEndpoint
             return InvalidRequest(false);
         }
 
-        bool valid = JwtVcJsonCredential.TryVerify(request.Credential!,
+        bool valid = JwtVcJsonCredential.TryVerifyWithIssuerName(request.Credential!,
             request.TrustedIssuerDid!, request.ExpectedHolderDid!,
             request.ExpectedCredentialType!, request.SubjectContextUri!,
-            clock.GetUtcNow(), out var subject, out string? credentialId);
+            clock.GetUtcNow(), out var subject, out string? credentialId,
+            out string? issuerName);
         return Results.Ok(valid
-            ? new VerifyJwtVcJsonCredentialResponse("SignedButStatusUnchecked", subject, credentialId)
+            ? new VerifyJwtVcJsonCredentialResponse(
+                "SignedButStatusUnchecked", subject, credentialId, issuerName)
             : new VerifyJwtVcJsonCredentialResponse("Invalid", null));
     }
 
@@ -92,10 +94,10 @@ internal static class JwtVcJsonCredentialVerificationEndpoint
             return InvalidRequest(true);
         }
 
-        if (!JwtVcJsonCredential.TryVerify(request.Credential!,
+        if (!JwtVcJsonCredential.TryVerifyWithIssuerName(request.Credential!,
             request.TrustedIssuerDid!, request.ExpectedHolderDid!,
             request.ExpectedCredentialType!, request.SubjectContextUri!,
-            now, out var subject, out string? credentialId))
+            now, out var subject, out string? credentialId, out string? issuerName))
         {
             return Results.Ok(new VerifyJwtVcJsonCredentialResponse("Invalid", null));
         }
@@ -112,7 +114,7 @@ internal static class JwtVcJsonCredentialVerificationEndpoint
         {
             RevocationSnapshotCheckResult.NotListed =>
                 Results.Ok(new VerifyJwtVcJsonCredentialResponse(
-                    "SignedNotListed", subject, credentialId)),
+                    "SignedNotListed", subject, credentialId, issuerName)),
             RevocationSnapshotCheckResult.Revoked =>
                 Results.Ok(new VerifyJwtVcJsonCredentialResponse("Revoked", null)),
             _ => Results.Ok(new VerifyJwtVcJsonCredentialResponse("Invalid", null))
@@ -176,6 +178,10 @@ public sealed class VerifyJwtVcJsonCredentialWithStatusRequest
     public DateTimeOffset? MinimumStatusObservedAt { get; init; }
 }
 
-/// <summary>VerifiedSubject and VerifiedCredentialId are null on failure or revoked status.</summary>
+/// <summary>
+ /// Verified subject, credential ID and descriptive issuer name are null on
+ /// failure or revoked status. Name is not issuer trust or legal identity.
+ /// </summary>
 public sealed record VerifyJwtVcJsonCredentialResponse(
-    string Status, JsonElement? VerifiedSubject, string? VerifiedCredentialId = null);
+    string Status, JsonElement? VerifiedSubject, string? VerifiedCredentialId = null,
+    string? VerifiedIssuerName = null);
