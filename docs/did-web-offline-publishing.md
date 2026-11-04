@@ -138,6 +138,25 @@ headers before connecting and detects a different final response URI, but
 **cannot prevent an injected redirecting handler from contacting a different
 host before that check**. Prefer the provided isolated handler where suitable.
 
+**Default network egress guard (isolated handler only):** The SDK resolves
+the preapproved hostname for each new TCP connection, refuses empty or mixed
+public/private DNS answer sets, and establishes TCP directly to a validated
+public IPv4/IPv6 address without a second DNS lookup. Loopback, RFC1918,
+shared/metadata/link-local, documentation, benchmark, multicast and selected
+tunnel/overlay destinations are denied before connect. The entire IETF
+protocol-assignment block `2001::/23` is also denied, **including its
+globally reachable specific-purpose exceptions**, rather than silently trusting
+future registry additions. Ordinary public issuer hosts should use globally
+allocated unicast ranges outside this block. Normal HTTPS SNI and certificate
+validation continue to use the original domain. This deliberately
+conservative filter may reject split-horizon/private-only issuers; use an
+independently audited caller-supplied transport only under explicit network
+controls. `IsPublicEgressAddress(IPAddress)` exposes the exact filter for
+operator preflight; this is not a dynamic IANA registry or a proof that an
+allowed public address is safe. Public IPs routed to internal services by
+local NAT or proxies, malicious public endpoints, DNS poisoning, and egress
+outside this handler remain operator/network policy concerns.
+
 The request is a credential-free GET to the exact URI returned by
 `DidWebMethod.GetDocumentUri(did)`. Responses must be HTTP 200 with
 `application/did+ld+json`, `application/did+json` or `application/json`,
@@ -148,9 +167,10 @@ wrong controller/relationships or nonmatching DID fail closed. Caller-requested
 cancellation propagates.
 
 **Network trust boundary:** Do not use this as an open DID-to-URL proxy.
-Restrict calling applications to pre-approved domain/DID sets, control DNS,
-network egress and SSRF policy independently, and maintain ordinary TLS
-validation. The API does not prove DNS ownership, historical key control,
+Restrict calling applications to pre-approved domain/DID sets. The isolated
+handler rejects non-public DNS destinations and connects only to vetted
+addresses, but operators must still control DNS integrity, network routes,
+egress and SSRF policy independently, and maintain ordinary TLS validation. The API does not prove DNS ownership, historical key control,
 a trusted issuer, actual private-key possession, legal identity, live
 revocation, human consent, Agent authority or third-party wallet
 interoperability. It neither changes existing `did:key` issuer verification
