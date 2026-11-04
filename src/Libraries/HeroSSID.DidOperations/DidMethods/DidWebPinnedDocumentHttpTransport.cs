@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Security;
+using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 
@@ -157,7 +158,9 @@ public static class DidWebPinnedDocumentHttpTransport
     /// Build a disposable default handler for a preapproved did:web HTTPS host.
     /// This rejects automatic redirects, proxy/cookie/credential attachment and
     /// Activity tracing; normal TLS certificate validation is retained.
-    /// Domain resolution and network segmentation remain the operator's task.
+    /// DNS addresses are rechecked at socket connection time against a
+    /// conservative public-only egress policy (mixed private/public responses
+    /// fail closed). The operator still owns network egress controls.
     /// </summary>
     public static SocketsHttpHandler CreateIsolatedTransportHandler() => new()
     {
@@ -169,11 +172,113 @@ public static class DidWebPinnedDocumentHttpTransport
         PreAuthenticate = false,
         AutomaticDecompression = DecompressionMethods.None,
         ActivityHeadersPropagator = null,
+        ConnectCallback = ConnectPublicOnlyAsync,
         SslOptions = new SslClientAuthenticationOptions
         {
             CertificateRevocationCheckMode = X509RevocationMode.Online
         }
     };
+
+
+    /// <summary>
+    /// Conservative public-only IP filter used by the isolated HTTPS transport
+    /// at connect time. It rejects loopback, private, shared, link-local,
+    /// documentation, benchmark and transition addresses. A permitted address
+    /// is not proof of safe network routing, domain ownership or issuer trust.
+    /// </summary>
+    public static bool IsPublicEgressAddress(IPAddress address)
+    {
+        ArgumentNullException.ThrowIfNull(address);
+
+        byte[] bytes = address.GetAddressBytes();
+        if (address.AddressFamily == AddressFamily.InterNetwork)
+        {
+            return bytes[0] is not (0 or 10 or 127 or >= 224) &&
+                !(bytes[0] == 100 && bytes[1] is >= 64 and <= 127) &&
+                !(bytes[0] == 169 && bytes[1] == 254) &&
+                !(bytes[0] == 172 && bytes[1] is >= 16 and <= 31) &&
+                !(bytes[0] == 192 && bytes[1] == 168) &&
+                !(bytes[0] == 192 && bytes[1] == 0 &&
+                    bytes[2] is 0 or 2) &&
+                !(bytes[0] == 192 && bytes[1] == 88 && bytes[2] == 99) &&
+                !(bytes[0] == 198 && bytes[1] is 18 or 19) &&
+                !(bytes[0] == 198 && bytes[1] == 51 && bytes[2] == 100) &&
+                !(bytes[0] == 203 && bytes[1] == 0 && bytes[2] == 113);
+        }
+
+        if (address.AddressFamily != AddressFamily.InterNetworkV6 ||
+            address.IsIPv4MappedToIPv6 ||
+            (bytes[0] & 0xe0) != 0x20)
+        {
+            // Only native global-unicast 2000::/3 may be considered.
+            return false;
+        }
+
+        if (bytes[0] == 0x20 && bytes[1] == 0x02)
+        {
+            return false; // 6to4 IPv4 tunnel destinations.
+        }
+
+        return !(bytes[0] == 0x20 && bytes[1] == 0x01 &&
+            ((bytes[2] == 0x0d && bytes[3] == 0xb8) || // Documentation.
+             (bytes[2] == 0x00 && bytes[3] == 0x00) || // Teredo.
+             (bytes[2] == 0x00 && bytes[3] == 0x02) || // Benchmark.
+             (bytes[2] == 0x00 && (bytes[3] & 0xf0) is 0x10 or 0x20)));
+             // ORCHID/ORCHIDv2 non-routable overlays.
+    }
+
+    private static async ValueTask<Stream> ConnectPublicOnlyAsync(
+        SocketsHttpConnectionContext context, CancellationToken cancellationToken)
+    {
+        IPAddress[] addresses;
+        try
+        {
+            addresses = await Dns.GetHostAddressesAsync(
+                context.DnsEndPoint.Host, cancellationToken).ConfigureAwait(false);
+        }
+        catch (SocketException ex)
+        {
+            throw new HttpRequestException("Pinned DID host DNS resolution failed.", ex);
+        }
+
+        // Reject *all* results on one private/special address, not merely
+        // select the first public result. Connect directly to the validated
+        // address: letting the default connector resolve again would reopen a
+        // DNS-rebinding window between the check and the TCP connection.
+        if (addresses.Length == 0 ||
+            addresses.Any(static address => !IsPublicEgressAddress(address)))
+        {
+            throw new HttpRequestException(
+                "Pinned DID host resolved to a non-public or empty IP address set.");
+        }
+
+        SocketException? lastSocketError = null;
+        foreach (IPAddress address in addresses)
+        {
+            var socket = new Socket(address.AddressFamily,
+                SocketType.Stream, ProtocolType.Tcp);
+            try
+            {
+                await socket.ConnectAsync(address, context.DnsEndPoint.Port,
+                    cancellationToken).ConfigureAwait(false);
+                return new NetworkStream(socket, ownsSocket: true);
+            }
+            catch (SocketException ex)
+            {
+                lastSocketError = ex;
+                socket.Dispose();
+            }
+            catch
+            {
+                socket.Dispose();
+                throw;
+            }
+        }
+
+        throw new HttpRequestException(
+            "No approved public address accepted the pinned DID HTTPS connection.",
+            lastSocketError);
+    }
 
     /// <summary>
     /// Fetch using an ephemeral credential-free and non-redirecting handler,
