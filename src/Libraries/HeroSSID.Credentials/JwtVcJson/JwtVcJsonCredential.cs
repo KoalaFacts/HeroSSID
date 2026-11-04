@@ -61,6 +61,24 @@ public static class JwtVcJsonCredential
             credentialSubject, issuerPrivateKey, validFrom, validUntil, null);
 
     /// <summary>
+    /// Issue a W3C VC1.1 JWT with the issuer's descriptive name in the
+    /// original Ed25519-signed vc.issuer object. Only the separately pinned
+    /// issuer DID and actual signature establish credential provenance; the
+    /// display name does not establish legal identity or business authority.
+    /// This opt-in route preserves Create's whole-second validity contract.
+    /// </summary>
+    public static string CreateWithIssuerName(string issuerDid, string holderDid,
+        string credentialType, Uri subjectContextUri, JsonElement credentialSubject,
+        byte[] issuerPrivateKey, DateTimeOffset validFrom, DateTimeOffset validUntil,
+        string issuerName)
+    {
+        ArgumentNullException.ThrowIfNull(issuerName);
+        return CreateCore(issuerDid, holderDid, credentialType, subjectContextUri,
+            credentialSubject, issuerPrivateKey, validFrom, validUntil,
+            null, issuerName: issuerName);
+    }
+
+    /// <summary>
     /// Opt-in VC1.1 JWT issuance retaining the exact caller-supplied validity
     /// instants as RFC 7519 NumericDate fractions down to 100 nanoseconds.
     /// Unlike Create, this does not round inward to whole seconds. The original
@@ -91,7 +109,7 @@ public static class JwtVcJsonCredential
     private static string CreateCore(string issuerDid, string holderDid, string credentialType,
         Uri subjectContextUri, JsonElement credentialSubject, byte[] issuerPrivateKey,
         DateTimeOffset validFrom, DateTimeOffset validUntil, Uri? credentialId,
-        bool exactValidity = false)
+        bool exactValidity = false, string? issuerName = null)
     {
         ArgumentNullException.ThrowIfNull(issuerDid);
         ArgumentNullException.ThrowIfNull(holderDid);
@@ -115,6 +133,7 @@ public static class JwtVcJsonCredential
             !ValidType(credentialType) ||
             !ValidContext(subjectContextUri) ||
             (credentialId is not null && !ValidCredentialId(credentialId)) ||
+            (issuerName is not null && !ValidIssuerName(issuerName)) ||
             issuerPrivateKey.Length != 32 ||
             issuerPrivateKey.All(static b => b == 0) ||
             issued < 0 || expires <= issued ||
@@ -148,12 +167,19 @@ public static class JwtVcJsonCredential
             payloadClaims["jti"] = credentialId.AbsoluteUri;
         }
 
-        payloadClaims["vc"] = new Dictionary<string, object>(StringComparer.Ordinal)
+        var vcClaims = new Dictionary<string, object>(StringComparer.Ordinal)
         {
             ["@context"] = new[] { BaseContext, subjectContextUri.AbsoluteUri },
             ["type"] = new[] { BaseType, credentialType },
             ["credentialSubject"] = credentialSubject
         };
+        if (issuerName is not null)
+        {
+            // Signed descriptive metadata, never an issuer-trust source.
+            vcClaims["issuer"] = new { id = issuerDid, name = issuerName };
+        }
+
+        payloadClaims["vc"] = vcClaims;
         string payload = JsonSerializer.Serialize(payloadClaims);
         string signed = Ed25519JwtSigner.CreateSignedJwt(header, payload, issuerPrivateKey);
 
@@ -427,6 +453,11 @@ public static class JwtVcJsonCredential
             ValidCredentialId(uri);
     }
 
+    private static bool ValidIssuerName(string name) =>
+        !string.IsNullOrWhiteSpace(name) &&
+        name.Length <= 128 &&
+        !name.Any(char.IsControl);
+
     private static bool ValidCredentialId(Uri uri) =>
         uri.IsAbsoluteUri &&
         string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) &&
@@ -476,8 +507,7 @@ public static class JwtVcJsonCredential
                         (embeddedIssuer.EnumerateObject().Count() == 2 &&
                             StrictJwtReader.TryGetString(embeddedIssuer, "name",
                                 out string issuerName) &&
-                            issuerName.Length <= 128 &&
-                            !issuerName.Any(char.IsControl))),
+                            ValidIssuerName(issuerName))),
                 _ => false
             };
             if (!matchesIssuer)

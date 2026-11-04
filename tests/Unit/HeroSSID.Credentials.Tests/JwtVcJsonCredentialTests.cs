@@ -19,6 +19,94 @@ public sealed class JwtVcJsonCredentialTests
     private readonly (byte[] Seed, string Did) _other = NewIdentity();
 
     [Fact]
+    public void OrganizationIssuerCanOptInToSigningDescriptiveVcIssuerMetadata()
+    {
+        // Real Ed25519 issuer signs descriptive metadata, while every
+        // relying party independently pins the actual issuer DID and key.
+        using var subjectDocument = JsonDocument.Parse(JsonSerializer.Serialize(
+            new { id = _holder.Did, membership = "active" }));
+        string jwt = JwtVcJsonCredential.CreateWithIssuerName(
+            _issuer.Did, _holder.Did, CredentialType, Vocabulary,
+            subjectDocument.RootElement, _issuer.Seed,
+            Now.AddMinutes(-1), Now.AddMinutes(10),
+            "Australasian Membership Office");
+
+        using var payloadDocument = JsonDocument.Parse(Ed25519JwtSigner.ExtractPayload(jwt));
+        JsonElement payload = payloadDocument.RootElement;
+        Assert.Equal(_issuer.Did, payload.GetProperty("iss").GetString());
+        JsonElement issuer = payload.GetProperty("vc").GetProperty("issuer");
+        Assert.Equal(_issuer.Did, issuer.GetProperty("id").GetString());
+        Assert.Equal("Australasian Membership Office",
+            issuer.GetProperty("name").GetString());
+        Assert.Equal(2, issuer.EnumerateObject().Count());
+
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did,
+            _holder.Did, CredentialType, Vocabulary, Now, out var claims));
+        Assert.Equal("active", claims.GetProperty("membership").GetString());
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, _other.Did,
+            _holder.Did, CredentialType, Vocabulary, Now, out var foreign));
+        Assert.Equal(JsonValueKind.Undefined, foreign.ValueKind);
+
+        // Original JWT bytes, including signed descriptive issuer metadata,
+        // remain the revocation subject. A renamed issuer does not re-sign.
+        string revoked = JwtVcJsonRevocationSnapshot.Create(_issuer.Did,
+            [jwt], _issuer.Seed, Now, new FixedClock(Now));
+        Assert.Equal(RevocationSnapshotCheckResult.Revoked,
+            JwtVcJsonRevocationSnapshot.Check(revoked, jwt, _issuer.Did, Now));
+        var parts = jwt.Split('.');
+        parts[1] = Base64UrlEncoder.Encode(Ed25519JwtSigner.ExtractPayload(jwt)
+            .Replace("Australasian Membership Office", "Impersonated Issuer",
+                StringComparison.Ordinal));
+        string tampered = string.Join('.', parts);
+        Assert.False(JwtVcJsonCredential.TryVerify(tampered, _issuer.Did,
+            _holder.Did, CredentialType, Vocabulary, Now, out var forged));
+        Assert.Equal(JsonValueKind.Undefined, forged.ValueKind);
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            JwtVcJsonRevocationSnapshot.Check(revoked, tampered, _issuer.Did, Now));
+
+        // Legacy Create remains unchanged; opt-in must not silently add metadata.
+        string unchanged = JwtVcJsonCredential.Create(_issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, subjectDocument.RootElement, _issuer.Seed,
+            Now.AddMinutes(-1), Now.AddMinutes(10));
+        using var originalDocument = JsonDocument.Parse(Ed25519JwtSigner.ExtractPayload(unchanged));
+        Assert.False(originalDocument.RootElement.GetProperty("vc").TryGetProperty("issuer", out _));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("invalid\nissuer")]
+    [InlineData("invalid\u0000issuer")]
+    public void DescriptiveIssuerNameRejectsInvalidValuesBeforeSigning(string name)
+    {
+        using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
+            new { id = _holder.Did, membership = "active" }));
+        Assert.Throws<ArgumentException>(() =>
+            JwtVcJsonCredential.CreateWithIssuerName(_issuer.Did, _holder.Did,
+                CredentialType, Vocabulary, subject.RootElement, _issuer.Seed,
+                Now.AddMinutes(-1), Now.AddMinutes(10), name));
+    }
+
+    [Fact]
+    public void DescriptiveIssuerNameRejectsOverlongNullAndWrongSigningKeys()
+    {
+        using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
+            new { id = _holder.Did, membership = "active" }));
+        Assert.Throws<ArgumentException>(() =>
+            JwtVcJsonCredential.CreateWithIssuerName(_issuer.Did, _holder.Did,
+                CredentialType, Vocabulary, subject.RootElement, _issuer.Seed,
+                Now.AddMinutes(-1), Now.AddMinutes(10), new string('X', 129)));
+        Assert.Throws<ArgumentNullException>(() =>
+            JwtVcJsonCredential.CreateWithIssuerName(_issuer.Did, _holder.Did,
+                CredentialType, Vocabulary, subject.RootElement, _issuer.Seed,
+                Now.AddMinutes(-1), Now.AddMinutes(10), null!));
+        Assert.Throws<ArgumentException>(() =>
+            JwtVcJsonCredential.CreateWithIssuerName(_issuer.Did, _holder.Did,
+                CredentialType, Vocabulary, subject.RootElement, _other.Seed,
+                Now.AddMinutes(-1), Now.AddMinutes(10), "Authentic Looking Name"));
+    }
+
+    [Fact]
     public void IssuerCreatesGenuineJwtVcJsonWithStandardContextAndIndependentVerification()
     {
         string jwt = Issue();
