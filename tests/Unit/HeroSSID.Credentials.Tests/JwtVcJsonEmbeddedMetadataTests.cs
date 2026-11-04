@@ -46,6 +46,55 @@ public sealed class JwtVcJsonEmbeddedMetadataTests
             JwtVcJsonRevocationSnapshot.Check(revoked, jwt, _issuer.Did, Now));
     }
 
+    [Fact]
+    public void IndependentlySignedIssuerObjectWithDescriptiveNameCanBeVerifiedAndRevoked()
+    {
+        // VC Data Model 1.1 allows issuer to be an object with an id and
+        // descriptive fields. The verifier still trusts only the pinned DID
+        // and actual Ed25519 signature, never the display name.
+        string jwt = SignExternal(variant: "issuer-name");
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out var subject));
+        Assert.Equal("active", subject.GetProperty("membership").GetString());
+
+        string revoked = JwtVcJsonRevocationSnapshot.Create(_issuer.Did, [jwt],
+            _issuer.Seed, Now, new FixedClock(Now));
+        Assert.Equal(RevocationSnapshotCheckResult.Revoked,
+            JwtVcJsonRevocationSnapshot.Check(revoked, jwt, _issuer.Did, Now));
+
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, _stranger.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out var foreign));
+        Assert.Equal(JsonValueKind.Undefined, foreign.ValueKind);
+
+        var parts = jwt.Split('.');
+        parts[1] = Base64UrlEncoder.Encode(
+            Base64UrlEncoder.DecodeString(parts[1]).Replace(
+                "Australasian Membership Office", "Impersonated Membership Office",
+                StringComparison.Ordinal));
+        Assert.False(JwtVcJsonCredential.TryVerify(string.Join('.', parts),
+            _issuer.Did, _holder.Did, CredentialType, Vocabulary, Now, out _));
+    }
+
+    [Theory]
+    [InlineData("issuer-name-empty")]
+    [InlineData("issuer-name-wrong-id")]
+    [InlineData("issuer-name-array")]
+    [InlineData("issuer-name-context")]
+    [InlineData("issuer-name-extra-property")]
+    [InlineData("issuer-name-null")]
+    [InlineData("issuer-name-too-long")]
+    [InlineData("issuer-name-control")]
+    public void SignedButInvalidIssuerDescriptionDoesNotReleaseClaims(string variant)
+    {
+        string jwt = SignExternal(variant: variant);
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did, _holder.Did,
+            CredentialType, Vocabulary, Now, out var subject));
+        Assert.Equal(JsonValueKind.Undefined, subject.ValueKind);
+        Assert.Throws<CryptographicException>(() =>
+            JwtVcJsonRevocationSnapshot.Create(_issuer.Did, [jwt],
+                _issuer.Seed, Now, new FixedClock(Now)));
+    }
+
     [Theory]
     [InlineData("wrong-issuer")]
     [InlineData("wrong-issuer-object")]
@@ -235,6 +284,39 @@ public sealed class JwtVcJsonEmbeddedMetadataTests
                 vc.Remove("issuanceDate");
                 vc.Remove("expirationDate");
                 vc["credentialSubject"] = new { id = _holder.Did, membership = "active" };
+                break;
+            case "issuer-name":
+                vc["issuer"] = new { id = _issuer.Did, name = "Australasian Membership Office" };
+                break;
+            case "issuer-name-empty":
+                vc["issuer"] = new { id = _issuer.Did, name = "" };
+                break;
+            case "issuer-name-wrong-id":
+                vc["issuer"] = new { id = _stranger.Did, name = "Australasian Membership Office" };
+                break;
+            case "issuer-name-array":
+                vc["issuer"] = new { id = _issuer.Did, name = new[] { "Australasian Membership Office" } };
+                break;
+            case "issuer-name-context":
+                vc["issuer"] = new Dictionary<string, object>(StringComparer.Ordinal)
+                {
+                    ["id"] = _issuer.Did,
+                    ["name"] = "Australasian Membership Office",
+                    ["@context"] = "https://untrusted.example/context"
+                };
+                break;
+            case "issuer-name-extra-property":
+                vc["issuer"] = new { id = _issuer.Did, name = "Australasian Membership Office",
+                    website = "https://untrusted.example" };
+                break;
+            case "issuer-name-null":
+                vc["issuer"] = new { id = _issuer.Did, name = (string?)null };
+                break;
+            case "issuer-name-too-long":
+                vc["issuer"] = new { id = _issuer.Did, name = new string('X', 129) };
+                break;
+            case "issuer-name-control":
+                vc["issuer"] = new { id = _issuer.Did, name = "Membership\u0000Office" };
                 break;
             case "wrong-issuer":
                 vc["issuer"] = _stranger.Did;
