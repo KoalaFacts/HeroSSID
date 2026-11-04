@@ -89,6 +89,25 @@ public sealed class DidWebPublishedKeyMatchTests
             did, key, new string(' ', 16385)));
     }
 
+    [Fact]
+    public void RejectsLoneSurrogateEscapesInJsonNamesAndValuesWithoutThrowing()
+    {
+        (string did, byte[] key, string json) = CreateDocument();
+
+        // JsonDocument can parse these escape tokens and defer the failure
+        // until property.Name or GetString() performs actual unescaping.
+        string malformedName = json.Replace(
+            "\"id\":", "\"\\uD800\":", StringComparison.Ordinal);
+        string malformedValue = json.Replace(
+            "\"id\": \"did:web:issuer.example.org\"",
+            "\"id\": \"\\uD800\"", StringComparison.Ordinal);
+
+        Assert.False(DidWebPublishedKeyMatch.MatchesExpectedDocument(
+            did, key, malformedName));
+        Assert.False(DidWebPublishedKeyMatch.MatchesExpectedDocument(
+            did, key, malformedValue));
+    }
+
     private static (string Did, byte[] PublicKey, string Json) CreateDocument()
     {
         using Key key = Key.Create(SignatureAlgorithm.Ed25519);

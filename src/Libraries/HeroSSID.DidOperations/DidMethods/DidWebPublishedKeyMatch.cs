@@ -98,6 +98,13 @@ public static class DidWebPublishedKeyMatch
         {
             return false;
         }
+        catch (InvalidOperationException)
+        {
+            // System.Text.Json can defer decoding invalid Unicode escape
+            // sequences until property.Name or GetString() is read. Treat
+            // these malformed inputs as an ordinary failed pinned match.
+            return false;
+        }
     }
 
     private static bool HasExactlyTheseFields(JsonElement element, string[] fields)
