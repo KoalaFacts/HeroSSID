@@ -190,10 +190,30 @@ public static class JwtVcJsonCredential
             credentialId, exactValidity, issuerName, relyingPartyAudience);
     }
 
+    /// <summary>
+    /// Explicit opt-in issuer-signed RFC 7519 aud array for two to eight distinct
+    /// canonical HTTPS recipients. Each relying party must independently pin
+    /// its OWN audience, trusted issuer, holder, type and context. This private
+    /// VC-level restriction is not standard VC1.1 holder consent or authority.
+    /// No existing single-audience or audience-free caller changes behavior.
+    /// </summary>
+    public static string CreateForAudiencesWithMetadata(string issuerDid, string holderDid,
+        string credentialType, Uri subjectContextUri, JsonElement credentialSubject,
+        byte[] issuerPrivateKey, DateTimeOffset validFrom, DateTimeOffset validUntil,
+        IReadOnlyList<Uri> relyingPartyAudiences, Uri? credentialId,
+        string? issuerName, bool exactValidity)
+    {
+        ArgumentNullException.ThrowIfNull(relyingPartyAudiences);
+        return CreateCore(issuerDid, holderDid, credentialType, subjectContextUri,
+            credentialSubject, issuerPrivateKey, validFrom, validUntil,
+            credentialId, exactValidity, issuerName, audiences: relyingPartyAudiences);
+    }
+
     private static string CreateCore(string issuerDid, string holderDid, string credentialType,
         Uri subjectContextUri, JsonElement credentialSubject, byte[] issuerPrivateKey,
         DateTimeOffset validFrom, DateTimeOffset validUntil, Uri? credentialId,
-        bool exactValidity = false, string? issuerName = null, Uri? audience = null)
+        bool exactValidity = false, string? issuerName = null, Uri? audience = null,
+        IReadOnlyList<Uri>? audiences = null)
     {
         ArgumentNullException.ThrowIfNull(issuerDid);
         ArgumentNullException.ThrowIfNull(holderDid);
@@ -219,6 +239,8 @@ public static class JwtVcJsonCredential
             (credentialId is not null && !ValidCredentialId(credentialId)) ||
             (issuerName is not null && !ValidIssuerName(issuerName)) ||
             (audience is not null && !ValidAudienceUri(audience)) ||
+            (audience is not null && audiences is not null) ||
+            (audiences is not null && !ValidIssuerAudiences(audiences)) ||
             issuerPrivateKey.Length != 32 ||
             issuerPrivateKey.All(static b => b == 0) ||
             issued < 0 || expires <= issued ||
@@ -256,6 +278,12 @@ public static class JwtVcJsonCredential
         {
             payloadClaims["aud"] = audience.AbsoluteUri;
         }
+        else if (audiences is not null)
+        {
+            // Original signed multi-audience claim; no untrusted recipient can
+            // be silently appended after the Ed25519 signature is created.
+            payloadClaims["aud"] = audiences.Select(static recipient => recipient.AbsoluteUri).ToArray();
+        }
 
         var vcClaims = new Dictionary<string, object>(StringComparer.Ordinal)
         {
@@ -278,12 +306,13 @@ public static class JwtVcJsonCredential
         // must never escape this API as a purported credential.
         DateTimeOffset verificationTime = exactValidity
             ? validFrom : DateTimeOffset.FromUnixTimeSeconds((long)issued);
+        Uri? signedAudience = audience ?? audiences?[0];
         if (signed.Length > MaximumJwtLength ||
-            !(audience is null
+            !(signedAudience is null
                 ? TryVerify(signed, issuerDid, holderDid, credentialType,
                     subjectContextUri, verificationTime, out _)
                 : TryVerifyForAudience(signed, issuerDid, holderDid,
-                    credentialType, subjectContextUri, audience,
+                    credentialType, subjectContextUri, signedAudience,
                     verificationTime, out _)))
         {
             throw new ArgumentException("The seed does not control the issuer DID or the VC is ambiguous/oversized.",
@@ -609,6 +638,29 @@ public static class JwtVcJsonCredential
         }
 
         audience = parsed.AbsoluteUri;
+        return true;
+    }
+
+    // Any one malformed or duplicate entry must reject the entire issuer
+    // selection before the private seed signs anything. Uri.AbsoluteUri
+    // canonicalizes explicit default HTTPS ports as well as relative forms.
+    private static bool ValidIssuerAudiences(IReadOnlyList<Uri> recipients)
+    {
+        if (recipients.Count is < 2 or > 8)
+        {
+            return false;
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (Uri? recipient in recipients)
+        {
+            if (recipient is null || !ValidAudienceUri(recipient) ||
+                !seen.Add(recipient.AbsoluteUri))
+            {
+                return false;
+            }
+        }
+
         return true;
     }
 
