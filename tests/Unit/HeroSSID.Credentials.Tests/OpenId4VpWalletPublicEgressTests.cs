@@ -39,7 +39,7 @@ public sealed class OpenId4VpWalletPublicEgressTests
             try
             {
                 using HttpResponseMessage response = await http.GetAsync(
-                    target, TestContext.Current.CancellationToken);
+                    target);
             }
             catch (HttpRequestException)
             {
