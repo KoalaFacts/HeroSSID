@@ -196,6 +196,16 @@ public sealed class JwtVcJsonAudienceDenylistHttpTests
         await AssertHiddenAsync("VerifyForAudienceWithDenylistAndStatus",
             request, "Invalid").ConfigureAwait(true);
 
+        // The snapshot's observation has only whole-second precision.
+        // A cutoff one 100ns tick later must not round back and accept it.
+        await AssertHiddenAsync("VerifyForAudienceWithDenylistAndStatus",
+            WithStatusCutoff(request, Now.AddSeconds(-20).AddTicks(1)),
+            "Invalid").ConfigureAwait(true);
+
+        var exactBoundary = await InvokeAsync("VerifyForAudienceWithDenylistAndStatus",
+            WithStatusCutoff(request, Now.AddSeconds(-20))).ConfigureAwait(true);
+        Assert.Equal("SignedNotListed", exactBoundary.Body.GetProperty("status").GetString());
+
         string afterIncident = Snapshot(issuer, []);
         var accepted = await InvokeAsync("VerifyForAudienceWithDenylistAndStatus",
             request with { RevocationSnapshot = afterIncident }).ConfigureAwait(true);
