@@ -167,7 +167,7 @@ public sealed class DidWebPinnedDocumentHttpTransportTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
 
         await Assert.ThrowsAsync<HttpRequestException>(() =>
-            http.GetAsync($"https://127.0.0.1:{port}/did.json", timeout.Token));
+            http.GetAsync(new Uri($"https://127.0.0.1:{port}/did.json"), timeout.Token));
         Assert.False(listener.Pending());
     }
 
