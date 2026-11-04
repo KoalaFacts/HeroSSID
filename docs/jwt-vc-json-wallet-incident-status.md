@@ -55,10 +55,13 @@ string form = JwtVcJsonWalletIncidentDisclosure
 `TryPrepare` authenticates the real verifier Ed25519 signature, exact
 signed request issuer/type/context/HTTPS callback, original VC1.1 Ed25519
 issuer signature, holder DID, expiry and the same genuine issuer's private
-signed status. It requires the issuer's **signed whole-second observation**
-at or after the independent cutoff before returning any full subject claims.
-A cutoff at `10:00:00.500Z` requires a snapshot signed for `10:00:01Z`
-or later; it is never rounded down.
+signed status. It requires the issuer's **signed observation timestamp** (now preserved
+to 100ns for newly issued private snapshots) at or after the independent
+cutoff before returning any subject claims. A cutoff at `10:00:00.500Z`
+can accept a genuine observation at `10:00:00.500Z` or later without
+waiting for the next whole second. Previously issued whole-second snapshots
+remain readable but cannot claim a later fractional observation; the verifier
+never rounds its own cutoff backwards.
 
 After the Wallet application's consent UI, the signing method rejects changed
 cutoff, request, issuer credential, signed status, claims, holder key or
