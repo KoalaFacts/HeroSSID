@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using HeroSSID.Credentials.JwtVcJson;
@@ -544,6 +545,9 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
         activity.Start();
         using var handler =
             OpenId4VpJwtVcJsonWalletResponseTransport.CreateIsolatedDirectPostHandler();
+        // Test-only loopback connector: exercise real HTTP Activity diagnostics
+        // without weakening the production public-only destination policy.
+        handler.ConnectCallback = ConnectTestOnlyLoopbackAsync;
         using var http = new HttpClient(handler);
         // Start request before accepting the TCP connection. Await both the
         // real HTTP call and the server before leaving the using scopes.
@@ -576,6 +580,9 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
         activity.Start();
 
         using var handler = OpenId4VpJwtVcJsonRequestUri.CreateIsolatedTransportHandler();
+        // Explicitly bypass the production egress policy only inside this
+        // isolated trace-header test against a private local TCP listener.
+        handler.ConnectCallback = ConnectTestOnlyLoopbackAsync;
         using var http = new HttpClient(handler);
         Task<HttpResponseMessage> requestTask = http.GetAsync(
             new Uri($"http://127.0.0.1:{port}/request-object"), cancellation.Token);
@@ -588,6 +595,29 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
         Assert.DoesNotContain("baggage:", received, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("private-wallet-tenant", received, StringComparison.Ordinal);
         listener.Stop();
+    }
+
+    private static async ValueTask<Stream> ConnectTestOnlyLoopbackAsync(
+        System.Net.Http.SocketsHttpConnectionContext context,
+        CancellationToken cancellationToken)
+    {
+        // Only these two header-propagation tests override a production
+        // handler. Do not use this connector in Wallet application code.
+        System.Net.Sockets.Socket? socket = new(
+            AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        try
+        {
+            await socket.ConnectAsync(
+                IPAddress.Loopback, context.DnsEndPoint.Port, cancellationToken)
+                .ConfigureAwait(false);
+            var stream = new System.Net.Sockets.NetworkStream(socket, ownsSocket: true);
+            socket = null;
+            return stream;
+        }
+        finally
+        {
+            socket?.Dispose();
+        }
     }
 
     private static async Task<string> ReadHeadersAndReplyAsync(

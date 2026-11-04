@@ -47,7 +47,8 @@ reference only from the canonical two-parameter launch; it rejects changed
 host, sibling paths, query, fragment, encodings, or duplicate parameters before
 sending HTTP. It then verifies the verifier's genuine Ed25519 request and
 the independently pinned callback/type/context as before. Use the built-in
-credential-free, non-redirecting isolated transport:
+credential-free, non-redirecting isolated transport. Its connect-time public-only DNS policy rejects mixed public/private, loopback, link-local and special-use answers before opening TCP, and connects to the checked IP without re-resolving. TLS validates the original host; this does not replace network egress controls or independent verifier trust:
+
 
 ```csharp
 using HeroSSID.Credentials.VerifiablePresentations;
