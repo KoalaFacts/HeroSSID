@@ -268,9 +268,9 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
         uri.Fragment.Length == 0 &&
         uri.AbsoluteUri.Length <= 2048;
 
-    private static bool ValidRecipients(Uri[] recipients)
+    private static bool ValidRecipients(IReadOnlyList<Uri> recipients)
     {
-        if (recipients.Length is < 2 or > 8)
+        if (recipients.Count is < 2 or > 8)
         {
             return false;
         }
@@ -313,7 +313,7 @@ public sealed class IssueJwtVcJsonCredentialRequest
     /// two to eight canonical distinct HTTPS recipient URLs. They are signed as
     /// RFC 7519 aud array. Each verifier still pins its own intended URI.
     /// </summary>
-    public Uri[]? RecipientAudiences { get; init; }
+    public IReadOnlyList<Uri>? RecipientAudiences { get; init; }
     public JsonElement CredentialSubject { get; init; }
     public DateTimeOffset? ValidUntil { get; init; }
     /// <summary>
