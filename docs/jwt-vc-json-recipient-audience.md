@@ -63,6 +63,47 @@ The request additionally needs a genuine scoped bearer token with the tenant-own
 
 **Privacy warning:** Every included recipient can receive the *same fully disclosed* claims if the holder presents them. Multi-recipient `aud` is an issuer-signed statement of intended recipient(s), not a holder proof or consent grant. The integrating Wallet must independently obtain actual human/agent disclosure approval and sign any holder presentation. It is an **application-specific** VC-level restriction, not a claim of VC1.1-standard credential audience semantics, OpenID4VP wallet interop, revocation freshness, real identity, or business authorization.
 
+## Verifier-owned historical/current issuer trust for recipient-bound JWTs (SDK)
+
+A relying party accepting current and explicitly enrolled historical issuer keys can now
+pin **both** its own HTTPS recipient and an independent list of up to 16
+distinct valid Ed25519 `did:key` issuer DIDs. These methods do not infer
+issuer trust from JWT `iss`/`kid`, and do not accept an `aud` token through
+the pre-existing audience-free `Check` methods:
+
+```csharp
+JwtVcJsonTrustedIssuerCheckResult result =
+    JwtVcJsonTrustedIssuerVerifier.CheckForAudience(
+        jwt, trustedIssuerDids, expectedHolderDid,
+        "https://issuer.example/credentials#Membership",
+        new Uri("https://issuer.example/contexts/member/v1"),
+        new Uri("https://verifier-a.example/intake"), now,
+        out string verifiedIssuerDid, out JsonElement verifiedSubject);
+```
+
+`trustedIssuerDids`, recipient, type, vocabulary and holder identity all
+come from **independent verifier policy**. `SignedButStatusUnchecked` means
+the original JWT genuinely verifies under those pins. It is **not** a
+holder-private-key proof, a real identity check or a revocation result.
+
+When a verifier also has the **original signer's own** recent private
+revocation snapshot, use `CheckForAudienceWithStatus(jwt, snapshot,
+trustedIssuerDids, expectedHolderDid, type, context, recipient, now,
+out issuer, out subject)`. For post-incident use, the separate
+`CheckForAudienceWithStatusAfterObservationCutoff` adds a verifier-owned
+`minimumObservedAt` immediately after `now`. A foreign issuer's status,
+expired/stale status, incident-preceding observation, wrong audience, invalid
+JWT signature or removed issuer pin cannot release issuer or subject outputs.
+`SignedNotListed` assumes an independently established complete status
+inventory and is never live non-revocation assurance.
+
+These opt-in .NET SDK methods do **not** add a non-.NET HTTP variant; the
+existing authenticated historical-issuer HTTP routes still reject
+audience-bound JWTs rather than implicitly bypass the recipient policy.
+Issuance remains the responsibility of the real issuer; the Wallet may hold
+and present but cannot convert these claims into human consent or business
+authorization. No independent third-party Wallet interoperability is claimed.
+
 ## Signed wire profile and independent tests
 
 * Standard VC 1.1 `typ=JWT` (or absent `typ` on independently signed JWTs), Ed25519 `alg=EdDSA`; independently pinned issuer and holder `did:key`, HTTPS vocabulary and credential type; max 15-minute validity as elsewhere in the opt-in VC1.1 SDK.
@@ -70,6 +111,6 @@ The request additionally needs a genuine scoped bearer token with the tenant-own
 * Verification requires an **exact ordinal match** to the relying party's independently configured HTTPS URI. Any malformed, duplicate, excessive or noncanonical array member rejects the complete credential even if another member matches.
 * Genuine external NSec Ed25519 signing is exercised independently of the HeroSSID issuer serializer in `JwtVcJsonAudienceBoundaryTests`, including both audience forms, false audience, false issuer/holder, timestamp, malformed audience, and tampered signature. These are SDK tests, **not** independent third-party wallet interoperability or conformance certification.
 * Issuer-signed, short-lived private revocation snapshots can still authenticate and hash the **original** audience-bound JWT. The snapshot checks signer and digest, **not** whether a particular verifier is an authorized audience; check the exact independently pinned audience and other credential policy separately. A signed absence does not establish complete/live non-revocation.
-* Existing multi-issuer and HTTP verification routes do **not** automatically accept `aud` credentials; they remain fail-closed. Callers may compose the explicit SDK audience verification with their own enrolled issuer policy and revocation decision.
+* Existing audience-free multi-issuer methods and the authenticated multi-issuer HTTP routes continue to **reject** `aud` credentials. The new explicit .NET SDK historical issuer audience methods require the relying party's own recipient URI and original signer status policy; there is no silent upgrade or HTTP bypass.
 
 The issuer's signature proves a statement by a key. `aud` expresses *intended recipient* only. Neither is a proof of the recipient's legal identity, holder key control, end-user consent, a person's identity, an organisation's rights or an Agent's delegated business authorization.
