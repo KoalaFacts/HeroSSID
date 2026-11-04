@@ -114,6 +114,68 @@ public sealed class JwtVcJsonAudienceIssuanceHttpTests(AspireWebApplicationFacto
         Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
     }
 
+    [Fact]
+    public async Task RecipientRouteSignsOptionalMetadataAndExactValidityInSameOriginalJwt()
+    {
+        string token = await TokenAsync("did:manage credential:issue credential:verify")
+            .ConfigureAwait(true);
+        string issuerDid = await RegisterIssuerAsync(token).ConfigureAwait(true);
+        using var holder = Key.Create(SignatureAlgorithm.Ed25519);
+        string holderDid = Did(holder);
+        var credentialId = new Uri("https://issuer.example/credentials/recipient-42");
+        const string issuerName = "Issuer display name (not verified legal identity)";
+        DateTimeOffset expiry = DateTimeOffset.UtcNow.AddMinutes(4).AddTicks(37);
+
+        var body = new
+        {
+            issuerDid,
+            holderDid,
+            credentialType = Type,
+            subjectContextUri = Context,
+            credentialSubject = new { id = holderDid, membership = "active" },
+            validUntil = expiry,
+            recipientAudience = Recipient,
+            credentialId,
+            issuerName,
+            exactValidity = true
+        };
+        using var issued = await PostAsync(IssuePath, body, token).ConfigureAwait(true);
+        string jwt = await SetupResponse.ReadRequiredStringAsync(issued,
+            HttpStatusCode.Created, "Issue aud+jti+issuer.name+fractional validity", "credential")
+            .ConfigureAwait(true);
+
+        Assert.True(JwtVcJsonCredential.TryVerifyForAudienceWithValidity(
+            jwt, issuerDid, holderDid, Type, Context, Recipient,
+            DateTimeOffset.UtcNow, out var subject, out string? signedId,
+            out string? signedName, out DateTimeOffset? issuedAt,
+            out DateTimeOffset? expiresAt));
+        Assert.Equal("active", subject.GetProperty("membership").GetString());
+        Assert.Equal(credentialId.AbsoluteUri, signedId);
+        Assert.Equal(issuerName, signedName);
+        Assert.NotNull(issuedAt);
+        Assert.Equal(expiry, expiresAt);
+
+        // A signature and metadata cannot bypass independently configured recipient trust.
+        Assert.False(JwtVcJsonCredential.TryVerifyForAudienceWithValidity(
+            jwt, issuerDid, holderDid, Type, Context,
+            new Uri("https://attacker.example/credentials"),
+            DateTimeOffset.UtcNow, out var wrongSubject, out var wrongId,
+            out var wrongName, out var wrongStart, out var wrongEnd));
+        Assert.Equal(JsonValueKind.Undefined, wrongSubject.ValueKind);
+        Assert.Null(wrongId);
+        Assert.Null(wrongName);
+        Assert.Null(wrongStart);
+        Assert.Null(wrongEnd);
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, issuerDid, holderDid,
+            Type, Context, DateTimeOffset.UtcNow, out _));
+
+        // The existing route must not silently drop a requested audience even
+        // when other valid signed metadata is present.
+        using var oldRoute = await PostAsync(LegacyIssuePath, body, token)
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, oldRoute.StatusCode);
+    }
+
     private static object Request(string issuer, string holder, Uri? audience) => new
     {
         issuerDid = issuer,
