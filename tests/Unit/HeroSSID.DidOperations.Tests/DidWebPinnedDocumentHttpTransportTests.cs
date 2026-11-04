@@ -194,6 +194,8 @@ public sealed class DidWebPinnedDocumentHttpTransportTests
     [InlineData("fc00::1", false)]
     [InlineData("fe80::1", false)]
     [InlineData("2001:db8::1", false)]
+    [InlineData("3fff::1", false)]
+    [InlineData("3fff:0fff::1", false)]
     [InlineData("2001::1", false)]
     [InlineData("2002:c0a8:0101::1", false)]
     [InlineData("2001:20::1", false)]
