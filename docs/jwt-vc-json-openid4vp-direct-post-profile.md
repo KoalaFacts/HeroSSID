@@ -80,8 +80,7 @@ integrations still using unbound legacy forms, not a claim that their already
 issued VP is revoked or that user consent was recorded. The SDK's safe default
 creates its own short-lived `SocketsHttpHandler`: no redirects, cookies,
 proxy, automatic credentials, client TLS certificate selection or automatic
-decompression or W3C Activity header/baggage propagation; normal TLS server verification and certificate revocation
-checks are retained. There is a 15-second default whole-response deadline
+decompression or W3C Activity header/baggage propagation. Its shared public-only DNS policy rejects the entire answer set when any address is loopback, private, link-local or special-use, and connects directly to a vetted IP without a second DNS resolution; normal TLS host verification and certificate revocation checks are retained. A pinned HTTPS URI is not a DNS/IP pin, and the operator must still enforce network egress controls. There is a 15-second default whole-response deadline
 (maximum 30 seconds), 180,000-byte maximum form and 4,096-byte maximum JSON
 receipt. Only HTTP 200 with a bounded JSON object from the exact callback
 returns true; a 3xx, invalid receipt or network timeout returns false.
