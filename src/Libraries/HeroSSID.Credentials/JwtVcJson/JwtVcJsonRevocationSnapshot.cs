@@ -268,7 +268,7 @@ public static class JwtVcJsonRevocationSnapshot
         // vc+jwt credentials. These remain two explicitly bounded input profiles.
         if (!TryReadSupportedCredentialJwt(jwt!, issuerDid, out var payload, out bool isNormativeJwt) ||
             !Ed25519JwtSigner.VerifySignedJwt(jwt!, issuerKey) ||
-            !HasSupportedClaims(payload) ||
+            !HasSupportedClaims(payload, isNormativeJwt) ||
             !StrictJwtReader.TryGetString(payload, "iss", out var issuer) ||
             !string.Equals(issuer, issuerDid, StringComparison.Ordinal) ||
             !StrictJwtReader.TryGetString(payload, "sub", out var holderDid) ||
@@ -354,10 +354,19 @@ public static class JwtVcJsonRevocationSnapshot
     // Match the bounded optional VC1.1 JWT claims accepted by the credential
     // verifier, without requiring a still-current validity window: issuers must
     // also be able to revoke a credential after its validity has expired.
-    private static bool HasSupportedClaims(JsonElement payload) =>
-        payload.EnumerateObject().Count() == 5 +
-        (payload.TryGetProperty("iat", out _) ? 1 : 0) +
-        (payload.TryGetProperty("jti", out _) ? 1 : 0);
+    private static bool HasSupportedClaims(JsonElement payload, bool isNormativeJwt)
+    {
+        bool hasAudience = payload.TryGetProperty("aud", out _);
+        // This source-authenticity check does NOT assert that the relying
+        // party is a valid recipient. The verifier must separately pin aud.
+        // Historical non-standard vc+jwt never permits the aud extension.
+        return (!hasAudience || (isNormativeJwt &&
+                JwtVcJsonCredential.HasWellFormedAudience(payload))) &&
+            payload.EnumerateObject().Count() == 5 +
+            (payload.TryGetProperty("iat", out _) ? 1 : 0) +
+            (payload.TryGetProperty("jti", out _) ? 1 : 0) +
+            (hasAudience ? 1 : 0);
+    }
 
     private static bool HasValidOptionalCredentialId(JsonElement payload)
     {
