@@ -24,7 +24,7 @@ public sealed class DidWebPinnedDocumentHttpTransportTests
         });
 
         Assert.True(await DidWebPinnedDocumentHttpTransport.FetchAndMatchAsync(
-            did, key, http));
+            did, key, http, cancellationToken: TestContext.Current.CancellationToken));
         Assert.Equal(1, calls);
     }
 
@@ -42,7 +42,7 @@ public sealed class DidWebPinnedDocumentHttpTransportTests
         });
 
         Assert.False(await DidWebPinnedDocumentHttpTransport.FetchAndMatchAsync(
-            did, substituted, http));
+            did, substituted, http, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Theory]
@@ -57,7 +57,7 @@ public sealed class DidWebPinnedDocumentHttpTransportTests
             Content = new StringContent(json, Encoding.UTF8, "application/did+ld+json")
         });
         Assert.False(await DidWebPinnedDocumentHttpTransport.FetchAndMatchAsync(
-            did, key, http));
+            did, key, http, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Theory]
@@ -71,7 +71,7 @@ public sealed class DidWebPinnedDocumentHttpTransportTests
             Content = new StringContent(json, Encoding.UTF8, contentType)
         });
         Assert.False(await DidWebPinnedDocumentHttpTransport.FetchAndMatchAsync(
-            did, key, http));
+            did, key, http, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -81,13 +81,13 @@ public sealed class DidWebPinnedDocumentHttpTransportTests
         using var tooLarge = Client(_ => JsonResponse(
             new string(' ', 16_385) + json));
         Assert.False(await DidWebPinnedDocumentHttpTransport.FetchAndMatchAsync(
-            did, key, tooLarge));
+            did, key, tooLarge, cancellationToken: TestContext.Current.CancellationToken));
 
         using var malicious = Client(_ => JsonResponse(
             json.Replace("issuer.example.org", "attacker.example.org",
                 StringComparison.Ordinal)));
         Assert.False(await DidWebPinnedDocumentHttpTransport.FetchAndMatchAsync(
-            did, key, malicious));
+            did, key, malicious, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -103,7 +103,7 @@ public sealed class DidWebPinnedDocumentHttpTransportTests
         http.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", "private-token");
         Assert.False(await DidWebPinnedDocumentHttpTransport.FetchAndMatchAsync(
-            did, key, http));
+            did, key, http, cancellationToken: TestContext.Current.CancellationToken));
         Assert.Equal(0, calls);
     }
 
@@ -119,7 +119,7 @@ public sealed class DidWebPinnedDocumentHttpTransportTests
                 "application/did+ld+json")
         });
         Assert.False(await DidWebPinnedDocumentHttpTransport.FetchAndMatchAsync(
-            did, key, http));
+            did, key, http, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -133,14 +133,25 @@ public sealed class DidWebPinnedDocumentHttpTransportTests
             return JsonResponse(json);
         });
         Assert.False(await DidWebPinnedDocumentHttpTransport.FetchAndMatchAsync(
-            "did:web:127.0.0x1", key, http));
+            "did:web:127.0.0x1", key, http, cancellationToken: TestContext.Current.CancellationToken));
         Assert.False(await DidWebPinnedDocumentHttpTransport.FetchAndMatchAsync(
-            "did:web:issuer.example.org", key[..31], http));
+            "did:web:issuer.example.org", key[..31], http, cancellationToken: TestContext.Current.CancellationToken));
         Assert.Equal(0, calls);
     }
 
-    private static HttpClient Client(Func<HttpRequestMessage, HttpResponseMessage> send) =>
-        new(new FakeHandler(send));
+    private static HttpClient Client(Func<HttpRequestMessage, HttpResponseMessage> send)
+    {
+        var handler = new FakeHandler(send);
+        try
+        {
+            return new HttpClient(handler, disposeHandler: true);
+        }
+        catch
+        {
+            handler.Dispose();
+            throw;
+        }
+    }
 
     private static HttpResponseMessage JsonResponse(string json) =>
         new(HttpStatusCode.OK)
