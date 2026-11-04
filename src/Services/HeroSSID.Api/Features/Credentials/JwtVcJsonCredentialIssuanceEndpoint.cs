@@ -117,9 +117,7 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
             validUntil == DateTimeOffset.MinValue ||
             // A legacy caller cannot unknowingly lose its requested recipient pin.
             ((request.RecipientAudience is not null) != requireAudience) ||
-            (requireAudience && (!ValidRecipient(request.RecipientAudience) ||
-                request.CredentialId is not null ||
-                request.IssuerName is not null || request.ExactValidity)))
+            (requireAudience && !ValidRecipient(request.RecipientAudience)))
         {
             return InvalidRequest();
         }
@@ -177,9 +175,10 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
                 {
                     // The issuer seed remains tenant-owned and is erased below.
                     // A recipient-bound JWT cannot be verified by legacy unpinned routes.
-                    jwt = JwtVcJsonCredential.CreateForAudience(issuerDid,
+                    jwt = JwtVcJsonCredential.CreateForAudienceWithMetadata(issuerDid,
                         holderDid, credentialType, context, request.CredentialSubject,
-                        seed, signingStart, validUntil, request.RecipientAudience!);
+                        seed, signingStart, validUntil, request.RecipientAudience!,
+                        request.CredentialId, request.IssuerName, request.ExactValidity);
                 }
                 else if (request.IssuerName is not null)
                 {
@@ -255,7 +254,7 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
 
     private static IResult InvalidRequest() => Results.Problem(
         title: "Invalid Request",
-        detail: "An active tenant-owned issuer, external did:key holder, HTTPS credential type and vocabulary, optional bounded HTTPS credential ID, an optional nonblank control-free issuer name of at most 128 characters, one object or one-element object array with absent or matching holder id, and expiry within 15 minutes are required. The opt-in recipient route also requires a canonical HTTPS recipient without optional ID, issuer name or exact-validity extensions; the legacy route rejects recipient policy.",
+        detail: "An active tenant-owned issuer, external did:key holder, HTTPS credential type and vocabulary, optional bounded HTTPS credential ID, an optional nonblank control-free issuer name of at most 128 characters, one object or one-element object array with absent or matching holder id, and expiry within 15 minutes are required. The opt-in recipient route additionally requires a canonical HTTPS recipient and permits the same bounded ID, issuer name and exact-validity options; the legacy route rejects recipient policy.",
         statusCode: StatusCodes.Status400BadRequest);
 }
 

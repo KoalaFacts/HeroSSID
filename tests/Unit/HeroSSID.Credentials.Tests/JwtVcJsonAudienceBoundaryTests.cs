@@ -154,6 +154,53 @@ public sealed class JwtVcJsonAudienceBoundaryTests
         Assert.Equal(JsonValueKind.Undefined, wrongRecipient.ValueKind);
     }
 
+    [Fact]
+    public void IssuerCanBindMetadataAndFractionalValidityToOneRecipientScopedJwt()
+    {
+        var issuer = NewIdentity();
+        var holder = NewIdentity();
+        using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
+            new { id = holder.Did, membership = "active" }));
+        var id = new Uri("https://issuer.example/credentials/recipient-metadata-01");
+        const string displayName = "Organisation display only";
+        DateTimeOffset from = Now.AddMinutes(-1).AddTicks(17);
+        DateTimeOffset until = Now.AddMinutes(5).AddTicks(29);
+
+        string jwt = JwtVcJsonCredential.CreateForAudienceWithMetadata(
+            issuer.Did, holder.Did, CredentialType, Context, subject.RootElement,
+            issuer.Seed, from, until, Recipient, id, displayName, exactValidity: true);
+        Assert.True(JwtVcJsonCredential.TryVerifyForAudienceWithValidity(
+            jwt, issuer.Did, holder.Did, CredentialType, Context, Recipient,
+            Now, out var claims, out var signedId, out var signedName,
+            out var signedFrom, out var signedUntil));
+        Assert.Equal("active", claims.GetProperty("membership").GetString());
+        Assert.Equal(id.AbsoluteUri, signedId);
+        Assert.Equal(displayName, signedName);
+        Assert.Equal(from, signedFrom);
+        Assert.Equal(until, signedUntil);
+
+        Assert.False(JwtVcJsonCredential.TryVerifyForAudienceWithValidity(
+            jwt, issuer.Did, holder.Did, CredentialType, Context, OtherRecipient,
+            Now, out var wrongSubject, out var wrongId, out var wrongName,
+            out var wrongStart, out var wrongEnd));
+        Assert.Equal(JsonValueKind.Undefined, wrongSubject.ValueKind);
+        Assert.Null(wrongId);
+        Assert.Null(wrongName);
+        Assert.Null(wrongStart);
+        Assert.Null(wrongEnd);
+
+        string[] parts = jwt.Split('.');
+        parts[1] = Base64UrlEncoder.Encode(Ed25519JwtSigner.ExtractPayload(jwt)
+            .Replace(displayName, "Forged organisation name", StringComparison.Ordinal));
+        Assert.False(JwtVcJsonCredential.TryVerifyForAudience(
+            string.Join('.', parts), issuer.Did, holder.Did, CredentialType,
+            Context, Recipient, Now, out _));
+        Assert.Throws<ArgumentException>(() => JwtVcJsonCredential.CreateForAudienceWithMetadata(
+            issuer.Did, holder.Did, CredentialType, Context, subject.RootElement,
+            issuer.Seed, from, until, Recipient, id, "Untrusted\nName",
+            exactValidity: true));
+    }
+
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;
