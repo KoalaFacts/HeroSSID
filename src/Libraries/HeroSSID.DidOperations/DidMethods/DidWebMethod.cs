@@ -201,7 +201,13 @@ public sealed class DidWebMethod : IDidMethod
             }
         }
 
-        return true;
+        // System.Uri accepts noncanonical hexadecimal/octal IPv4 spellings
+        // (for example 127.0.0x1) and silently canonicalizes the destination.
+        // Offline publishing must never map a DID to a different host or IP.
+        return Uri.TryCreate("https://" + domain + "/", UriKind.Absolute,
+            out Uri? publicationHost) &&
+            publicationHost.HostNameType == UriHostNameType.Dns &&
+            string.Equals(publicationHost.Host, domain, StringComparison.Ordinal);
     }
 
     private static bool IsAsciiLowerAlphanumeric(char character) =>
