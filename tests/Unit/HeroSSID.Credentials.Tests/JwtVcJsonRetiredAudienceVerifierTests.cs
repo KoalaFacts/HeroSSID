@@ -115,7 +115,10 @@ public sealed class JwtVcJsonRetiredAudienceVerifierTests
             name, BindingFlags.Public | BindingFlags.Static);
         Assert.NotNull(method);
         var inputs = new List<object?> { jwt };
-        if (snapshot is not null) inputs.Add(snapshot);
+        if (snapshot is not null)
+        {
+            inputs.Add(snapshot);
+        }
         inputs.AddRange([active, retired, holderDid, CredentialType, Context,
             audience, Now, null, default(JsonElement)]);
         object?[] arguments = inputs.ToArray();
