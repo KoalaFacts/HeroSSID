@@ -124,7 +124,7 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
             (request.RecipientAudience is not null &&
                 !ValidRecipient(request.RecipientAudience)) ||
             (request.RecipientAudiences is not null &&
-                !ValidRecipients(request.RecipientAudiences))
+                !ValidRecipients(request.RecipientAudiences)))
         {
             return InvalidRequest();
         }
