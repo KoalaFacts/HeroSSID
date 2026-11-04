@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Sockets;
 using System.Text;
 using HeroSSID.DidOperations.DidMethods;
 using NSec.Cryptography;
@@ -146,6 +147,28 @@ public sealed class DidWebPinnedDocumentHttpTransportTests
         Assert.False(await DidWebPinnedDocumentHttpTransport.FetchAndMatchAsync(
             "did:web:issuer.example.org", key[..31], http, cancellationToken: TestContext.Current.CancellationToken));
         Assert.Equal(0, calls);
+    }
+
+
+    [Fact]
+    public async Task IsolatedTransportRejectsLoopbackBeforeOpeningTcpConnection()
+    {
+        // The default isolated transport must independently enforce public egress
+        // even if a pinned hostname has been rebound to an internal address.
+        // No TLS server is needed: the attacker must never receive a TCP SYN.
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        using var handler =
+            DidWebPinnedDocumentHttpTransport.CreateIsolatedTransportHandler();
+        Assert.NotNull(handler.ConnectCallback);
+        using var http = new HttpClient(handler);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+
+        await Assert.ThrowsAsync<HttpRequestException>(() =>
+            http.GetAsync($"https://127.0.0.1:{port}/did.json", timeout.Token));
+        Assert.False(listener.Pending());
     }
 
     private static HttpResponseMessage JsonResponse(string json) =>
