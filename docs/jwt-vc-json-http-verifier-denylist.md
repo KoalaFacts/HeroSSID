@@ -66,3 +66,32 @@ The xUnit suite uses real, separate Ed25519 active issuer, retired issuer, outsi
 **Operational limits:** This is a verifier-supplied request policy, not a durable shared denylist service; provisioning, authoritative incident intake, tenant-specific authorization, secure storage, synchronization across verifier instances and audit trails belong to the calling verifier. The issuer's status list may be incomplete or stale. Neither signature nor a clean private snapshot establishes holder key control, informed consent, human or organisation identity verification, real-time non-revocation, delegated agent authority, business authorization or third-party Wallet interoperability. No database migration, deployment or release is part of this feature.
 
 See [SDK emergency denial](jwt-vc-json-verifier-emergency-denylist.md), [retired issuer exact-JWT pins](jwt-vc-json-retired-issuer-exact-pins.md), [existing authenticated HTTP verification](jwt-vc-json-retired-issuer-http-profile.md), and [vision](VISION.md).
+
+
+## Independent post-incident status cutoff (HTTP, opt-in)
+
+The authenticated verifier can supply a **verifier-owned** `minimumStatusObservedAt`
+UTC instant on the two `-with-denylist-and-status` routes (including the
+recipient-pinned `verify-for-audience-with-denylist-and-status` route), and
+on the existing `verify-active-and-retired-with-status` route. This is a
+caller-enforced incident policy; do not take it from a wallet or signed JWT.
+
+```json
+{
+  "minimumStatusObservedAt": "2026-11-04T10:00:00.0000001Z"
+}
+```
+
+Include this additional member in the existing request body together with
+the real signed JWT, independently pinned issuer and holder, required recipient
+for audience routes, exact-JWT verifier denylist, and genuine same-issuer
+`revocationSnapshot`. The issuer's **signed** whole-second observation must
+be at or later than the supplied instant. An authentic, otherwise fresh
+pre-incident snapshot yields `Invalid` with no verified issuer/subject;
+a cutoff in the future or before Unix epoch fails with HTTP 400. The same
+policy member on a route **without** status checking fails HTTP 400 rather
+than being silently ignored.
+
+The issuer's signing key and self-reported observation are not evidence of
+independent status completeness. This does not prove real-time non-revocation,
+holder control, informed human consent or business authorization.

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using HeroSSID.Credentials.CredentialRevocation;
 using HeroSSID.Api.Authentication;
 using HeroSSID.Credentials.CredentialVerification;
 using HeroSSID.Credentials.JwtVcJson;
@@ -134,6 +135,15 @@ internal static class JwtVcJsonRetiredIssuerVerificationEndpoint
                 statusCode: StatusCodes.Status400BadRequest);
         }
 
+        DateTimeOffset now = clock.GetUtcNow();
+        if (request.MinimumStatusObservedAt is DateTimeOffset cutoff &&
+            (cutoff < DateTimeOffset.UnixEpoch || cutoff > now))
+        {
+            return Results.Problem(title: "Invalid Request",
+                detail: "The verifier-owned status observation cutoff must be no later than the current time.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
         // No holder/issuer/policy is authenticated merely by appearing in a
         // caller's JSON. Both SDK paths require original issuer Ed25519 proof,
         // independently pinned trust/holder/type/context/expiry and optional
@@ -155,12 +165,12 @@ internal static class JwtVcJsonRetiredIssuerVerificationEndpoint
                     ? JwtVcJsonVerifierDenylist.CheckForAudienceWithStatus(
                         request.Credential!, request.RevocationSnapshot!, active, retired,
                         denied, request.ExpectedHolderDid!, request.ExpectedCredentialType!,
-                        request.SubjectContextUri!, request.ExpectedAudience!, clock.GetUtcNow(),
+                        request.SubjectContextUri!, request.ExpectedAudience!, now,
                         out verifiedIssuer, out verifiedSubject)
                     : JwtVcJsonVerifierDenylist.CheckForAudience(
                         request.Credential!, active, retired, denied,
                         request.ExpectedHolderDid!, request.ExpectedCredentialType!,
-                        request.SubjectContextUri!, request.ExpectedAudience!, clock.GetUtcNow(),
+                        request.SubjectContextUri!, request.ExpectedAudience!, now,
                         out verifiedIssuer, out verifiedSubject);
             }
             else
@@ -169,12 +179,12 @@ internal static class JwtVcJsonRetiredIssuerVerificationEndpoint
                     ? JwtVcJsonVerifierDenylist.CheckWithStatus(
                         request.Credential!, request.RevocationSnapshot!, active, retired,
                         denied, request.ExpectedHolderDid!, request.ExpectedCredentialType!,
-                        request.SubjectContextUri!, clock.GetUtcNow(),
+                        request.SubjectContextUri!, now,
                         out verifiedIssuer, out verifiedSubject)
                     : JwtVcJsonVerifierDenylist.Check(
                         request.Credential!, active, retired, denied,
                         request.ExpectedHolderDid!, request.ExpectedCredentialType!,
-                        request.SubjectContextUri!, clock.GetUtcNow(),
+                        request.SubjectContextUri!, now,
                         out verifiedIssuer, out verifiedSubject);
             }
             status = result.ToString();
@@ -187,16 +197,35 @@ internal static class JwtVcJsonRetiredIssuerVerificationEndpoint
                 ? JwtVcJsonRetiredIssuerVerifier.CheckWithStatus(
                     request.Credential!, request.RevocationSnapshot!, active, retired,
                     request.ExpectedHolderDid!, request.ExpectedCredentialType!,
-                    request.SubjectContextUri!, clock.GetUtcNow(),
+                    request.SubjectContextUri!, now,
                     out verifiedIssuer, out verifiedSubject)
                 : JwtVcJsonRetiredIssuerVerifier.Check(
                     request.Credential!, active, retired,
                     request.ExpectedHolderDid!, request.ExpectedCredentialType!,
-                    request.SubjectContextUri!, clock.GetUtcNow(),
+                    request.SubjectContextUri!, now,
                     out verifiedIssuer, out verifiedSubject);
             status = result.ToString();
             disclose = result is JwtVcJsonTrustedIssuerCheckResult.SignedButStatusUnchecked
                 or JwtVcJsonTrustedIssuerCheckResult.SignedNotListed;
+        }
+
+        // A genuine, 60-second-fresh PRE-incident snapshot must not satisfy
+        // a verifier-owned post-incident observation policy. Recheck the same
+        // signed original JWT against the ACTUAL authenticated issuer, never
+        // against the snapshot's claimed issuer or any other trusted key.
+        if (disclose && withStatus &&
+            request.MinimumStatusObservedAt is DateTimeOffset minimum)
+        {
+            RevocationSnapshotCheckResult observed =
+                JwtVcJsonRevocationSnapshot.CheckWithObservationCutoff(
+                    request.RevocationSnapshot!, request.Credential!,
+                    verifiedIssuer, now, minimum);
+            if (observed is not RevocationSnapshotCheckResult.NotListed)
+            {
+                status = observed is RevocationSnapshotCheckResult.Revoked
+                    ? "IssuerReportedRevoked" : "Invalid";
+                disclose = false;
+            }
         }
 
         // Local denial, issuer-reported revocation, invalid signatures and
@@ -266,7 +295,8 @@ internal static class JwtVcJsonRetiredIssuerVerificationEndpoint
                 return false;
             }
         }
-        else if (request.RevocationSnapshot is not null)
+        else if (request.RevocationSnapshot is not null ||
+            request.MinimumStatusObservedAt is not null)
         {
             // A snapshot on the status-unchecked route must not be ignored.
             return false;
@@ -380,4 +410,6 @@ public sealed record class VerifyJwtVcJsonActiveAndRetiredRequest
     public Uri? SubjectContextUri { get; init; }
     public Uri? ExpectedAudience { get; init; }
     public string? RevocationSnapshot { get; init; }
+    /// <summary>Verifier-owned lower bound on actual-issuer private status observation.</summary>
+    public DateTimeOffset? MinimumStatusObservedAt { get; init; }
 }
