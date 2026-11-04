@@ -179,6 +179,15 @@ public sealed class DidWebPinnedDocumentHttpTransportTests
     [InlineData("127.0.0.1", false)]
     [InlineData("169.254.169.254", false)]
     [InlineData("172.20.1.1", false)]
+    // IANA reserves all of 192.0.0.0/24 for protocol assignments;
+    // individual public anycast exceptions must still be denied by this
+    // conservative did:web HTTPS egress filter, not silently allowed.
+    [InlineData("192.0.0.9", false)]
+    [InlineData("192.0.0.10", false)]
+    [InlineData("192.0.0.42", false)]
+    [InlineData("192.0.0.170", false)]
+    [InlineData("192.0.0.171", false)]
+    [InlineData("192.0.0.254", false)]
     [InlineData("192.0.0.1", false)]
     [InlineData("192.0.2.1", false)]
     [InlineData("192.88.99.1", false)]
