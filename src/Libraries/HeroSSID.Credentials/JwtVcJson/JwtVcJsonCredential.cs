@@ -155,10 +155,27 @@ public static class JwtVcJsonCredential
             credentialId, exactValidity: true);
     }
 
+    /// <summary>
+    /// Opt-in VC 1.1 JWT with an issuer-signed RFC 7519 recipient audience.
+    /// The receiver still independently pins its own HTTPS audience AND the
+    /// issuer, subject, type and vocabulary. This does not prove that the
+    /// issuer verified the recipient's identity or that the holder consented.
+    /// </summary>
+    public static string CreateForAudience(string issuerDid, string holderDid,
+        string credentialType, Uri subjectContextUri, JsonElement credentialSubject,
+        byte[] issuerPrivateKey, DateTimeOffset validFrom, DateTimeOffset validUntil,
+        Uri relyingPartyAudience)
+    {
+        ArgumentNullException.ThrowIfNull(relyingPartyAudience);
+        return CreateCore(issuerDid, holderDid, credentialType, subjectContextUri,
+            credentialSubject, issuerPrivateKey, validFrom, validUntil, null,
+            audience: relyingPartyAudience);
+    }
+
     private static string CreateCore(string issuerDid, string holderDid, string credentialType,
         Uri subjectContextUri, JsonElement credentialSubject, byte[] issuerPrivateKey,
         DateTimeOffset validFrom, DateTimeOffset validUntil, Uri? credentialId,
-        bool exactValidity = false, string? issuerName = null)
+        bool exactValidity = false, string? issuerName = null, Uri? audience = null)
     {
         ArgumentNullException.ThrowIfNull(issuerDid);
         ArgumentNullException.ThrowIfNull(holderDid);
@@ -183,6 +200,7 @@ public static class JwtVcJsonCredential
             !ValidContext(subjectContextUri) ||
             (credentialId is not null && !ValidCredentialId(credentialId)) ||
             (issuerName is not null && !ValidIssuerName(issuerName)) ||
+            (audience is not null && !ValidAudienceUri(audience)) ||
             issuerPrivateKey.Length != 32 ||
             issuerPrivateKey.All(static b => b == 0) ||
             issued < 0 || expires <= issued ||
@@ -216,6 +234,11 @@ public static class JwtVcJsonCredential
             payloadClaims["jti"] = credentialId.AbsoluteUri;
         }
 
+        if (audience is not null)
+        {
+            payloadClaims["aud"] = audience.AbsoluteUri;
+        }
+
         var vcClaims = new Dictionary<string, object>(StringComparer.Ordinal)
         {
             ["@context"] = new[] { BaseContext, subjectContextUri.AbsoluteUri },
@@ -235,11 +258,15 @@ public static class JwtVcJsonCredential
         // Check the actual cryptographic result against the self-certifying issuer DID,
         // including unique nested JSON properties. Wrong-key or malformed output
         // must never escape this API as a purported credential.
+        DateTimeOffset verificationTime = exactValidity
+            ? validFrom : DateTimeOffset.FromUnixTimeSeconds((long)issued);
         if (signed.Length > MaximumJwtLength ||
-            !TryVerify(signed, issuerDid, holderDid, credentialType,
-                subjectContextUri,
-                exactValidity ? validFrom : DateTimeOffset.FromUnixTimeSeconds((long)issued),
-                out _))
+            !(audience is null
+                ? TryVerify(signed, issuerDid, holderDid, credentialType,
+                    subjectContextUri, verificationTime, out _)
+                : TryVerifyForAudience(signed, issuerDid, holderDid,
+                    credentialType, subjectContextUri, audience,
+                    verificationTime, out _)))
         {
             throw new ArgumentException("The seed does not control the issuer DID or the VC is ambiguous/oversized.",
                 nameof(issuerPrivateKey));
@@ -263,11 +290,29 @@ public static class JwtVcJsonCredential
         TryVerifyCore(jwt, trustedIssuerDid, expectedHolderDid, expectedCredentialType,
             expectedSubjectContextUri, now, out verifiedSubject, out _, out _, out _, out _);
 
+    /// <summary>
+    /// Verify only a VC 1.1 JWT explicitly addressed to the independently
+    /// pinned relying-party HTTPS audience. Accept a single RFC 7519 aud URI
+    /// or at most eight distinct canonical HTTPS recipient URIs. Do not
+    /// infer issuer trust, holder key control or business authorization
+    /// from a signed aud claim. The pre-existing TryVerify rejects aud.
+    /// </summary>
+    public static bool TryVerifyForAudience(string jwt, string trustedIssuerDid,
+        string expectedHolderDid, string expectedCredentialType,
+        Uri expectedSubjectContextUri, Uri expectedAudience, DateTimeOffset now,
+        out JsonElement verifiedSubject)
+    {
+        ArgumentNullException.ThrowIfNull(expectedAudience);
+        return TryVerifyCore(jwt, trustedIssuerDid, expectedHolderDid,
+            expectedCredentialType, expectedSubjectContextUri, now,
+            out verifiedSubject, out _, out _, out _, out _, expectedAudience);
+    }
+
     private static bool TryVerifyCore(string jwt, string trustedIssuerDid, string expectedHolderDid,
         string expectedCredentialType, Uri expectedSubjectContextUri,
         DateTimeOffset now, out JsonElement verifiedSubject, out string? verifiedCredentialId,
         out string? verifiedIssuerName, out DateTimeOffset? verifiedNotBefore,
-        out DateTimeOffset? verifiedExpiresAt)
+        out DateTimeOffset? verifiedExpiresAt, Uri? expectedAudience = null)
     {
         ArgumentNullException.ThrowIfNull(jwt);
         ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
@@ -282,7 +327,9 @@ public static class JwtVcJsonCredential
             !ValidType(expectedCredentialType) ||
             !ValidContext(expectedSubjectContextUri) ||
             !TryReadSupportedCredentialJwt(jwt, trustedIssuerDid, out var payload, out bool isNormativeJwt) ||
-            !HasSupportedClaims(payload) ||
+            (expectedAudience is not null && !isNormativeJwt) ||
+            !HasSupportedClaims(payload, expectedAudience is not null) ||
+            !HasPinnedAudience(payload, expectedAudience) ||
             !Ed25519JwtSigner.VerifySignedJwt(jwt, issuerPublicKey) ||
             !StrictJwtReader.TryGetString(payload, "iss", out var signedIssuer) ||
             !string.Equals(signedIssuer, trustedIssuerDid, StringComparison.Ordinal) ||
@@ -416,10 +463,82 @@ public static class JwtVcJsonCredential
     // W3C VC 1.1 maps the credential id into JWT jti. OpenID4VP's
     // jwt_vc_json example omits iat altogether. Recognize only these
     // two known optional claims; fail closed on any other payload members.
-    private static bool HasSupportedClaims(JsonElement payload) =>
+    private static bool HasSupportedClaims(JsonElement payload, bool allowAudience) =>
         payload.EnumerateObject().Count() == 5 +
         (payload.TryGetProperty("iat", out _) ? 1 : 0) +
-        (payload.TryGetProperty("jti", out _) ? 1 : 0);
+        (payload.TryGetProperty("jti", out _) ? 1 : 0) +
+        (allowAudience && payload.TryGetProperty("aud", out _) ? 1 : 0);
+
+    // The signed JWT aud is never a verifier trust source: it must match
+    // an independently configured recipient URI. Every array member must be
+    // syntactically sound (not just the first matching entry), without
+    // duplicates, malformed schemes or ambiguous canonical spellings.
+    private static bool HasPinnedAudience(JsonElement payload, Uri? expectedAudience)
+    {
+        if (expectedAudience is null)
+        {
+            return !payload.TryGetProperty("aud", out _);
+        }
+
+        if (!ValidAudienceUri(expectedAudience) ||
+            !payload.TryGetProperty("aud", out var audience))
+        {
+            return false;
+        }
+
+        string expected = expectedAudience.AbsoluteUri;
+        if (audience.ValueKind == JsonValueKind.String)
+        {
+            return TryReadCanonicalAudience(audience, out string actual) &&
+                string.Equals(actual, expected, StringComparison.Ordinal);
+        }
+
+        if (audience.ValueKind != JsonValueKind.Array ||
+            audience.GetArrayLength() is < 1 or > 8)
+        {
+            return false;
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        bool containsRecipient = false;
+        foreach (var item in audience.EnumerateArray())
+        {
+            if (!TryReadCanonicalAudience(item, out string actual) ||
+                !seen.Add(actual))
+            {
+                return false;
+            }
+
+            containsRecipient |= string.Equals(actual, expected, StringComparison.Ordinal);
+        }
+
+        return containsRecipient;
+    }
+
+    private static bool TryReadCanonicalAudience(JsonElement item, out string audience)
+    {
+        audience = string.Empty;
+        if (item.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        string? raw = item.GetString();
+        if (string.IsNullOrWhiteSpace(raw) || raw.Length > 2048 ||
+            !Uri.TryCreate(raw, UriKind.Absolute, out var parsed) ||
+            !ValidAudienceUri(parsed) ||
+            !string.Equals(raw, parsed.AbsoluteUri, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        audience = parsed.AbsoluteUri;
+        return true;
+    }
+
+    // Audience is a signed routing assertion, not an address to fetch.
+    // Keep it HTTPS, canonical, userinfo-free and fragment-free.
+    private static bool ValidAudienceUri(Uri uri) => ValidContext(uri);
 
     // RFC 7519 allows fractional NumericDates. Only accept exact 100ns
     // instants; keep older nonstandard vc+jwt payloads integer-only.
