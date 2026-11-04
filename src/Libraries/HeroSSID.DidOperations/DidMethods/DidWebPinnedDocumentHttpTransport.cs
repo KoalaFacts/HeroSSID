@@ -75,7 +75,7 @@ public static class DidWebPinnedDocumentHttpTransport
                 response.RequestMessage?.RequestUri?.OriginalString !=
                     exactPublicationUri.OriginalString ||
                 !IsAllowedContentType(mediaType) ||
-                response.Content.Headers.ContentEncoding.Any() ||
+                response.Content.Headers.ContentEncoding.Count != 0 ||
                 response.Content.Headers.ContentLength > MaximumDocumentBytes)
             {
                 return false;
