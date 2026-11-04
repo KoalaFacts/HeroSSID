@@ -33,9 +33,23 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
             .Produces(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
+
+        // Explicit issuer-signed RFC 7519 recipient restriction (private VC-level profile).
+        credentials.MapPost("/jwt-vc-json/issue-for-audience", IssueForAudienceAsync)
+            .RequireAuthorization(CredentialIssueRequirement.PolicyName)
+            .RequireIssuerSigningGrant()
+            .WithName("IssueJwtVcJsonCredentialForAudience")
+            .WithSummary("Issue a VC1.1 JWT with an explicit HTTPS recipient restriction")
+            .Produces<IssueJwtVcJsonCredentialResponse>(StatusCodes.Status201Created)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
     }
 
-    internal static async Task<IResult> IssueAsync(
+    internal static Task<IResult> IssueAsync(
         [FromBody] IssueJwtVcJsonCredentialRequest request,
         [FromServices] HeroDbContext dbContext,
         [FromServices] IKeyEncryptionService encryption,
@@ -44,6 +58,30 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
         [FromServices] TimeProvider clock,
         [FromServices] ILogger<Program> logger,
         CancellationToken cancellationToken)
+        => IssueCoreAsync(request, dbContext, encryption, rateLimiter,
+            tenantContext, clock, logger, cancellationToken, requireAudience: false);
+
+    internal static Task<IResult> IssueForAudienceAsync(
+        [FromBody] IssueJwtVcJsonCredentialRequest request,
+        [FromServices] HeroDbContext dbContext,
+        [FromServices] IKeyEncryptionService encryption,
+        [FromServices] IRateLimiter rateLimiter,
+        [FromServices] ITenantContext tenantContext,
+        [FromServices] TimeProvider clock,
+        [FromServices] ILogger<Program> logger,
+        CancellationToken cancellationToken)
+        => IssueCoreAsync(request, dbContext, encryption, rateLimiter,
+            tenantContext, clock, logger, cancellationToken, requireAudience: true);
+
+    private static async Task<IResult> IssueCoreAsync(
+        [FromBody] IssueJwtVcJsonCredentialRequest request,
+        [FromServices] HeroDbContext dbContext,
+        [FromServices] IKeyEncryptionService encryption,
+        [FromServices] IRateLimiter rateLimiter,
+        [FromServices] ITenantContext tenantContext,
+        [FromServices] TimeProvider clock,
+        [FromServices] ILogger<Program> logger,
+        CancellationToken cancellationToken, bool requireAudience)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(clock);
@@ -76,7 +114,12 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
                  identifier.UserInfo.Length != 0 ||
                  identifier.AbsoluteUri.Length > 2048)) ||
             request.CredentialSubject.ValueKind is not (JsonValueKind.Object or JsonValueKind.Array) ||
-            validUntil == DateTimeOffset.MinValue)
+            validUntil == DateTimeOffset.MinValue ||
+            // A legacy caller cannot unknowingly lose its requested recipient pin.
+            ((request.RecipientAudience is not null) != requireAudience) ||
+            (requireAudience && (!ValidRecipient(request.RecipientAudience) ||
+                request.CredentialId is not null ||
+                request.IssuerName is not null || request.ExactValidity)))
         {
             return InvalidRequest();
         }
@@ -130,7 +173,15 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
                     ? now
                     : DateTimeOffset.FromUnixTimeSeconds(now.ToUnixTimeSeconds());
                 string jwt;
-                if (request.IssuerName is not null)
+                if (requireAudience)
+                {
+                    // The issuer seed remains tenant-owned and is erased below.
+                    // A recipient-bound JWT cannot be verified by legacy unpinned routes.
+                    jwt = JwtVcJsonCredential.CreateForAudience(issuerDid,
+                        holderDid, credentialType, context, request.CredentialSubject,
+                        seed, signingStart, validUntil, request.RecipientAudience!);
+                }
+                else if (request.IssuerName is not null)
                 {
                     // A descriptive issuer name is signed by the same tenant-owned
                     // Ed25519 key, never an external source of issuer trust.
@@ -194,9 +245,17 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
         }
     }
 
+    private static bool ValidRecipient(Uri? uri) =>
+        uri is { IsAbsoluteUri: true } &&
+        uri.Scheme == Uri.UriSchemeHttps &&
+        !string.IsNullOrWhiteSpace(uri.Host) &&
+        uri.UserInfo.Length == 0 &&
+        uri.Fragment.Length == 0 &&
+        uri.AbsoluteUri.Length <= 2048;
+
     private static IResult InvalidRequest() => Results.Problem(
         title: "Invalid Request",
-        detail: "An active tenant-owned issuer, external did:key holder, HTTPS credential type and vocabulary, optional bounded HTTPS credential ID, an optional nonblank control-free issuer name of at most 128 characters, one object or one-element object array with absent or matching holder id, and expiry within 15 minutes are required.",
+        detail: "An active tenant-owned issuer, external did:key holder, HTTPS credential type and vocabulary, optional bounded HTTPS credential ID, an optional nonblank control-free issuer name of at most 128 characters, one object or one-element object array with absent or matching holder id, and expiry within 15 minutes are required. The opt-in recipient route also requires a canonical HTTPS recipient without optional ID, issuer name or exact-validity extensions; the legacy route rejects recipient policy.",
         statusCode: StatusCodes.Status400BadRequest);
 }
 
@@ -209,6 +268,12 @@ public sealed class IssueJwtVcJsonCredentialRequest
     public Uri? SubjectContextUri { get; init; }
     /// <summary>Optional issuer-assigned HTTPS credential identifier, signed as JWT jti.</summary>
     public Uri? CredentialId { get; init; }
+    /// <summary>
+    /// Only the explicit issue-for-audience route signs this private RFC 7519
+    /// VC-level recipient restriction. Legacy issuance rejects it.
+    /// A signed aud is not standard VC1.1 presentation audience binding.
+    /// </summary>
+    public Uri? RecipientAudience { get; init; }
     public JsonElement CredentialSubject { get; init; }
     public DateTimeOffset? ValidUntil { get; init; }
     /// <summary>
