@@ -81,6 +81,59 @@ public static class JwtVcJsonVerifierDenylist
             now, out verifiedIssuerDid, out verifiedSubject);
     }
 
+    /// <summary>
+    /// Explicitly pin the verifier's own HTTPS recipient before accepting an
+    /// issuer-signed VC1.1 JWT with aud. Independent active/retired issuer,
+    /// original-JWT digest denial, holder, type, context and time checks all
+    /// remain required. Recipient binding is not holder consent or authority.
+    /// </summary>
+    public static JwtVcJsonVerifierPolicyResult CheckForAudience(
+        string credentialJwt,
+        IReadOnlyCollection<string> activeIssuerDids,
+        IReadOnlyCollection<JwtVcJsonRetiredCredentialPin> retiredCredentialPins,
+        IReadOnlyCollection<string> deniedCredentialSha256,
+        string expectedHolderDid,
+        string expectedCredentialType,
+        Uri expectedSubjectContextUri,
+        Uri expectedAudience,
+        DateTimeOffset now,
+        out string verifiedIssuerDid,
+        out JsonElement verifiedSubject)
+    {
+        ArgumentNullException.ThrowIfNull(expectedAudience);
+        return CheckCore(credentialJwt, null, activeIssuerDids, retiredCredentialPins,
+            deniedCredentialSha256, expectedHolderDid, expectedCredentialType,
+            expectedSubjectContextUri, now, out verifiedIssuerDid, out verifiedSubject,
+            expectedAudience);
+    }
+
+    /// <summary>
+    /// Explicit recipient pin plus the genuine original signer's short-lived
+    /// private revocation snapshot. Clean status cannot bypass a verifier's
+    /// separately registered emergency denial. No live status assurance.
+    /// </summary>
+    public static JwtVcJsonVerifierPolicyResult CheckForAudienceWithStatus(
+        string credentialJwt,
+        string revocationSnapshotJwt,
+        IReadOnlyCollection<string> activeIssuerDids,
+        IReadOnlyCollection<JwtVcJsonRetiredCredentialPin> retiredCredentialPins,
+        IReadOnlyCollection<string> deniedCredentialSha256,
+        string expectedHolderDid,
+        string expectedCredentialType,
+        Uri expectedSubjectContextUri,
+        Uri expectedAudience,
+        DateTimeOffset now,
+        out string verifiedIssuerDid,
+        out JsonElement verifiedSubject)
+    {
+        ArgumentNullException.ThrowIfNull(revocationSnapshotJwt);
+        ArgumentNullException.ThrowIfNull(expectedAudience);
+        return CheckCore(credentialJwt, revocationSnapshotJwt, activeIssuerDids,
+            retiredCredentialPins, deniedCredentialSha256,
+            expectedHolderDid, expectedCredentialType, expectedSubjectContextUri,
+            now, out verifiedIssuerDid, out verifiedSubject, expectedAudience);
+    }
+
     private static JwtVcJsonVerifierPolicyResult CheckCore(
         string credentialJwt,
         string? revocationSnapshotJwt,
@@ -92,7 +145,8 @@ public static class JwtVcJsonVerifierDenylist
         Uri expectedSubjectContextUri,
         DateTimeOffset now,
         out string verifiedIssuerDid,
-        out JsonElement verifiedSubject)
+        out JsonElement verifiedSubject,
+        Uri? expectedAudience = null)
     {
         ArgumentNullException.ThrowIfNull(credentialJwt);
         ArgumentNullException.ThrowIfNull(activeIssuerDids);
@@ -132,19 +186,42 @@ public static class JwtVcJsonVerifierDenylist
         // denial prevents an arbitrary unverified token from being reported
         // as a revoked/denied issuer credential. Retired acceptance itself
         // still requires a separately registered exact signed-JWT fingerprint.
-        JwtVcJsonTrustedIssuerCheckResult checkedResult =
-            revocationSnapshotJwt is null
+        // The older API intentionally rejects signed aud, rather than
+        // silently discarding issuer-specified recipient restrictions.
+        // Only the explicit opt-in path supplies a verifier-owned recipient.
+        string actualIssuerDid;
+        JsonElement actualSubject;
+        JwtVcJsonTrustedIssuerCheckResult checkedResult;
+        if (expectedAudience is null)
+        {
+            checkedResult = revocationSnapshotJwt is null
                 ? JwtVcJsonRetiredIssuerVerifier.Check(
                     credentialJwt, activeIssuerDids, retiredCredentialPins,
                     expectedHolderDid, expectedCredentialType,
-                    expectedSubjectContextUri, now, out var actualIssuerDid,
-                    out var actualSubject)
+                    expectedSubjectContextUri, now, out actualIssuerDid,
+                    out actualSubject)
                 : JwtVcJsonRetiredIssuerVerifier.CheckWithStatus(
                     credentialJwt, revocationSnapshotJwt,
                     activeIssuerDids, retiredCredentialPins,
                     expectedHolderDid, expectedCredentialType,
                     expectedSubjectContextUri, now, out actualIssuerDid,
                     out actualSubject);
+        }
+        else
+        {
+            checkedResult = revocationSnapshotJwt is null
+                ? JwtVcJsonRetiredIssuerVerifier.CheckForAudience(
+                    credentialJwt, activeIssuerDids, retiredCredentialPins,
+                    expectedHolderDid, expectedCredentialType,
+                    expectedSubjectContextUri, expectedAudience, now,
+                    out actualIssuerDid, out actualSubject)
+                : JwtVcJsonRetiredIssuerVerifier.CheckForAudienceWithStatus(
+                    credentialJwt, revocationSnapshotJwt, activeIssuerDids,
+                    retiredCredentialPins, expectedHolderDid,
+                    expectedCredentialType, expectedSubjectContextUri,
+                    expectedAudience, now, out actualIssuerDid,
+                    out actualSubject);
+        }
 
         if (checkedResult == JwtVcJsonTrustedIssuerCheckResult.Revoked)
         {
