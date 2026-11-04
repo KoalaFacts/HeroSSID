@@ -23,6 +23,8 @@ public sealed class DidWebOfflineDocumentTests
         string did = method.GenerateDidIdentifier(publicKey, options);
         Assert.Equal("did:web:issuer.example.com:organizations:acme", did);
         Assert.True(method.IsValid(did));
+        Assert.Equal("https://issuer.example.com/organizations/acme/did.json",
+            DidWebMethod.GetDocumentUri(did).AbsoluteUri);
 
         using JsonDocument json = JsonDocument.Parse(
             method.CreateDidDocument(did, publicKey, options));
@@ -58,6 +60,8 @@ public sealed class DidWebOfflineDocumentTests
         var options = new Dictionary<string, object> { ["domain"] = "example.org" };
         string did = method.GenerateDidIdentifier(publicKey, options);
         Assert.Equal("did:web:example.org", did);
+        Assert.Equal("https://example.org/.well-known/did.json",
+            DidWebMethod.GetDocumentUri(did).AbsoluteUri);
         using JsonDocument json = JsonDocument.Parse(
             method.CreateDidDocument(did, publicKey, options));
         Assert.Equal(did, json.RootElement.GetProperty("id").GetString());
@@ -78,6 +82,7 @@ public sealed class DidWebOfflineDocumentTests
     {
         var method = new DidWebMethod();
         Assert.False(method.IsValid(did));
+        Assert.Throws<ArgumentException>(() => DidWebMethod.GetDocumentUri(did));
         Assert.Throws<ArgumentException>(() => method.CreateDidDocument(did, NewPublicKey()));
     }
 
