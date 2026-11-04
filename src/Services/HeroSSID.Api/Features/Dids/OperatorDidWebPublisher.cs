@@ -93,9 +93,13 @@ public sealed class OperatorDidWebPublisher
         if (!IsEnabled ||
             !string.Equals(context.Request.Scheme, Uri.UriSchemeHttps,
                 StringComparison.Ordinal) ||
-            !string.Equals(context.Request.Host.Host, _hostname,
+            // Never use HostString.Port as the sole explicit-port check: it
+            // returns null for malformed/overflowing port values, which could
+            // otherwise be confused with an omitted default HTTPS port.
+            !(string.Equals(context.Request.Host.Value, _hostname,
                 StringComparison.Ordinal) ||
-            context.Request.Host.Port is not (null or 443))
+                string.Equals(context.Request.Host.Value, _hostname + ":443",
+                    StringComparison.Ordinal)))
         {
             return Results.NotFound();
         }
