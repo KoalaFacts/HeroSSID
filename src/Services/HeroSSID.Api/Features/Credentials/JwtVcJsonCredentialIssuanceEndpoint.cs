@@ -59,7 +59,7 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
         [FromServices] ILogger<Program> logger,
         CancellationToken cancellationToken)
         => IssueCoreAsync(request, dbContext, encryption, rateLimiter,
-            tenantContext, clock, logger, cancellationToken, requireAudience: false);
+            tenantContext, clock, logger, requireAudience: false, cancellationToken: cancellationToken);
 
     internal static Task<IResult> IssueForAudienceAsync(
         [FromBody] IssueJwtVcJsonCredentialRequest request,
@@ -71,7 +71,7 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
         [FromServices] ILogger<Program> logger,
         CancellationToken cancellationToken)
         => IssueCoreAsync(request, dbContext, encryption, rateLimiter,
-            tenantContext, clock, logger, cancellationToken, requireAudience: true);
+            tenantContext, clock, logger, requireAudience: true, cancellationToken: cancellationToken);
 
     private static async Task<IResult> IssueCoreAsync(
         [FromBody] IssueJwtVcJsonCredentialRequest request,
@@ -81,7 +81,7 @@ internal static class JwtVcJsonCredentialIssuanceEndpoint
         [FromServices] ITenantContext tenantContext,
         [FromServices] TimeProvider clock,
         [FromServices] ILogger<Program> logger,
-        CancellationToken cancellationToken, bool requireAudience)
+        bool requireAudience, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(clock);
