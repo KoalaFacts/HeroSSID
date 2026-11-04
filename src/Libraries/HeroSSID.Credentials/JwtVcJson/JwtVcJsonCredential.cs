@@ -60,9 +60,38 @@ public static class JwtVcJsonCredential
         CreateCore(issuerDid, holderDid, credentialType, subjectContextUri,
             credentialSubject, issuerPrivateKey, validFrom, validUntil, null);
 
+    /// <summary>
+    /// Opt-in VC1.1 JWT issuance retaining the exact caller-supplied validity
+    /// instants as RFC 7519 NumericDate fractions down to 100 nanoseconds.
+    /// Unlike Create, this does not round inward to whole seconds. The original
+    /// issuer controls the seed; holder control and business authority are separate.
+    /// </summary>
+    public static string CreateWithExactValidity(string issuerDid, string holderDid,
+        string credentialType, Uri subjectContextUri, JsonElement credentialSubject,
+        byte[] issuerPrivateKey, DateTimeOffset validFrom, DateTimeOffset validUntil) =>
+        CreateCore(issuerDid, holderDid, credentialType, subjectContextUri,
+            credentialSubject, issuerPrivateKey, validFrom, validUntil,
+            null, exactValidity: true);
+
+    /// <summary>
+    /// Exact-validity issuance with an optional portable HTTPS credential ID
+    /// signed into JWT jti, not a remotely trusted issuer or authorization.
+    /// </summary>
+    public static string CreateWithExactValidity(string issuerDid, string holderDid,
+        string credentialType, Uri subjectContextUri, JsonElement credentialSubject,
+        byte[] issuerPrivateKey, DateTimeOffset validFrom, DateTimeOffset validUntil,
+        Uri credentialId)
+    {
+        ArgumentNullException.ThrowIfNull(credentialId);
+        return CreateCore(issuerDid, holderDid, credentialType, subjectContextUri,
+            credentialSubject, issuerPrivateKey, validFrom, validUntil,
+            credentialId, exactValidity: true);
+    }
+
     private static string CreateCore(string issuerDid, string holderDid, string credentialType,
         Uri subjectContextUri, JsonElement credentialSubject, byte[] issuerPrivateKey,
-        DateTimeOffset validFrom, DateTimeOffset validUntil, Uri? credentialId)
+        DateTimeOffset validFrom, DateTimeOffset validUntil, Uri? credentialId,
+        bool exactValidity = false)
     {
         ArgumentNullException.ThrowIfNull(issuerDid);
         ArgumentNullException.ThrowIfNull(holderDid);
@@ -70,16 +99,17 @@ public static class JwtVcJsonCredential
         ArgumentNullException.ThrowIfNull(subjectContextUri);
         ArgumentNullException.ThrowIfNull(issuerPrivateKey);
 
-        // JWT NumericDate uses whole seconds. Round the start UP and the end DOWN:
-        // the signed credential must never become valid before the requested start
-        // or remain valid after the requested end. Reject windows that disappear.
-        long issued = validFrom.ToUnixTimeSeconds();
-        if (validFrom.UtcTicks % TimeSpan.TicksPerSecond != 0)
+        // Preserve the previous whole-second Create contract: round the start
+        // inward UP and the end inward DOWN. Only explicit exact-validity calls
+        // retain the 100ns DateTimeOffset instants as signed JWT NumericDates.
+        // Neither profile ever widens the caller's requested interval.
+        decimal issued = exactValidity ? NumericDate(validFrom) : validFrom.ToUnixTimeSeconds();
+        if (!exactValidity && validFrom.UtcTicks % TimeSpan.TicksPerSecond != 0)
         {
             issued++;
         }
 
-        long expires = validUntil.ToUnixTimeSeconds();
+        decimal expires = exactValidity ? NumericDate(validUntil) : validUntil.ToUnixTimeSeconds();
         if (!OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(issuerDid, out _) ||
             !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(holderDid, out _) ||
             !ValidType(credentialType) ||
@@ -133,7 +163,9 @@ public static class JwtVcJsonCredential
         // must never escape this API as a purported credential.
         if (signed.Length > MaximumJwtLength ||
             !TryVerify(signed, issuerDid, holderDid, credentialType,
-                subjectContextUri, DateTimeOffset.FromUnixTimeSeconds(issued), out _))
+                subjectContextUri,
+                exactValidity ? validFrom : DateTimeOffset.FromUnixTimeSeconds((long)issued),
+                out _))
         {
             throw new ArgumentException("The seed does not control the issuer DID or the VC is ambiguous/oversized.",
                 nameof(issuerPrivateKey));
