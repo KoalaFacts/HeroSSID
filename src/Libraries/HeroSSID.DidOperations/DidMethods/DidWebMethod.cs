@@ -143,6 +143,7 @@ public sealed class DidWebMethod : IDidMethod
     /// </summary>
     public static Uri GetDocumentUri(string didIdentifier)
     {
+        ArgumentNullException.ThrowIfNull(didIdentifier);
         if (!IsValidIdentifier(didIdentifier))
         {
             throw new ArgumentException("Invalid or unsupported did:web identifier.", nameof(didIdentifier));
