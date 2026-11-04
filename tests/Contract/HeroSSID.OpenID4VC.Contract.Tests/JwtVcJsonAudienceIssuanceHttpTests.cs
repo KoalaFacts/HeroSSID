@@ -176,6 +176,62 @@ public sealed class JwtVcJsonAudienceIssuanceHttpTests(AspireWebApplicationFacto
         Assert.Equal(HttpStatusCode.BadRequest, oldRoute.StatusCode);
     }
 
+    [Fact]
+    public async Task AuthenticatedIssuerSignsExactlyTwoAudiencesWithoutWideningLegacyRoute()
+    {
+        string token = await TokenAsync("did:manage credential:issue credential:verify")
+            .ConfigureAwait(true);
+        string issuerDid = await RegisterIssuerAsync(token).ConfigureAwait(true);
+        using var holder = Key.Create(SignatureAlgorithm.Ed25519);
+        string holderDid = Did(holder);
+        var otherRecipient = new Uri("https://second-verifier.example/credential-intake");
+        var body = new
+        {
+            issuerDid,
+            holderDid,
+            credentialType = Type,
+            subjectContextUri = Context,
+            credentialSubject = new { id = holderDid, membership = "active" },
+            validUntil = DateTimeOffset.UtcNow.AddMinutes(5),
+            recipientAudiences = new[] { Recipient, otherRecipient }
+        };
+        using var issued = await PostAsync(IssuePath, body, token).ConfigureAwait(true);
+        string jwt = await SetupResponse.ReadRequiredStringAsync(issued,
+            HttpStatusCode.Created, "Issuer-signed multi-audience VC1.1", "credential")
+            .ConfigureAwait(true);
+
+        Assert.True(JwtVcJsonCredential.TryVerifyForAudience(
+            jwt, issuerDid, holderDid, Type, Context, Recipient,
+            DateTimeOffset.UtcNow, out var first));
+        Assert.Equal("active", first.GetProperty("membership").GetString());
+        Assert.True(JwtVcJsonCredential.TryVerifyForAudience(
+            jwt, issuerDid, holderDid, Type, Context, otherRecipient,
+            DateTimeOffset.UtcNow, out _));
+        Assert.False(JwtVcJsonCredential.TryVerifyForAudience(
+            jwt, issuerDid, holderDid, Type, Context,
+            new Uri("https://unauthorised.example/credential-intake"),
+            DateTimeOffset.UtcNow, out var denied));
+        Assert.Equal(JsonValueKind.Undefined, denied.ValueKind);
+
+        using var oldRoute = await PostAsync(LegacyIssuePath, body, token)
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, oldRoute.StatusCode);
+        using var both = await PostAsync(IssuePath, new
+        {
+            body.issuerDid, body.holderDid, body.credentialType,
+            body.subjectContextUri, body.credentialSubject, body.validUntil,
+            body.recipientAudiences, recipientAudience = Recipient
+        }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, both.StatusCode);
+        using var repeated = await PostAsync(IssuePath, new
+        {
+            body.issuerDid, body.holderDid, body.credentialType,
+            body.subjectContextUri, body.credentialSubject, body.validUntil,
+            recipientAudiences = new[] { Recipient, Recipient }
+        }, token).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.BadRequest, repeated.StatusCode);
+    }
+
     private static object Request(string issuer, string holder, Uri? audience) => new
     {
         issuerDid = issuer,
