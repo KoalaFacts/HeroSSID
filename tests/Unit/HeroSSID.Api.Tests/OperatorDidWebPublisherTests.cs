@@ -74,7 +74,9 @@ public sealed class OperatorDidWebPublisherTests
         using var key = Key.Create(SignatureAlgorithm.Ed25519);
         var enabled = NewPublisher(Entries(key.PublicKey.Export(KeyBlobFormat.RawPublicKey)));
 
+        using var services = new ServiceCollection().AddLogging().BuildServiceProvider();
         DefaultHttpContext valid = Context("https", "issuer.example");
+        valid.RequestServices = services;
         await enabled.Handle(valid).ExecuteAsync(valid).ConfigureAwait(true);
         Assert.Equal(StatusCodes.Status200OK, valid.Response.StatusCode);
         Assert.Equal("application/did+ld+json", valid.Response.ContentType);
@@ -91,6 +93,7 @@ public sealed class OperatorDidWebPublisherTests
         })
         {
             DefaultHttpContext denied = Context(pair.Item1, pair.Item2);
+            denied.RequestServices = services;
             await enabled.Handle(denied).ExecuteAsync(denied).ConfigureAwait(true);
             Assert.Equal(StatusCodes.Status404NotFound, denied.Response.StatusCode);
             Assert.Equal(0, denied.Response.Body.Length);
