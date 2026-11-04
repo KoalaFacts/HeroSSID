@@ -1,3 +1,14 @@
+using HeroSSID.Data;
+using Microsoft.AspNetCore.Cryptography.KeyDerivation;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using System.Net;
 using System.Text;
 using HeroSSID.Api.Features.Dids;
 using HeroSSID.DidOperations.DidMethods;
@@ -84,6 +95,80 @@ public sealed class OperatorDidWebPublisherTests
             await enabled.Handle(denied).ExecuteAsync(denied).ConfigureAwait(true);
             Assert.Equal(StatusCodes.Status404NotFound, denied.Response.StatusCode);
             Assert.Equal(0, denied.Response.Body.Length);
+        }
+    }
+
+    [Fact]
+    public async Task ActualAnonymousRouteServesOnlyTheExplicitlyEnrolledDomain()
+    {
+        using var key = Key.Create(SignatureAlgorithm.Ed25519);
+        byte[] publicKey = key.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+        await using var hosting = new DidWebHttpFactory(publicKey);
+        using var client = hosting.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        using var good = await client.GetAsync(
+            "https://issuer.example/.well-known/did.json").ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, good.StatusCode);
+        Assert.Equal("application/did+ld+json", good.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("no-store", good.Headers.CacheControl?.ToString());
+        string json = await good.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(DidWebPublishedKeyMatch.MatchesExpectedDocument(
+            "did:web:issuer.example", publicKey, json));
+
+        using var wrongHost = await client.GetAsync(
+            "https://unapproved.example/.well-known/did.json").ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, wrongHost.StatusCode);
+
+        using var wrongPort = await client.GetAsync(
+            "https://issuer.example:8443/.well-known/did.json").ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, wrongPort.StatusCode);
+
+        await using var disabled = new DidWebHttpFactory(null);
+        using var disabledClient = disabled.CreateClient();
+        using var missing = await disabledClient.GetAsync(
+            "https://issuer.example/.well-known/did.json").ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+    }
+
+    private sealed class DidWebHttpFactory(byte[]? keyBytes) : WebApplicationFactory<Program>
+    {
+        private readonly string _database = Guid.NewGuid().ToString("N");
+
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            builder.UseEnvironment("Testing");
+            builder.ConfigureAppConfiguration((_, configuration) =>
+            {
+                var entries = new Dictionary<string, string?>
+                {
+                    ["Jwt:Secret"] = "HTTP-regression-test-signing-key-with-at-least-32-bytes",
+                    ["Jwt:Issuer"] = "https://http-test.example",
+                    ["Jwt:Audience"] = "https://http-test.example",
+                    ["ConnectionStrings:HeroDb"] = "Host=unused;Database=unused",
+                    ["HEROSSID_DB_PASSWORD"] = "unused"
+                };
+                if (keyBytes is not null)
+                {
+                    foreach (var entry in Entries(keyBytes))
+                    {
+                        entries.Add(entry.Key, entry.Value);
+                    }
+                }
+
+                configuration.AddInMemoryCollection(entries);
+            });
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<DbContextOptions<HeroDbContext>>();
+                services.RemoveAll<IDbContextOptionsConfiguration<HeroDbContext>>();
+                services.AddDbContext<HeroDbContext>(
+                    options => options.UseInMemoryDatabase(_database));
+                services.AddSingleton<IDataProtectionProvider>(
+                    new EphemeralDataProtectionProvider());
+            });
         }
     }
 
