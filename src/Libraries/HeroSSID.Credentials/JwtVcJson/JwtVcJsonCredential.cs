@@ -46,7 +46,7 @@ public static class JwtVcJsonCredential
         string expectedCredentialType, Uri expectedSubjectContextUri,
         DateTimeOffset now, out JsonElement verifiedSubject, out string? verifiedCredentialId)
         => TryVerifyCore(jwt, trustedIssuerDid, expectedHolderDid, expectedCredentialType,
-            expectedSubjectContextUri, now, out verifiedSubject, out verifiedCredentialId, out _);
+            expectedSubjectContextUri, now, out verifiedSubject, out verifiedCredentialId, out _, out _, out _);
 
     /// <summary>
     /// Return original Ed25519-signed VC1.1 descriptive issuer metadata only
@@ -61,7 +61,24 @@ public static class JwtVcJsonCredential
         out string? verifiedIssuerName)
         => TryVerifyCore(jwt, trustedIssuerDid, expectedHolderDid, expectedCredentialType,
             expectedSubjectContextUri, now, out verifiedSubject,
-            out verifiedCredentialId, out verifiedIssuerName);
+            out verifiedCredentialId, out verifiedIssuerName, out _, out _);
+
+    /// <summary>
+    /// Return the original authenticated JWT nbf and exp bounds (exact to
+    /// 100 nanoseconds) so relying parties can cap their own cache lifetime.
+    /// All outputs remain empty on signature, policy, expiry or format failure.
+    /// This does not establish holder key control, revocation or authorization.
+    /// </summary>
+    public static bool TryVerifyWithValidity(string jwt, string trustedIssuerDid,
+        string expectedHolderDid, string expectedCredentialType,
+        Uri expectedSubjectContextUri, DateTimeOffset now,
+        out JsonElement verifiedSubject, out string? verifiedCredentialId,
+        out string? verifiedIssuerName, out DateTimeOffset? verifiedNotBefore,
+        out DateTimeOffset? verifiedExpiresAt)
+        => TryVerifyCore(jwt, trustedIssuerDid, expectedHolderDid, expectedCredentialType,
+            expectedSubjectContextUri, now, out verifiedSubject,
+            out verifiedCredentialId, out verifiedIssuerName,
+            out verifiedNotBefore, out verifiedExpiresAt);
 
     /// <summary>
     /// Sign a short-lived, fully disclosed JWT VC 1.1 with the issuer's own Ed25519 seed.
@@ -244,18 +261,21 @@ public static class JwtVcJsonCredential
         string expectedCredentialType, Uri expectedSubjectContextUri,
         DateTimeOffset now, out JsonElement verifiedSubject) =>
         TryVerifyCore(jwt, trustedIssuerDid, expectedHolderDid, expectedCredentialType,
-            expectedSubjectContextUri, now, out verifiedSubject, out _, out _);
+            expectedSubjectContextUri, now, out verifiedSubject, out _, out _, out _, out _);
 
     private static bool TryVerifyCore(string jwt, string trustedIssuerDid, string expectedHolderDid,
         string expectedCredentialType, Uri expectedSubjectContextUri,
         DateTimeOffset now, out JsonElement verifiedSubject, out string? verifiedCredentialId,
-        out string? verifiedIssuerName)
+        out string? verifiedIssuerName, out DateTimeOffset? verifiedNotBefore,
+        out DateTimeOffset? verifiedExpiresAt)
     {
         ArgumentNullException.ThrowIfNull(jwt);
         ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
         verifiedSubject = default;
         verifiedCredentialId = null;
         verifiedIssuerName = null;
+        verifiedNotBefore = null;
+        verifiedExpiresAt = null;
 
         if (!OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(trustedIssuerDid, out var issuerPublicKey) ||
             !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(expectedHolderDid, out _) ||
@@ -297,6 +317,13 @@ public static class JwtVcJsonCredential
             embeddedIssuer.TryGetProperty("name", out var name)
                 ? name.GetString()
                 : null;
+        // The strict signed NumericDates are nonnegative, below DateTimeOffset
+        // maximum and exact 100ns ticks. Preserve the original bounds; never
+        // round an expiration up when handing it to another relying party.
+        verifiedNotBefore = DateTimeOffset.UnixEpoch.AddTicks(
+            decimal.ToInt64(notBefore * TimeSpan.TicksPerSecond));
+        verifiedExpiresAt = DateTimeOffset.UnixEpoch.AddTicks(
+            decimal.ToInt64(expires * TimeSpan.TicksPerSecond));
         return true;
     }
 
