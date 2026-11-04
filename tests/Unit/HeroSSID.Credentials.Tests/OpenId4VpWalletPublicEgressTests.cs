@@ -22,7 +22,7 @@ public sealed class OpenId4VpWalletPublicEgressTests
     [InlineData(true)]
     public async Task IsolatedWalletHandlerNeverConnectsToLoopbackBeforeTls(bool directPost)
     {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         try
         {
