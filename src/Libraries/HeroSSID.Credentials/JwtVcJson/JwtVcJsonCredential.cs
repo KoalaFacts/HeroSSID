@@ -469,6 +469,43 @@ public static class JwtVcJsonCredential
         (payload.TryGetProperty("jti", out _) ? 1 : 0) +
         (allowAudience && payload.TryGetProperty("aud", out _) ? 1 : 0);
 
+    /// <summary>
+    /// Status exports may authenticate original signed JWT provenance and
+    /// its exact digest without deciding a relying party's recipient policy.
+    /// A caller MUST still independently pin the expected audience before
+    /// releasing claims. This validates only signed aud syntax and bounds.
+    /// </summary>
+    internal static bool HasWellFormedAudience(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("aud", out var aud))
+        {
+            return false;
+        }
+
+        if (aud.ValueKind == JsonValueKind.String)
+        {
+            return TryReadCanonicalAudience(aud, out _);
+        }
+
+        if (aud.ValueKind != JsonValueKind.Array ||
+            aud.GetArrayLength() is < 1 or > 8)
+        {
+            return false;
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var item in aud.EnumerateArray())
+        {
+            if (!TryReadCanonicalAudience(item, out string audience) ||
+                !seen.Add(audience))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     // The signed JWT aud is never a verifier trust source: it must match
     // an independently configured recipient URI. Every array member must be
     // syntactically sound (not just the first matching entry), without
