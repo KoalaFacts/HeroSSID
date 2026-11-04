@@ -105,14 +105,14 @@ public sealed class OperatorDidWebPublisherTests
     {
         using var key = Key.Create(SignatureAlgorithm.Ed25519);
         byte[] publicKey = key.PublicKey.Export(KeyBlobFormat.RawPublicKey);
-        await using var hosting = new DidWebHttpFactory(publicKey);
+        using var hosting = new DidWebHttpFactory(publicKey);
         using var client = hosting.CreateClient(new WebApplicationFactoryClientOptions
         {
             AllowAutoRedirect = false
         });
 
         using var good = await client.GetAsync(
-            "https://issuer.example/.well-known/did.json").ConfigureAwait(true);
+            new Uri("https://issuer.example/.well-known/did.json", UriKind.Absolute)).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.OK, good.StatusCode);
         Assert.Equal("application/did+ld+json", good.Content.Headers.ContentType?.MediaType);
         Assert.Equal("no-store", good.Headers.CacheControl?.ToString());
@@ -121,17 +121,17 @@ public sealed class OperatorDidWebPublisherTests
             "did:web:issuer.example", publicKey, json));
 
         using var wrongHost = await client.GetAsync(
-            "https://unapproved.example/.well-known/did.json").ConfigureAwait(true);
+            new Uri("https://unapproved.example/.well-known/did.json", UriKind.Absolute)).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.NotFound, wrongHost.StatusCode);
 
         using var wrongPort = await client.GetAsync(
-            "https://issuer.example:8443/.well-known/did.json").ConfigureAwait(true);
+            new Uri("https://issuer.example:8443/.well-known/did.json", UriKind.Absolute)).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.NotFound, wrongPort.StatusCode);
 
-        await using var disabled = new DidWebHttpFactory(null);
+        using var disabled = new DidWebHttpFactory(null);
         using var disabledClient = disabled.CreateClient();
         using var missing = await disabledClient.GetAsync(
-            "https://issuer.example/.well-known/did.json").ConfigureAwait(true);
+            new Uri("https://issuer.example/.well-known/did.json", UriKind.Absolute)).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
     }
 
