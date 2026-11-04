@@ -37,7 +37,7 @@ public sealed class DidWebPinnedKeyRetirementTests
             Assert.Single(root.GetProperty("authentication").EnumerateArray()).GetString());
         Assert.Equal(Did + "#key-2",
             Assert.Single(root.GetProperty("assertionMethod").EnumerateArray()).GetString());
-        Assert.DoesNotContain("#key-1", document);
+        Assert.DoesNotContain("#key-1", document, StringComparison.Ordinal);
         Assert.Equal(5, root.EnumerateObject().Count());
     }
 
