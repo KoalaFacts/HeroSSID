@@ -81,6 +81,9 @@ public sealed class JwtVcJsonEmbeddedMetadataTests
     [InlineData("issuer-name-array")]
     [InlineData("issuer-name-context")]
     [InlineData("issuer-name-extra-property")]
+    [InlineData("issuer-name-null")]
+    [InlineData("issuer-name-too-long")]
+    [InlineData("issuer-name-control")]
     public void SignedButInvalidIssuerDescriptionDoesNotReleaseClaims(string variant)
     {
         string jwt = SignExternal(variant: variant);
@@ -295,12 +298,25 @@ public sealed class JwtVcJsonEmbeddedMetadataTests
                 vc["issuer"] = new { id = _issuer.Did, name = new[] { "Australasian Membership Office" } };
                 break;
             case "issuer-name-context":
-                vc["issuer"] = new { id = _issuer.Did, name = "Australasian Membership Office",
-                    @context = "https://untrusted.example/context" };
+                vc["issuer"] = new Dictionary<string, object>(StringComparer.Ordinal)
+                {
+                    ["id"] = _issuer.Did,
+                    ["name"] = "Australasian Membership Office",
+                    ["@context"] = "https://untrusted.example/context"
+                };
                 break;
             case "issuer-name-extra-property":
                 vc["issuer"] = new { id = _issuer.Did, name = "Australasian Membership Office",
                     website = "https://untrusted.example" };
+                break;
+            case "issuer-name-null":
+                vc["issuer"] = new { id = _issuer.Did, name = (string?)null };
+                break;
+            case "issuer-name-too-long":
+                vc["issuer"] = new { id = _issuer.Did, name = new string('X', 129) };
+                break;
+            case "issuer-name-control":
+                vc["issuer"] = new { id = _issuer.Did, name = "Membership\u0000Office" };
                 break;
             case "wrong-issuer":
                 vc["issuer"] = _stranger.Did;

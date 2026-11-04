@@ -137,6 +137,28 @@ noncanonical Ed25519 JWS. Issuance by `Create` continues to produce the
 original six-field bounded representation without `jti`; existing tokens
 retain their verification result.
 
+### Independently signed descriptive issuer objects (input-only)
+
+The bounded VC1.1 JWT verifier accepts the Recommendation's
+[`issuer` object representation](https://www.w3.org/TR/2021/REC-vc-data-model-20211109/#issuer)
+when the genuine issuer-signed `vc.issuer` is either the same DID as
+JWT `iss`, `{ "id": "<pinned issuer DID>" }`, or the same object with one
+additional **nonempty, at most 128-character, control-free string `name`**.
+The verifier still requires the **independently pinned issuer DID**, real
+Ed25519 signature, pinned holder/type/context and exact validity. The
+returned verified subject is unchanged, and the original compact JWT is
+used for signer-specific revocation snapshots.
+
+The `name` is only signed descriptive metadata, **not independent proof
+of the organization's legal name**, DID ownership beyond the verifying
+key, real-world identity or permission to act. A mismatched `issuer.id`,
+empty/non-string/overlong/control-character `name`, extra issuer object
+properties (including nested `@context`) and malformed signatures fail
+closed, with no released subject. This is an explicitly bounded
+**verification-only** compatibility path: HeroSSID's existing SDK and HTTP
+issuers still emit the compact JWT-claim-only form. It does not establish
+third-party Wallet interoperability or complete VC conformance.
+
 ### JWT `sub` as the single subject identifier
 
 W3C VC Data Model 1.1 Recommendation §6.3.1 maps

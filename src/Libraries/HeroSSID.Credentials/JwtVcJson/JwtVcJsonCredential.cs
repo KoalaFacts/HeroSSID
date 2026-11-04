@@ -467,9 +467,17 @@ public static class JwtVcJsonCredential
                     string.Equals(embeddedIssuer.GetString(), pinnedIssuerDid,
                         StringComparison.Ordinal),
                 JsonValueKind.Object =>
-                    embeddedIssuer.EnumerateObject().Count() == 1 &&
                     StrictJwtReader.TryGetString(embeddedIssuer, "id", out string issuerId) &&
-                    string.Equals(issuerId, pinnedIssuerDid, StringComparison.Ordinal),
+                    string.Equals(issuerId, pinnedIssuerDid, StringComparison.Ordinal) &&
+                    // VC1.1 permits an issuer object with descriptive fields.
+                    // Only a bounded signed name is understood by this
+                    // plain-JSON profile; it is NOT a verifier trust anchor.
+                    (embeddedIssuer.EnumerateObject().Count() == 1 ||
+                        (embeddedIssuer.EnumerateObject().Count() == 2 &&
+                            StrictJwtReader.TryGetString(embeddedIssuer, "name",
+                                out string issuerName) &&
+                            issuerName.Length <= 128 &&
+                            !issuerName.Any(char.IsControl))),
                 _ => false
             };
             if (!matchesIssuer)
