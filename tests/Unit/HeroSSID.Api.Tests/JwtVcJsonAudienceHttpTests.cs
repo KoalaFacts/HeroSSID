@@ -64,7 +64,7 @@ public sealed class JwtVcJsonAudienceHttpTests
             expectedAudience = Audience
         });
         var request = JsonSerializer.Deserialize<VerifyJwtVcJsonCredentialRequest>(
-            submitted, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            submitted, JsonSerializerOptions.Web);
         Assert.NotNull(request);
 
         var result = await ExecuteAsync(JwtVcJsonCredentialVerificationEndpoint.Verify(
