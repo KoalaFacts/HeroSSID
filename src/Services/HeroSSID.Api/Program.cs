@@ -114,6 +114,8 @@ builder.Services.AddSingleton<HostPinnedGuardianEnrollmentRegistry>();
 builder.Services.AddSingleton<HostPinnedVcdm20IssuerRegistry>();
 // Only operator configuration, never claimant-supplied HTTP fields, enrolls issuer successors.
 builder.Services.AddSingleton<HostPinnedIssuerSuccessorRegistry>();
+// Optional public DID document publication requires explicit operator enrollment.
+builder.Services.AddSingleton<OperatorDidWebPublisher>();
 
 // Add API versioning (T028)
 builder.Services.AddApiVersioning(options =>
@@ -250,6 +252,7 @@ _ = app.Services.GetRequiredService<HostPinnedGuardianEnrollmentRegistry>();
 _ = app.Services.GetRequiredService<HostPinnedVcdm20IssuerRegistry>();
 _ = app.Services.GetRequiredService<HostPinnedIssuerSuccessorRegistry>();
 _ = app.Services.GetRequiredService<IssuerSigningGrantRegistry>();
+_ = app.Services.GetRequiredService<OperatorDidWebPublisher>();
 
 // Fail before serving requests, after all host configuration providers have been applied.
 _ = app.Services.GetRequiredService<JwtSigningSettings>();
@@ -318,6 +321,7 @@ app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = Dat
     .ExcludeFromDescription();
 
 // Map User Story 1 endpoints
+OperatorDidWebPublisher.Map(app, app.Services.GetRequiredService<OperatorDidWebPublisher>());
 app.MapDidEndpoints();
 app.MapCredentialEndpoints();
 
