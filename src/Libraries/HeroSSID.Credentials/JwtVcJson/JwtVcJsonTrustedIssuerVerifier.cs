@@ -103,12 +103,93 @@ public static class JwtVcJsonTrustedIssuerVerifier
             out verifiedIssuerDid, out verifiedSubject);
     }
 
+    /// <summary>
+    /// Verify a VC1.1 JWT addressed to this independently pinned HTTPS
+    /// recipient against a verifier-owned current/historical issuer DID list.
+    /// The original signature, holder, type, context, audience and expiry
+    /// must all validate before claims are disclosed. This is not a holder
+    /// key proof, real-world identity check or authorization decision.
+    /// </summary>
+    public static JwtVcJsonTrustedIssuerCheckResult CheckForAudience(
+        string credentialJwt, IReadOnlyCollection<string> trustedIssuerDids,
+        string expectedHolderDid, string expectedCredentialType,
+        Uri expectedSubjectContextUri, Uri expectedAudience, DateTimeOffset now,
+        out string verifiedIssuerDid, out JsonElement verifiedSubject)
+    {
+        ArgumentNullException.ThrowIfNull(credentialJwt);
+        ArgumentNullException.ThrowIfNull(trustedIssuerDids);
+        ArgumentNullException.ThrowIfNull(expectedHolderDid);
+        ArgumentNullException.ThrowIfNull(expectedCredentialType);
+        ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
+        ArgumentNullException.ThrowIfNull(expectedAudience);
+
+        return CheckCore(credentialJwt, null, trustedIssuerDids, expectedHolderDid,
+            expectedCredentialType, expectedSubjectContextUri, now,
+            withStatus: false, minimumObservedAt: null,
+            out verifiedIssuerDid, out verifiedSubject, expectedAudience);
+    }
+
+    /// <summary>
+    /// Recipient-pinned issuer trust plus original-signer private status.
+    /// A clean snapshot does not prove complete or live non-revocation.
+    /// Neither a status signed by another allowlisted issuer nor a different
+    /// JWT audience authorizes disclosure.
+    /// </summary>
+    public static JwtVcJsonTrustedIssuerCheckResult CheckForAudienceWithStatus(
+        string credentialJwt, string revocationSnapshotJwt,
+        IReadOnlyCollection<string> trustedIssuerDids,
+        string expectedHolderDid, string expectedCredentialType,
+        Uri expectedSubjectContextUri, Uri expectedAudience, DateTimeOffset now,
+        out string verifiedIssuerDid, out JsonElement verifiedSubject)
+    {
+        ArgumentNullException.ThrowIfNull(credentialJwt);
+        ArgumentNullException.ThrowIfNull(revocationSnapshotJwt);
+        ArgumentNullException.ThrowIfNull(trustedIssuerDids);
+        ArgumentNullException.ThrowIfNull(expectedHolderDid);
+        ArgumentNullException.ThrowIfNull(expectedCredentialType);
+        ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
+        ArgumentNullException.ThrowIfNull(expectedAudience);
+
+        return CheckCore(credentialJwt, revocationSnapshotJwt, trustedIssuerDids,
+            expectedHolderDid, expectedCredentialType, expectedSubjectContextUri,
+            now, withStatus: true, minimumObservedAt: null,
+            out verifiedIssuerDid, out verifiedSubject, expectedAudience);
+    }
+
+    /// <summary>
+    /// Recipient-pinned issuer trust plus actual signer status whose observation
+    /// instant must meet a verifier-owned incident cutoff. No automated trust
+    /// promotion, revocation completeness or end-user consent is implied.
+    /// </summary>
+    public static JwtVcJsonTrustedIssuerCheckResult CheckForAudienceWithStatusAfterObservationCutoff(
+        string credentialJwt, string revocationSnapshotJwt,
+        IReadOnlyCollection<string> trustedIssuerDids,
+        string expectedHolderDid, string expectedCredentialType,
+        Uri expectedSubjectContextUri, Uri expectedAudience, DateTimeOffset now,
+        DateTimeOffset minimumObservedAt,
+        out string verifiedIssuerDid, out JsonElement verifiedSubject)
+    {
+        ArgumentNullException.ThrowIfNull(credentialJwt);
+        ArgumentNullException.ThrowIfNull(revocationSnapshotJwt);
+        ArgumentNullException.ThrowIfNull(trustedIssuerDids);
+        ArgumentNullException.ThrowIfNull(expectedHolderDid);
+        ArgumentNullException.ThrowIfNull(expectedCredentialType);
+        ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
+        ArgumentNullException.ThrowIfNull(expectedAudience);
+
+        return CheckCore(credentialJwt, revocationSnapshotJwt, trustedIssuerDids,
+            expectedHolderDid, expectedCredentialType, expectedSubjectContextUri,
+            now, withStatus: true, minimumObservedAt,
+            out verifiedIssuerDid, out verifiedSubject, expectedAudience);
+    }
+
     private static JwtVcJsonTrustedIssuerCheckResult CheckCore(
         string credentialJwt, string? revocationSnapshotJwt,
         IReadOnlyCollection<string> trustedIssuerDids, string expectedHolderDid,
         string expectedCredentialType, Uri expectedSubjectContextUri,
         DateTimeOffset now, bool withStatus, DateTimeOffset? minimumObservedAt,
-        out string verifiedIssuerDid, out JsonElement verifiedSubject)
+        out string verifiedIssuerDid, out JsonElement verifiedSubject,
+        Uri? expectedAudience = null)
     {
         // Do not release even a previously authenticated issuer identity on
         // an invalid, revoked or status-uncertain verification attempt.
@@ -163,9 +244,20 @@ public static class JwtVcJsonTrustedIssuerVerifier
         // candidate. Each candidate is already in the relying party's list.
         foreach (string issuerDid in issuers)
         {
-            if (!JwtVcJsonCredential.TryVerify(credentialJwt, issuerDid,
+            // The old trust-list API intentionally rejects all aud claims.
+            // Only an explicit, verifier-controlled audience enables this
+            // recipient-bound path; issuer selection still comes solely from
+            // independently pinned DIDs, never untrusted JWT headers.
+            JsonElement authenticatedSubject;
+            bool credentialVerified = expectedAudience is null
+                ? JwtVcJsonCredential.TryVerify(credentialJwt, issuerDid,
                     expectedHolderDid, expectedCredentialType,
-                    expectedSubjectContextUri, now, out var authenticatedSubject))
+                    expectedSubjectContextUri, now, out authenticatedSubject)
+                : JwtVcJsonCredential.TryVerifyForAudience(credentialJwt, issuerDid,
+                    expectedHolderDid, expectedCredentialType,
+                    expectedSubjectContextUri, expectedAudience, now,
+                    out authenticatedSubject);
+            if (!credentialVerified)
             {
                 continue;
             }
