@@ -36,6 +36,23 @@ internal static class JwtVcJsonCredentialVerificationEndpoint
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
+        credentials.MapPost("/jwt-vc-json/verify-for-audience", VerifyForAudience)
+            .RequireAuthorization(OperationScopes.CredentialVerify)
+            .WithName("VerifyJwtVcJsonCredentialForAudience")
+            .WithSummary("Verify original VC1.1 JWT for independently pinned HTTPS recipient")
+            .Produces<VerifyJwtVcJsonCredentialResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden);
+
+        credentials.MapPost("/jwt-vc-json/verify-for-audience-with-status", VerifyForAudienceWithStatus)
+            .RequireAuthorization(OperationScopes.CredentialVerify)
+            .WithName("VerifyJwtVcJsonCredentialForAudienceWithStatus")
+            .WithSummary("Verify recipient-pinned VC1.1 JWT and genuine original-issuer status")
+            .Produces<VerifyJwtVcJsonCredentialResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden);
     }
 
     /// <summary>
@@ -51,6 +68,7 @@ internal static class JwtVcJsonCredentialVerificationEndpoint
         ArgumentNullException.ThrowIfNull(clock);
 
         if (request.MinimumStatusObservedAt is not null ||
+            request.ExpectedAudience is not null ||
             !IsValidPolicy(request.Credential, request.TrustedIssuerDid,
                 request.ExpectedHolderDid, request.ExpectedCredentialType,
                 request.SubjectContextUri))
@@ -85,7 +103,8 @@ internal static class JwtVcJsonCredentialVerificationEndpoint
         ArgumentNullException.ThrowIfNull(clock);
 
         DateTimeOffset now = clock.GetUtcNow();
-        if (!IsValidPolicy(request.Credential, request.TrustedIssuerDid,
+        if (request.ExpectedAudience is not null ||
+            !IsValidPolicy(request.Credential, request.TrustedIssuerDid,
                 request.ExpectedHolderDid, request.ExpectedCredentialType,
                 request.SubjectContextUri) ||
             string.IsNullOrWhiteSpace(request.RevocationSnapshot) ||
@@ -113,6 +132,86 @@ internal static class JwtVcJsonCredentialVerificationEndpoint
                 request.TrustedIssuerDid!, now, minimum)
             : JwtVcJsonRevocationSnapshot.Check(request.RevocationSnapshot!,
                 request.Credential!, request.TrustedIssuerDid!, now);
+        return status switch
+        {
+            RevocationSnapshotCheckResult.NotListed =>
+                Results.Ok(new VerifyJwtVcJsonCredentialResponse(
+                    "SignedNotListed", subject, credentialId, issuerName,
+                    validFrom, validUntil)),
+            RevocationSnapshotCheckResult.Revoked =>
+                Results.Ok(new VerifyJwtVcJsonCredentialResponse("Revoked", null)),
+            _ => Results.Ok(new VerifyJwtVcJsonCredentialResponse("Invalid", null))
+        };
+    }
+
+    /// <summary>
+    /// Only this explicit adapter accepts an expected HTTPS audience.
+    /// Independent issuer/holder/type/context/recipient pins are mandatory.
+    /// Genuine signer status is checked on the exact JWT after verification;
+    /// none of these checks prove live non-revocation or holder consent.
+    /// </summary>
+    internal static IResult VerifyForAudience(
+        [FromBody] VerifyJwtVcJsonForAudienceRequest request,
+        [FromServices] TimeProvider clock) =>
+        VerifyForAudienceCore(request, clock, withStatus: false);
+
+    internal static IResult VerifyForAudienceWithStatus(
+        [FromBody] VerifyJwtVcJsonForAudienceRequest request,
+        [FromServices] TimeProvider clock) =>
+        VerifyForAudienceCore(request, clock, withStatus: true);
+
+    private static IResult VerifyForAudienceCore(
+        VerifyJwtVcJsonForAudienceRequest request, TimeProvider clock, bool withStatus)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(clock);
+        DateTimeOffset now = clock.GetUtcNow();
+        Uri? audience = request.ExpectedAudience;
+        if (!IsValidPolicy(request.Credential, request.TrustedIssuerDid,
+                request.ExpectedHolderDid, request.ExpectedCredentialType,
+                request.SubjectContextUri) ||
+            audience is not { IsAbsoluteUri: true } ||
+            audience.Scheme != Uri.UriSchemeHttps ||
+            string.IsNullOrWhiteSpace(audience.Host) ||
+            audience.UserInfo.Length != 0 ||
+            audience.Fragment.Length != 0 ||
+            audience.AbsoluteUri.Length > 2048 ||
+            (!withStatus && (request.RevocationSnapshot is not null ||
+                request.MinimumStatusObservedAt is not null)) ||
+            (withStatus && (string.IsNullOrWhiteSpace(request.RevocationSnapshot) ||
+                request.RevocationSnapshot.Length > MaximumJwtLength ||
+                (request.MinimumStatusObservedAt is DateTimeOffset cutoff &&
+                    (cutoff < DateTimeOffset.UnixEpoch || cutoff > now)))))
+        {
+            return Results.Problem(title: "Invalid Request",
+                detail: "Independently pinned issuer, holder, HTTPS type, context and recipient are required; status belongs only to the status route.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        if (!JwtVcJsonCredential.TryVerifyForAudienceWithValidity(
+                request.Credential!, request.TrustedIssuerDid!,
+                request.ExpectedHolderDid!, request.ExpectedCredentialType!,
+                request.SubjectContextUri!, audience, now, out var subject,
+                out string? credentialId, out string? issuerName,
+                out DateTimeOffset? validFrom, out DateTimeOffset? validUntil))
+        {
+            return Results.Ok(new VerifyJwtVcJsonCredentialResponse("Invalid", null));
+        }
+
+        if (!withStatus)
+        {
+            return Results.Ok(new VerifyJwtVcJsonCredentialResponse(
+                "SignedButStatusUnchecked", subject, credentialId, issuerName,
+                validFrom, validUntil));
+        }
+
+        var status = request.MinimumStatusObservedAt is DateTimeOffset minimum
+            ? JwtVcJsonRevocationSnapshot.CheckWithObservationCutoff(
+                request.RevocationSnapshot!, request.Credential!,
+                request.TrustedIssuerDid!, now, minimum)
+            : JwtVcJsonRevocationSnapshot.Check(
+                request.RevocationSnapshot!, request.Credential!,
+                request.TrustedIssuerDid!, now);
         return status switch
         {
             RevocationSnapshotCheckResult.NotListed =>
@@ -165,6 +264,8 @@ public sealed class VerifyJwtVcJsonCredentialRequest
     public string? ExpectedHolderDid { get; init; }
     public string? ExpectedCredentialType { get; init; }
     public Uri? SubjectContextUri { get; init; }
+    /// <summary>Do not silently ignore explicit recipient policy on legacy routes.</summary>
+    public Uri? ExpectedAudience { get; init; }
     /// <summary>Reserved for status routes; unchecked verification must reject it.</summary>
     public DateTimeOffset? MinimumStatusObservedAt { get; init; }
 }
@@ -177,8 +278,26 @@ public sealed class VerifyJwtVcJsonCredentialWithStatusRequest
     public string? ExpectedHolderDid { get; init; }
     public string? ExpectedCredentialType { get; init; }
     public Uri? SubjectContextUri { get; init; }
+    /// <summary>Do not silently ignore explicit recipient policy on legacy routes.</summary>
+    public Uri? ExpectedAudience { get; init; }
     public string? RevocationSnapshot { get; init; }
     /// <summary>Opt-in earliest acceptable issuer status observation time.</summary>
+    public DateTimeOffset? MinimumStatusObservedAt { get; init; }
+}
+
+/// <summary>
+/// A relying party supplies all pins from its own policy, not the JWT.
+/// Status belongs only to the explicitly named status route.
+/// </summary>
+public sealed class VerifyJwtVcJsonForAudienceRequest
+{
+    public string? Credential { get; init; }
+    public string? TrustedIssuerDid { get; init; }
+    public string? ExpectedHolderDid { get; init; }
+    public string? ExpectedCredentialType { get; init; }
+    public Uri? SubjectContextUri { get; init; }
+    public Uri? ExpectedAudience { get; init; }
+    public string? RevocationSnapshot { get; init; }
     public DateTimeOffset? MinimumStatusObservedAt { get; init; }
 }
 
