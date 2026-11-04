@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using HeroSSID.Credentials.VerifiablePresentations;
+using HeroSSID.Core.Networking;
 
 namespace HeroSSID.Credentials.Tests;
 
@@ -56,6 +57,24 @@ public sealed class OpenId4VpWalletPublicEgressTests
         {
             listener.Stop();
         }
+    }
+
+    [Theory]
+    [InlineData("1.1.1.1", true)]
+    [InlineData("8.8.8.8", true)]
+    [InlineData("2606:4700:4700::1111", true)]
+    [InlineData("127.0.0.1", false)]
+    [InlineData("169.254.169.254", false)]
+    [InlineData("10.1.2.3", false)]
+    [InlineData("192.0.0.9", false)]
+    [InlineData("::ffff:127.0.0.1", false)]
+    [InlineData("::1", false)]
+    [InlineData("2001:db8::1", false)]
+    public void PublicOnlyConnectionPolicyRetainsPublicAndRejectsPrivateAddresses(
+        string address, bool expectedPublic)
+    {
+        Assert.Equal(expectedPublic,
+            PublicOnlyHttpsConnection.IsPublicEgressAddress(IPAddress.Parse(address)));
     }
 
     private static SocketsHttpHandler CreateHandler(bool directPost) =>
