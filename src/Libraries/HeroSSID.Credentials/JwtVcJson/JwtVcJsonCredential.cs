@@ -172,6 +172,24 @@ public static class JwtVcJsonCredential
             audience: relyingPartyAudience);
     }
 
+    /// <summary>
+    /// Opt-in composition of the private HTTPS recipient restriction with
+    /// genuine issuer-signed VC1.1 JWT metadata and 100ns-validity bounds.
+    /// Every field is signed in the ORIGINAL JWT. The recipient must still
+    /// independently pin its expected audience, issuer, holder and context;
+    /// a name or recipient claim is never identity or authorization proof.
+    /// </summary>
+    public static string CreateForAudienceWithMetadata(string issuerDid, string holderDid,
+        string credentialType, Uri subjectContextUri, JsonElement credentialSubject,
+        byte[] issuerPrivateKey, DateTimeOffset validFrom, DateTimeOffset validUntil,
+        Uri relyingPartyAudience, Uri? credentialId, string? issuerName, bool exactValidity)
+    {
+        ArgumentNullException.ThrowIfNull(relyingPartyAudience);
+        return CreateCore(issuerDid, holderDid, credentialType, subjectContextUri,
+            credentialSubject, issuerPrivateKey, validFrom, validUntil,
+            credentialId, exactValidity, issuerName, relyingPartyAudience);
+    }
+
     private static string CreateCore(string issuerDid, string holderDid, string credentialType,
         Uri subjectContextUri, JsonElement credentialSubject, byte[] issuerPrivateKey,
         DateTimeOffset validFrom, DateTimeOffset validUntil, Uri? credentialId,
