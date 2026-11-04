@@ -57,7 +57,7 @@ public sealed class OperatorDidWebPublisher
                 "A canonical domain and nonzero 32-byte public Ed25519 key are required.");
         }
 
-        byte[] publicKey = Convert.FromHexString(keyHex);
+        byte[] publicKey = Convert.FromHexString(keyHex!);
         try
         {
             var method = new DidWebMethod();
