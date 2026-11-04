@@ -23,6 +23,86 @@ public sealed class JwtVcJsonCredentialIssuanceHttpTests(AspireWebApplicationFac
     private static readonly string[] SeparateRequiredScopes = ["credential:revoke", "did:manage"];
     private static readonly string[] ForgedStatusTokens = ["not-a-valid-issued-jwt"];
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AuthenticatedTenantIssuerSignsOneElementVc11SubjectArray(bool includeSubjectId)
+    {
+        // VC1.1 permits array-form credentialSubject. The signed payload must
+        // preserve the original array and verification must bind its one
+        // object to JWT sub, even when nested id is omitted.
+        string token = await GetTokenAsync("did:manage credential:issue").ConfigureAwait(true);
+        string issuerDid = await CreateDidAsync(token).ConfigureAwait(true);
+        using var holder = Key.Create(SignatureAlgorithm.Ed25519);
+        string holderDid = DidFromKey(holder.PublicKey.Export(KeyBlobFormat.RawPublicKey));
+        object[] signedArray = includeSubjectId
+            ? [new { id = holderDid, membership = "active" }]
+            : [new { membership = "active" }];
+
+        using var issued = await PostAsync(Endpoint, new
+        {
+            issuerDid,
+            holderDid,
+            credentialType = CredentialType,
+            subjectContextUri = Vocabulary,
+            credentialSubject = signedArray,
+            validUntil = DateTimeOffset.UtcNow.AddMinutes(5),
+            exactValidity = true
+        }, token).ConfigureAwait(true);
+        string jwt = await SetupResponse.ReadRequiredStringAsync(
+            issued, HttpStatusCode.Created,
+            "Issue one-element array VC1.1 JWT through authenticated HTTP",
+            "credential").ConfigureAwait(true);
+
+        using var payload = JsonDocument.Parse(Ed25519JwtSigner.ExtractPayload(jwt));
+        JsonElement signedSubject = payload.RootElement.GetProperty("vc")
+            .GetProperty("credentialSubject");
+        Assert.Equal(JsonValueKind.Array, signedSubject.ValueKind);
+        Assert.Equal(1, signedSubject.GetArrayLength());
+        Assert.Equal("active", signedSubject[0].GetProperty("membership").GetString());
+        Assert.Equal(includeSubjectId, signedSubject[0].TryGetProperty("id", out _));
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, issuerDid, holderDid,
+            CredentialType, Vocabulary, DateTimeOffset.UtcNow, out var claim));
+        Assert.Equal("active", claim.GetProperty("membership").GetString());
+
+        using var outsider = Key.Create(SignatureAlgorithm.Ed25519);
+        string outsiderDid = DidFromKey(outsider.PublicKey.Export(KeyBlobFormat.RawPublicKey));
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, issuerDid, outsiderDid,
+            CredentialType, Vocabulary, DateTimeOffset.UtcNow, out _));
+    }
+
+    [Fact]
+    public async Task AuthenticatedTenantIssuerRejectsAmbiguousAndForeignSubjectArrays()
+    {
+        string token = await GetTokenAsync("did:manage credential:issue").ConfigureAwait(true);
+        string issuerDid = await CreateDidAsync(token).ConfigureAwait(true);
+        using var holder = Key.Create(SignatureAlgorithm.Ed25519);
+        using var stranger = Key.Create(SignatureAlgorithm.Ed25519);
+        string holderDid = DidFromKey(holder.PublicKey.Export(KeyBlobFormat.RawPublicKey));
+        string strangerDid = DidFromKey(stranger.PublicKey.Export(KeyBlobFormat.RawPublicKey));
+        object[] invalid = [
+            Array.Empty<object>(),
+            new object[] { new { membership = "active" }, new { membership = "admin" } },
+            new object[] { new { id = strangerDid, membership = "admin" } },
+            new object[] { new { membership = "active",
+                nested = new Dictionary<string, string> {
+                    ["@context"] = "https://attacker.example/claims" } } }
+        ];
+        foreach (object credentialSubject in invalid)
+        {
+            using var response = await PostAsync(Endpoint, new
+            {
+                issuerDid,
+                holderDid,
+                credentialType = CredentialType,
+                subjectContextUri = Vocabulary,
+                credentialSubject,
+                validUntil = DateTimeOffset.UtcNow.AddMinutes(5)
+            }, token).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+    }
+
     [Fact]
     public async Task AuthenticatedIssuerSignsVc11JwtForUnenrolledHolder()
     {
