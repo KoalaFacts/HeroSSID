@@ -171,7 +171,12 @@ public sealed class DidWebPinnedDocumentHttpTransportTests
             HttpRequestMessage request, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(send(request));
+            HttpResponseMessage response = send(request);
+            // A raw HttpMessageHandler test double must record the originating
+            // request just as the real HTTP transport does. Preserve an
+            // explicitly different URI for the redirect regression test.
+            response.RequestMessage ??= request;
+            return Task.FromResult(response);
         }
     }
 }
