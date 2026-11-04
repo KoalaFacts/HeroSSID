@@ -19,6 +19,42 @@ public sealed class JwtVcJsonCredentialTests
     private readonly (byte[] Seed, string Did) _other = NewIdentity();
 
     [Fact]
+    public void OrganizationIssuerCanOptInToSigningDescriptiveVcIssuerMetadata()
+    {
+        // The existing issuer can sign a standards-shaped VC issuer object;
+        // the name is only descriptive, never a verifier trust anchor.
+        // Lookup keeps the test-only RED compiling before the opt-in SDK API exists.
+        var issuerApi = typeof(JwtVcJsonCredential).GetMethods()
+            .SingleOrDefault(method => method.Name == "CreateWithIssuerName" &&
+                method.GetParameters().Length == 9);
+        Assert.NotNull(issuerApi);
+
+        using var subjectDocument = JsonDocument.Parse(JsonSerializer.Serialize(
+            new { id = _holder.Did, membership = "active" }));
+        string jwt = Assert.IsType<string>(issuerApi!.Invoke(null,
+            [_issuer.Did, _holder.Did, CredentialType, Vocabulary,
+                subjectDocument.RootElement, _issuer.Seed,
+                Now.AddMinutes(-1), Now.AddMinutes(10),
+                "Australasian Membership Office"]));
+
+        using var payloadDocument = JsonDocument.Parse(Ed25519JwtSigner.ExtractPayload(jwt));
+        JsonElement payload = payloadDocument.RootElement;
+        Assert.Equal(_issuer.Did, payload.GetProperty("iss").GetString());
+        JsonElement issuer = payload.GetProperty("vc").GetProperty("issuer");
+        Assert.Equal(_issuer.Did, issuer.GetProperty("id").GetString());
+        Assert.Equal("Australasian Membership Office",
+            issuer.GetProperty("name").GetString());
+        Assert.Equal(2, issuer.EnumerateObject().Count());
+
+        Assert.True(JwtVcJsonCredential.TryVerify(jwt, _issuer.Did,
+            _holder.Did, CredentialType, Vocabulary, Now, out var claims));
+        Assert.Equal("active", claims.GetProperty("membership").GetString());
+        Assert.False(JwtVcJsonCredential.TryVerify(jwt, _other.Did,
+            _holder.Did, CredentialType, Vocabulary, Now, out var foreign));
+        Assert.Equal(JsonValueKind.Undefined, foreign.ValueKind);
+    }
+
+    [Fact]
     public void IssuerCreatesGenuineJwtVcJsonWithStandardContextAndIndependentVerification()
     {
         string jwt = Issue();
