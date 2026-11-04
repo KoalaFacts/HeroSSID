@@ -75,8 +75,8 @@ public sealed class JwtVcJsonCredentialTests
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
-    [InlineData("invalid\\nissuer")]
-    [InlineData("invalid\\u0000issuer")]
+    [InlineData("invalid\nissuer")]
+    [InlineData("invalid\u0000issuer")]
     public void DescriptiveIssuerNameRejectsInvalidValuesBeforeSigning(string name)
     {
         using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
