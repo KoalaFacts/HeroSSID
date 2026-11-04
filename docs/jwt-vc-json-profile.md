@@ -13,6 +13,40 @@ This is a **real issuer-signed JWT VC 1.1 credential** intended for the OpenID4V
 - signed `vc.@context=["https://www.w3.org/2018/credentials/v1", pinnedVersionedHttpsVocabulary]` (not `vc.context`), `vc.type=["VerifiableCredential", expectedType]`, and `vc.credentialSubject` with either the exact `id=holderDid` or no nested `id` (the signed JWT `sub` supplies that identifier);
 - a **15-minute maximum** encoded validity interval, a bounded subject and a bounded JWT. Normal `DateTimeOffset` fractional-second arguments are accepted: `iat` and `nbf` round **up** to the next whole second, and `exp` rounds **down**, so the JWT cannot be valid before the requested start or at/after the requested end. An interval that becomes empty, or exceeds 900 encoded seconds, is rejected. Near-second boundaries can shorten the usable interval by up to almost two seconds.
 
+### Opt-in exact 100ns NumericDate issuance
+
+Use `JwtVcJsonCredential.CreateWithExactValidity(issuerDid, holderDid,
+credentialType, subjectContextUri, credentialSubject, issuerSeed, validFrom,
+validUntil)` to sign **the exact caller-supplied UTC instants** into JWT
+`iat=nbf` and `exp`, including fractional RFC 7519 NumericDates to .NET's
+100-nanosecond tick precision. The overload with a final `Uri credentialId`
+also signs a bounded HTTPS `jti`. The genuine Ed25519 issuer, independently
+pinned DID, subject, context/type and status boundaries remain unchanged.
+
+Unlike the original `Create` overloads, exact validity **never rounds inwards
+to whole seconds**. A positive one-tick window can therefore remain usable,
+but a zero/negative interval or any interval exceeding 900 exact seconds fails
+at issuance. Verification rejects a JWT **before the exact `nbf` tick** and
+**at or after the exact `exp` tick**; original-JWT issuer-signed revocation
+continues to use the original signed bytes. Existing `Create` outputs stay
+integer-second, including their documented inward rounding; no caller is
+silently upgraded to fractional JWT timestamps.
+
+```csharp
+// Explicit opt-in; caller keeps the issuer seed secret and the verifier pins
+// an independently configured issuer DID.
+string preciseJwt = JwtVcJsonCredential.CreateWithExactValidity(
+    issuerDid, holderDid, "MembershipCredential", vocabulary,
+    document.RootElement, issuerSeed, now.AddTicks(1),
+    now.AddMinutes(10).AddTicks(3));
+```
+
+Fractional JWT NumericDates are valid RFC 7519 encodings, but **this SDK
+profile's acceptance at tick precision is not proof of independent wallet
+interoperability**. Verifiers must not interpret valid issuer signatures as
+holder-key possession, real-world identity, user consent, live revocation or
+business authorization.
+
 ### Issuer-assigned signed credential identifiers (opt-in)
 
 The original eight-argument `JwtVcJsonCredential.Create` contract is preserved and
