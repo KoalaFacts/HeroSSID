@@ -7,6 +7,8 @@ namespace HeroSSID.Api.Features.Dids;
 
 /// <summary>
 /// Operator-controlled, opt-in root did:web HTTPS document publication.
+/// Optionally advertises two independently operator-pinned public keys during
+/// an explicit overlap; it never promotes either key to verifier trust.
 /// Only a public key is configured; no tenant, private key, trust grant,
 /// identity verification or signing capability is exposed by this endpoint.
 /// </summary>
@@ -31,10 +33,14 @@ public sealed class OperatorDidWebPublisher
             return;
         }
 
-        if (section.Value is not null || fields.Length != 2 ||
+        bool hasSuccessor = fields.Any(static field =>
+            field.Key == "SuccessorPublicKeyHex");
+        if (section.Value is not null ||
+            fields.Length != (hasSuccessor ? 3 : 2) ||
             fields.Any(static field =>
                 field.Value is null || field.GetChildren().Any() ||
-                field.Key is not ("Domain" or "PublicKeyHex")))
+                field.Key is not ("Domain" or "PublicKeyHex" or
+                    "SuccessorPublicKeyHex")))
         {
             throw new InvalidOperationException(
                 "Invalid operator-owned did:web publication configuration.");
@@ -42,11 +48,10 @@ public sealed class OperatorDidWebPublisher
 
         string? domain = section["Domain"];
         string? keyHex = section["PublicKeyHex"];
+        string? successorHex = section["SuccessorPublicKeyHex"];
         if (string.IsNullOrWhiteSpace(domain) ||
-            keyHex is not { Length: 64 } ||
-            !keyHex.All(static character =>
-                character is >= '0' and <= '9' or >= 'a' and <= 'f') ||
-            keyHex.All(static character => character == '0'))
+            !IsCanonicalPublicKeyHex(keyHex) ||
+            (hasSuccessor && !IsCanonicalPublicKeyHex(successorHex)))
         {
             throw new InvalidOperationException(
                 "A canonical domain and nonzero 32-byte public Ed25519 key are required.");
@@ -61,7 +66,10 @@ public sealed class OperatorDidWebPublisher
                 {
                     ["domain"] = domain
                 });
-            Document = method.CreateDidDocument(Did, publicKey);
+            Document = hasSuccessor
+                ? DidWebPinnedKeyTransition.CreateTransitionDocument(
+                    Did, publicKey, Convert.FromHexString(successorHex!))
+                : method.CreateDidDocument(Did, publicKey);
             _hostname = domain;
         }
         catch (ArgumentException exception)
@@ -71,6 +79,12 @@ public sealed class OperatorDidWebPublisher
                 exception);
         }
     }
+
+    private static bool IsCanonicalPublicKeyHex(string? value) =>
+        value is { Length: 64 } &&
+        value.All(static character =>
+            character is >= '0' and <= '9' or >= 'a' and <= 'f') &&
+        value.Any(static character => character != '0');
 
     /// <summary>Whether a valid operator-supplied publication is configured.</summary>
     public bool IsEnabled => Did is not null;
