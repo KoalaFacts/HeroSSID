@@ -397,9 +397,9 @@ public static class Vcdm20RevocationSnapshot
         }
 
         // Genuine Ed25519 signatures have already authenticated both immutable
-        // tokens. A last clock sample prevents releasing a subject after an
-        // expensive status check crossed the VP or snapshot expiry boundary.
-        DateTimeOffset now = clock.GetUtcNow();
+        // tokens. Parse both immutable expiries BEFORE the final clock sample;
+        // an earlier sample would allow expensive JSON parsing to cross the
+        // status or VP deadline and still disclose an expired subject.
         if (!StrictJwtReader.TryGetString(subject, "id", out string holderDid) ||
             !holderDid.StartsWith("did:key:", StringComparison.Ordinal) ||
             !StrictJwtReader.TryRead(presentationJwt, "vp+jwt",
@@ -407,11 +407,16 @@ public static class Vcdm20RevocationSnapshot
                 holderDid + "#" + holderDid["did:key:".Length..], "vp") ||
             !PresentationChallengePolicy.TryGetNumericDate(
                 signedPresentation, "exp", out decimal presentationExpires) ||
-            presentationExpires <= PresentationChallengePolicy.NumericDate(now) ||
             !StrictJwtReader.TryRead(snapshotJwt, SnapshotType,
                 MaximumSnapshotLength, out JsonElement signedSnapshot) ||
-            !StrictJwtReader.TryGetTimestamp(signedSnapshot, "exp", out long statusExpires) ||
-            statusExpires <= now.ToUnixTimeSeconds())
+            !StrictJwtReader.TryGetTimestamp(signedSnapshot, "exp", out long statusExpires))
+        {
+            return Vcdm20RevocationCheckResult.Invalid;
+        }
+
+        DateTimeOffset finalNow = clock.GetUtcNow();
+        if (presentationExpires <= PresentationChallengePolicy.NumericDate(finalNow) ||
+            statusExpires <= finalNow.ToUnixTimeSeconds())
         {
             return Vcdm20RevocationCheckResult.Invalid;
         }
