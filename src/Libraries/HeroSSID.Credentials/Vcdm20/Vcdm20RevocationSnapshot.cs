@@ -405,13 +405,16 @@ public static class Vcdm20RevocationSnapshot
         if (!StrictJwtReader.TryRead(credentialJwt!, "vc+jwt", MaximumCredentialLength,
                 out var payload, KeyId(issuerDid), "vc") ||
             !Ed25519JwtSigner.VerifySignedJwt(credentialJwt!, issuerPublicKey) ||
-            (payload.EnumerateObject().Count() is not (6 or 7)) ||
-            // Both six-field originals and opt-in seven-field signed-ID VC2
-            // JWTs are revocable by their exact original bytes. Accept the
-            // seventh field ONLY when it is the canonical signed HTTPS id.
-            (payload.EnumerateObject().Count() == 7 &&
+            (payload.EnumerateObject().Count() is not (6 or 7 or 8)) ||
+            // The seven-field shape requires a canonical signed HTTPS id.
+            // Eight fields require BOTH that id and a single canonical HTTPS
+            // audience; do not accept arbitrary eighth issuer-signed policies.
+            (payload.EnumerateObject().Count() >= 7 &&
                 (!StrictJwtReader.TryGetString(payload, "id", out string signedId) ||
                  !Vcdm20JoseCredential.ValidCanonicalCredentialId(signedId))) ||
+            (payload.EnumerateObject().Count() == 8 &&
+                (!StrictJwtReader.TryGetString(payload, "aud", out string signedAudience) ||
+                 !Vcdm20JoseCredential.ValidCanonicalAudience(signedAudience))) ||
             payload.TryGetProperty("vc", out _) || payload.TryGetProperty("vp", out _) ||
             !StrictJwtReader.TryGetString(payload, "issuer", out var signedIssuer) ||
             !string.Equals(signedIssuer, issuerDid, StringComparison.Ordinal) ||

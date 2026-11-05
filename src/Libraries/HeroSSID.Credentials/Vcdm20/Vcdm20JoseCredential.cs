@@ -366,7 +366,7 @@ public static partial class Vcdm20JoseCredential
         ValidCredentialId(uri) &&
         string.Equals(uri.AbsoluteUri, id, StringComparison.Ordinal);
 
-    private static bool ValidCanonicalAudience(string audience) =>
+    internal static bool ValidCanonicalAudience(string audience) =>
         audience.Length <= 2_048 &&
         Uri.TryCreate(audience, UriKind.Absolute, out Uri? uri) &&
         ValidAudience(uri) &&
