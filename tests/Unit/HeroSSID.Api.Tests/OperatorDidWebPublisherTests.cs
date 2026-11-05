@@ -227,6 +227,110 @@ public sealed class OperatorDidWebPublisherTests
         Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
     }
 
+
+    [Fact]
+    public void ExplicitRetirementPublishesSuccessorOnlyWithoutChangingTheDidOrKey2Fragment()
+    {
+        using var oldKey = Key.Create(SignatureAlgorithm.Ed25519);
+        using var nextKey = Key.Create(SignatureAlgorithm.Ed25519);
+        byte[] oldPublicKey = oldKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+        byte[] nextPublicKey = nextKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+        var entries = Entries(oldPublicKey);
+        entries.Add("DidWebPublication:SuccessorPublicKeyHex",
+            Convert.ToHexStringLower(nextPublicKey));
+        entries.Add("DidWebPublication:RetireOldKey", "true");
+
+        var publisher = NewPublisher(entries);
+        Assert.Equal("did:web:issuer.example", publisher.Did);
+        Assert.NotNull(publisher.Document);
+        Assert.True(DidWebPinnedKeyRetirement.MatchesExpectedRetirementDocument(
+            publisher.Did!, oldPublicKey, nextPublicKey, publisher.Document));
+        Assert.False(DidWebPinnedKeyTransition.MatchesExpectedTransitionDocument(
+            publisher.Did!, oldPublicKey, nextPublicKey, publisher.Document));
+        Assert.False(DidWebPublishedKeyMatch.MatchesExpectedDocument(
+            publisher.Did!, oldPublicKey, publisher.Document));
+    }
+
+    [Fact]
+    public async Task RetiredDocumentIsServedOnlyOnThePinnedHttpsHost()
+    {
+        using var oldKey = Key.Create(SignatureAlgorithm.Ed25519);
+        using var nextKey = Key.Create(SignatureAlgorithm.Ed25519);
+        byte[] oldPublicKey = oldKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+        byte[] nextPublicKey = nextKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+        var entries = Entries(oldPublicKey);
+        entries.Add("DidWebPublication:SuccessorPublicKeyHex",
+            Convert.ToHexStringLower(nextPublicKey));
+        entries.Add("DidWebPublication:RetireOldKey", "true");
+        var publisher = NewPublisher(entries);
+        using var services = new ServiceCollection().AddLogging().BuildServiceProvider();
+
+        DefaultHttpContext valid = Context("https", "issuer.example");
+        valid.RequestServices = services;
+        await publisher.Handle(valid).ExecuteAsync(valid).ConfigureAwait(true);
+        Assert.Equal(StatusCodes.Status200OK, valid.Response.StatusCode);
+        Assert.Equal("no-store", valid.Response.Headers.CacheControl.ToString());
+        valid.Response.Body.Position = 0;
+        using var reader = new StreamReader(valid.Response.Body, Encoding.UTF8);
+        string document = await reader.ReadToEndAsync().ConfigureAwait(true);
+        Assert.True(DidWebPinnedKeyRetirement.MatchesExpectedRetirementDocument(
+            "did:web:issuer.example", oldPublicKey, nextPublicKey, document));
+
+        foreach (var pair in new[]
+        {
+            ("http", "issuer.example"),
+            ("https", "other.example"),
+            ("https", "issuer.example:8443"),
+            ("https", "issuer.example:9999999999")
+        })
+        {
+            DefaultHttpContext denied = Context(pair.Item1, pair.Item2);
+            denied.RequestServices = services;
+            await publisher.Handle(denied).ExecuteAsync(denied).ConfigureAwait(true);
+            Assert.Equal(StatusCodes.Status404NotFound, denied.Response.StatusCode);
+            Assert.Equal(0, denied.Response.Body.Length);
+        }
+    }
+
+    [Fact]
+    public void RetirementRequiresExplicitTrueAndTwoDistinctPins()
+    {
+        using var oldKey = Key.Create(SignatureAlgorithm.Ed25519);
+        using var nextKey = Key.Create(SignatureAlgorithm.Ed25519);
+        byte[] oldPublicKey = oldKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+        var entries = Entries(oldPublicKey);
+        entries.Add("DidWebPublication:SuccessorPublicKeyHex",
+            Convert.ToHexStringLower(nextKey.PublicKey.Export(KeyBlobFormat.RawPublicKey)));
+        entries.Add("DidWebPublication:RetireOldKey", "true");
+        Assert.True(NewPublisher(entries).IsEnabled);
+
+        foreach (string invalid in new[] { "false", "True", "1", "" })
+        {
+            var copy = new Dictionary<string, string?>(entries)
+            {
+                ["DidWebPublication:RetireOldKey"] = invalid
+            };
+            Assert.Throws<InvalidOperationException>(() => NewPublisher(copy));
+        }
+
+        var missingSuccessor = new Dictionary<string, string?>(entries);
+        missingSuccessor.Remove("DidWebPublication:SuccessorPublicKeyHex");
+        Assert.Throws<InvalidOperationException>(() => NewPublisher(missingSuccessor));
+
+        var identical = new Dictionary<string, string?>(entries)
+        {
+            ["DidWebPublication:SuccessorPublicKeyHex"] =
+                Convert.ToHexStringLower(oldPublicKey)
+        };
+        Assert.Throws<InvalidOperationException>(() => NewPublisher(identical));
+
+        var unexpected = new Dictionary<string, string?>(entries)
+        {
+            ["DidWebPublication:GrantIssuerTrust"] = "true"
+        };
+        Assert.Throws<InvalidOperationException>(() => NewPublisher(unexpected));
+    }
+
     private sealed class DidWebHttpFactory(byte[]? keyBytes, byte[]? successorKeyBytes = null) : WebApplicationFactory<Program>
     {
         private readonly string _database = Guid.NewGuid().ToString("N");
