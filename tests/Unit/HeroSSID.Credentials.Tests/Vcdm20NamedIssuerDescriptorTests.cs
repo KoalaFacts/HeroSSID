@@ -115,6 +115,95 @@ public sealed class Vcdm20NamedIssuerDescriptorTests
             _issuerSeed, Now.AddMinutes(-1), Now.AddMinutes(10)));
     }
 
+    [Fact]
+    public void GenuineSignerWithCorrectKidButDifferentSignedIssuerObjectIdFails()
+    {
+        string original = IssueNamed();
+        string header = Ed25519JwtSigner.ExtractHeader(original);
+        string payload = Ed25519JwtSigner.ExtractPayload(original);
+        string wrongIssuerObject = payload.Replace(
+            "\"id\":\"" + _issuerDid + "\"",
+            "\"id\":\"" + _holderDid + "\"",
+            StringComparison.Ordinal);
+        Assert.NotEqual(payload, wrongIssuerObject);
+        // Same genuine original issuer signing key + unchanged pinned kid.
+        // Only the signed issuer.id object member is substituted.
+        string reSigned = Ed25519JwtSigner.CreateSignedJwt(
+            header, wrongIssuerObject, _issuerSeed);
+        Assert.True(Vcdm20JoseCredential.TryVerifyNamedIssuer(
+            original, _issuerDid, Name, _holderDid, Type, Context, Now, out _));
+        Assert.False(Vcdm20JoseCredential.TryVerifyNamedIssuer(
+            reSigned, _issuerDid, Name, _holderDid, Type, Context, Now,
+            out var denied));
+        Assert.Equal(JsonValueKind.Undefined, denied.ValueKind);
+    }
+
+    [Fact]
+    public void DuplicateAndMalformedSignedIssuerDescriptorsCannotReleaseClaims()
+    {
+        string original = IssueNamed();
+        string header = Ed25519JwtSigner.ExtractHeader(original);
+        string payload = Ed25519JwtSigner.ExtractPayload(original);
+        string[] changedPayloads =
+        [
+            payload.Replace(
+                "\"name\":\"" + Name + "\"",
+                "\"name\":\"" + Name + "\",\"name\":\"" + Name + "\"",
+                StringComparison.Ordinal),
+            payload.Replace(
+                "\"name\":\"" + Name + "\"",
+                "\"name\":\" " + Name + "\"",
+                StringComparison.Ordinal),
+            payload.Replace(
+                "\"name\":\"" + Name + "\"",
+                "\"name\":\"" + Name.ToLowerInvariant() + "\"",
+                StringComparison.Ordinal)
+        ];
+
+        foreach (string changed in changedPayloads)
+        {
+            Assert.NotEqual(payload, changed);
+            string genuinelySigned = Ed25519JwtSigner.CreateSignedJwt(
+                header, changed, _issuerSeed);
+            Assert.False(Vcdm20JoseCredential.TryVerifyNamedIssuer(
+                genuinelySigned, _issuerDid, Name, _holderDid, Type, Context,
+                Now, out var denied));
+            Assert.Equal(JsonValueKind.Undefined, denied.ValueKind);
+        }
+
+        using var subject = Subject();
+        foreach (string rejected in new[] { " " + Name, Name + " ", new string('x', 129) })
+        {
+            Assert.Throws<ArgumentException>(() => Vcdm20JoseCredential.CreateWithNamedIssuer(
+                _issuerDid, rejected, _holderDid, Type, Context,
+                subject.RootElement, _issuerSeed, Now.AddMinutes(-1),
+                Now.AddMinutes(10)));
+        }
+    }
+
+    [Fact]
+    public void NamedIssuerSignedValidityKeepsSubsecondStartAndExclusiveEnd()
+    {
+        using var subject = Subject();
+        DateTimeOffset from = Now.AddTicks(1);
+        DateTimeOffset until = Now.AddTicks(5);
+        string signed = Vcdm20JoseCredential.CreateWithNamedIssuer(
+            _issuerDid, Name, _holderDid, Type, Context, subject.RootElement,
+            _issuerSeed, from, until);
+        Assert.False(Vcdm20JoseCredential.TryVerifyNamedIssuer(
+            signed, _issuerDid, Name, _holderDid, Type, Context,
+            Now, out var denied));
+        Assert.Equal(JsonValueKind.Undefined, denied.ValueKind);
+        Assert.True(Vcdm20JoseCredential.TryVerifyNamedIssuer(
+            signed, _issuerDid, Name, _holderDid, Type, Context,
+            from, out var accepted));
+        Assert.Equal("active", accepted.GetProperty("membership").GetString());
+        Assert.False(Vcdm20JoseCredential.TryVerifyNamedIssuer(
+            signed, _issuerDid, Name, _holderDid, Type, Context,
+            until, out denied));
+        Assert.Equal(JsonValueKind.Undefined, denied.ValueKind);
+    }
+
     private string IssueNamed()
     {
         using var subject = Subject();
