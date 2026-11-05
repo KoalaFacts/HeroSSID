@@ -11,6 +11,15 @@ This opt-in .NET 10 SDK API composes **three distinct assertions** for a relying
 
 For example, the verifier's policy can require `{ ["membership"] = "active" }` plus `{ ["tier"] = "standard" }` for an **exact identified** membership credential. The legacy `Vcdm20JosePresentation.Create` / `Check` methods intentionally remain six-field-only and **do not accept** a signed-ID VC2 credential; the opt-in signed-ID constructor and composite checker are the explicit upgrade path. The output `verifiedIssuerDid` and `verifiedSubject` are released **only** after both genuine Ed25519 signatures, tenant-owned nonce and audience, one-use atomic consumption, credential type/context/expiry, independent issuer and holder pins, signed credential ID, and exact case-sensitive string values all pass. A failed call returns `Invalid` with empty signer and undefined subject. A valid but disallowed `inactive` credential is rejected; its correctly authenticated one-use presentation remains spent.
 
+Immediately before releasing any signer or subject, the composite checker takes
+a final verification-clock sample *after* the original issuer/holder signatures
+and claim checks. It rechecks the authenticated holder VP's signed fractional
+`exp` (already bounded by the retained challenge and original VC expiry).
+The status-aware path also rechecks the issuer-authenticated snapshot's signed
+60-second `exp` at that same instant. A deadline crossed during checking
+rejects with empty outputs; the consumed challenge stays spent. A successful
+return is only a point-in-time result, not future validity.
+
 The successful result is `SignedButStatusUnchecked`: **it does not attest current membership, non-revocation, reliable identity enrollment, genuine consent, entitlement or business authorization.** The application must separately enforce revocation freshness, identity-vetting requirements and an independent purpose-specific authorization decision. This SDK cannot prove a human actually saw a consent screen. The issuer context is checked by exact URI only; there is **no JSON-LD semantic expansion** or independent Wallet interoperability test. Do not call this a standard OpenID4VP 1.0 hosted transport.
 
 The SDK's `InMemoryPresentationChallengeStore` is process-local. A multi-replica service requires a shared, atomic, durable challenge store; no new schema, database migration or remote endpoint is provided by this package. Never accept a verifier policy supplied by the Wallet itself.
