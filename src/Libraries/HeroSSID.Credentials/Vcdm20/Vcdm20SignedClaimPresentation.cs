@@ -74,4 +74,22 @@ public static class Vcdm20SignedClaimPresentation
         verifiedSubject = subject;
         return Vcdm20PresentationCheckResult.SignedButStatusUnchecked;
     }
+
+    /// <summary>
+    /// Opt-in issuer-status-enforced version of the independently pinned
+    /// signed-ID member and real one-use holder proof verification.
+    /// A valid issuer-signed not-listed snapshot is not live non-revocation
+    /// or membership authorization.
+    /// </summary>
+    public static Vcdm20RevocationCheckResult CheckWithIssuerStatus(
+        string presentationJwt, string snapshotJwt, Guid verifierTenantId,
+        string expectedAudience, string expectedNonce, string expectedCredentialType,
+        Uri expectedContextUri, IPresentationChallengeStore challenges,
+        IReadOnlyCollection<string> trustedIssuerDids, string expectedHolderDid,
+        Uri expectedCredentialId, IReadOnlyDictionary<string, string> requiredSubjectClaims,
+        DateTimeOffset minimumObservedAtUtc, TimeProvider clock,
+        out string verifiedIssuerDid, out JsonElement verifiedSubject)
+    {
+        throw new NotSupportedException("Intentional RED: signed-ID member status verification is not implemented.");
+    }
 }
