@@ -65,6 +65,13 @@ public sealed class DidWebPinnedPublishedKeyControlVerifier
 
         cancellationToken.ThrowIfCancellationRequested();
 
+        // Bind this invocation to the exact proof bytes received at entry.
+        // The caller retains both arrays and an awaited HTTPS request can give
+        // it time to replace an initially forged nonce or signature with valid
+        // bytes. Never verify or consume a different proof after that await.
+        byte[] nonceSnapshot = (byte[])nonce.Clone();
+        byte[] signatureSnapshot = (byte[])signature.Clone();
+
         // Do not burn the live challenge if public publication is unavailable,
         // stale, hostile, redirected or substituted. The existing fetch path
         // bounds the body, duration and document profile.
@@ -79,7 +86,7 @@ public sealed class DidWebPinnedPublishedKeyControlVerifier
         cancellationToken.ThrowIfCancellationRequested();
         // The signer signature binds the original verifier DID, audience,
         // issuance/expiry and unpredictable nonce; atomically consume once.
-        return _challenges.TryVerifyAndConsume(nonce, signature);
+        return _challenges.TryVerifyAndConsume(nonceSnapshot, signatureSnapshot);
     }
 
     /// <summary>
