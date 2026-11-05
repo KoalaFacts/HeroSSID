@@ -92,6 +92,64 @@ public static class Vcdm20TrustedIssuerVerifier
         DateTimeOffset now, out string verifiedIssuerDid,
         out JsonElement verifiedSubject)
     {
-        throw new NotSupportedException("Signed credential ID trust-policy verification is not implemented.");
+        ArgumentNullException.ThrowIfNull(issuerSignedJwt);
+        ArgumentNullException.ThrowIfNull(trustedIssuerDids);
+        ArgumentNullException.ThrowIfNull(expectedHolderDid);
+        ArgumentNullException.ThrowIfNull(expectedCredentialType);
+        ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
+        ArgumentNullException.ThrowIfNull(expectedCredentialId);
+
+        verifiedIssuerDid = string.Empty;
+        verifiedSubject = default;
+
+        // The caller pins a canonical HTTPS identifier independently of the
+        // credential. A signed identifier alone must never grant issuer trust.
+        if (!expectedCredentialId.IsAbsoluteUri ||
+            !string.Equals(expectedCredentialId.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) ||
+            string.IsNullOrWhiteSpace(expectedCredentialId.Host) ||
+            !string.IsNullOrEmpty(expectedCredentialId.UserInfo) ||
+            expectedCredentialId.AbsoluteUri.Length > 2_048 ||
+            trustedIssuerDids.Count is < 1 or > MaximumTrustedIssuers)
+        {
+            return false;
+        }
+
+        // Snapshot the caller-owned trust set and reject the whole policy if
+        // any issuer is malformed or duplicated, even when another is valid.
+        string[] issuers = trustedIssuerDids.ToArray();
+        if (issuers.Length != trustedIssuerDids.Count)
+        {
+            return false;
+        }
+
+        var unique = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string did in issuers)
+        {
+            if (string.IsNullOrWhiteSpace(did) ||
+                !unique.Add(did) ||
+                !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(did, out _))
+            {
+                return false;
+            }
+        }
+
+        // Only attempt issuers already pinned by the relying verifier.
+        // Never promote the untrusted JWT's 'issuer' or 'kid' into a trust pin.
+        string expectedId = expectedCredentialId.AbsoluteUri;
+        foreach (string did in issuers)
+        {
+            if (Vcdm20JoseCredential.TryVerifyWithId(
+                issuerSignedJwt, did, expectedHolderDid, expectedCredentialType,
+                expectedSubjectContextUri, now, out JsonElement subject,
+                out string? signedId) &&
+                string.Equals(signedId, expectedId, StringComparison.Ordinal))
+            {
+                verifiedIssuerDid = did;
+                verifiedSubject = subject;
+                return true;
+            }
+        }
+
+        return false;
     }
 }
