@@ -69,6 +69,93 @@ public sealed class OperatorDidWebPublisherTests
     }
 
     [Fact]
+    public void ExplicitSuccessorPinPublishesTheExactTwoKeyOverlapDocument()
+    {
+        using var oldKey = Key.Create(SignatureAlgorithm.Ed25519);
+        using var successor = Key.Create(SignatureAlgorithm.Ed25519);
+        byte[] oldPublicKey = oldKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+        byte[] successorPublicKey = successor.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+        var entries = Entries(oldPublicKey);
+        entries.Add("DidWebPublication:SuccessorPublicKeyHex",
+            Convert.ToHexStringLower(successorPublicKey));
+
+        var publisher = NewPublisher(entries);
+        Assert.True(publisher.IsEnabled);
+        Assert.Equal("did:web:issuer.example", publisher.Did);
+        Assert.NotNull(publisher.Document);
+        Assert.True(DidWebPinnedKeyTransition.MatchesExpectedTransitionDocument(
+            publisher.Did!, oldPublicKey, successorPublicKey, publisher.Document));
+        Assert.False(DidWebPublishedKeyMatch.MatchesExpectedDocument(
+            publisher.Did!, oldPublicKey, publisher.Document));
+    }
+
+    [Fact]
+    public async Task ExplicitTwoKeyOverlapIsServedOnThePinnedHttpsHostOnly()
+    {
+        using var oldKey = Key.Create(SignatureAlgorithm.Ed25519);
+        using var successor = Key.Create(SignatureAlgorithm.Ed25519);
+        byte[] oldPublicKey = oldKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+        byte[] successorPublicKey = successor.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+        using var hosting = new DidWebHttpFactory(oldPublicKey, successorPublicKey);
+        using var client = hosting.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        using var response = await client.GetAsync(
+            new Uri("https://issuer.example/.well-known/did.json", UriKind.Absolute))
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+        string json = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(DidWebPinnedKeyTransition.MatchesExpectedTransitionDocument(
+            "did:web:issuer.example", oldPublicKey, successorPublicKey, json));
+
+        using var wrongHost = await client.GetAsync(
+            new Uri("https://unapproved.example/.well-known/did.json", UriKind.Absolute))
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, wrongHost.StatusCode);
+        using var wrongPort = await client.GetAsync(
+            new Uri("https://issuer.example:8443/.well-known/did.json", UriKind.Absolute))
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, wrongPort.StatusCode);
+    }
+
+    [Fact]
+    public void TwoKeyOverlapRefusesMissingInvalidOrIdenticalSuccessorPins()
+    {
+        using var oldKey = Key.Create(SignatureAlgorithm.Ed25519);
+        using var successor = Key.Create(SignatureAlgorithm.Ed25519);
+        byte[] oldPublicKey = oldKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+        byte[] successorPublicKey = successor.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+        var entries = Entries(oldPublicKey);
+        entries.Add("DidWebPublication:SuccessorPublicKeyHex",
+            Convert.ToHexStringLower(successorPublicKey));
+        Assert.True(NewPublisher(entries).IsEnabled);
+
+        foreach (string invalid in new[]
+        {
+            Convert.ToHexStringLower(oldPublicKey),
+            new string('0', 64),
+            Convert.ToHexString(successorPublicKey),
+            "not-a-public-key"
+        })
+        {
+            var invalidEntries = new Dictionary<string, string?>(entries)
+            {
+                ["DidWebPublication:SuccessorPublicKeyHex"] = invalid
+            };
+            Assert.Throws<InvalidOperationException>(() => NewPublisher(invalidEntries));
+        }
+
+        var unexpected = new Dictionary<string, string?>(entries)
+        {
+            ["DidWebPublication:EnableAutomaticTrust"] = "true"
+        };
+        Assert.Throws<InvalidOperationException>(() => NewPublisher(unexpected));
+    }
+
+    [Fact]
     public async Task HttpsExactHostServesDocumentButWrongHostSchemeOrPortDoesNot()
     {
         using var key = Key.Create(SignatureAlgorithm.Ed25519);
@@ -140,7 +227,7 @@ public sealed class OperatorDidWebPublisherTests
         Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
     }
 
-    private sealed class DidWebHttpFactory(byte[]? keyBytes) : WebApplicationFactory<Program>
+    private sealed class DidWebHttpFactory(byte[]? keyBytes, byte[]? successorKeyBytes = null) : WebApplicationFactory<Program>
     {
         private readonly string _database = Guid.NewGuid().ToString("N");
 
@@ -166,6 +253,11 @@ public sealed class OperatorDidWebPublisherTests
                     foreach (var entry in Entries(keyBytes))
                     {
                         entries.Add(entry.Key, entry.Value);
+                    }
+                    if (successorKeyBytes is not null)
+                    {
+                        entries.Add("DidWebPublication:SuccessorPublicKeyHex",
+                            Convert.ToHexStringLower(successorKeyBytes));
                     }
                 }
 
