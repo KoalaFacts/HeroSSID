@@ -1,4 +1,5 @@
 using System.Text.Json;
+using HeroSSID.Credentials.Utilities;
 using HeroSSID.Credentials.VerifiablePresentations;
 
 namespace HeroSSID.Credentials.Vcdm20;
@@ -33,6 +34,16 @@ public static class Vcdm20SignedClaimPresentation
                 expectedHolderDid, expectedCredentialId,
                 requiredSubjectClaims, clock, out _, out string issuer,
                 out JsonElement subject))
+        {
+            return Vcdm20PresentationCheckResult.Invalid;
+        }
+
+        // CheckCore bounded VP.exp by the retained challenge and original
+        // VC.validUntil before atomically spending the nonce. Their deadlines
+        // are therefore no earlier than authenticated VP.exp. Sample time
+        // again after issuer/policy checks, not just before them.
+        if (!IsAuthenticatedPresentationStillLive(
+                presentationJwt, expectedHolderDid, clock.GetUtcNow()))
         {
             return Vcdm20PresentationCheckResult.Invalid;
         }
@@ -86,10 +97,52 @@ public static class Vcdm20SignedClaimPresentation
             return status;
         }
 
+        // Check the signed VP and status expiry against ONE final clock
+        // sample after the expensive genuine holder, issuer and status
+        // verification. Both compact JWTs have already been authenticated;
+        // re-read only their immutable signed expiry fields, with no new
+        // trust decision from unverified or caller-substituted claims.
+        DateTimeOffset finalNow = clock.GetUtcNow();
+        if (!IsAuthenticatedPresentationStillLive(
+                presentationJwt, expectedHolderDid, finalNow) ||
+            !IsAuthenticatedStatusStillLive(snapshotJwt, finalNow))
+        {
+            return Vcdm20RevocationCheckResult.Invalid;
+        }
+
         verifiedIssuerDid = issuer;
         verifiedSubject = subject;
         return Vcdm20RevocationCheckResult.SignedNotListed;
     }
+
+    // These helpers MUST only be used after TryAuthenticateOriginal and,
+    // for status, CheckWithObservationCutoff have verified real Ed25519
+    // signatures over these exact immutable strings. Parsing never confers
+    // provenance on its own.
+    private static bool IsAuthenticatedPresentationStillLive(
+        string presentationJwt, string expectedHolderDid, DateTimeOffset now)
+    {
+        if (!expectedHolderDid.StartsWith("did:key:", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        string keyId = expectedHolderDid + "#" + expectedHolderDid["did:key:".Length..];
+        return StrictJwtReader.TryRead(
+                presentationJwt, "vp+jwt", 131_072,
+                out JsonElement payload, keyId, "vp") &&
+            PresentationChallengePolicy.TryGetNumericDate(
+                payload, "exp", out decimal expiry) &&
+            expiry > PresentationChallengePolicy.NumericDate(now);
+    }
+
+    private static bool IsAuthenticatedStatusStillLive(
+        string signedSnapshotJwt, DateTimeOffset now) =>
+        StrictJwtReader.TryRead(
+            signedSnapshotJwt, "herossid-vc2-revocation-snapshot+jwt",
+            65_536, out JsonElement payload) &&
+        StrictJwtReader.TryGetTimestamp(payload, "exp", out long expiry) &&
+        expiry > now.ToUnixTimeSeconds();
 
     private static bool TryAuthenticateOriginal(
         string presentationJwt, Guid verifierTenantId,
