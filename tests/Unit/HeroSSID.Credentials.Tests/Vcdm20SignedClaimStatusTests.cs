@@ -1,4 +1,7 @@
+using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using HeroSSID.Credentials.Utilities;
 using HeroSSID.Credentials.Vcdm20;
 using HeroSSID.Credentials.VerifiablePresentations;
 using NSec.Cryptography;
@@ -98,6 +101,37 @@ public sealed class Vcdm20SignedClaimStatusTests
 
         Assert.Equal(expected, Vcdm20RevocationSnapshot.Check(
             snapshot, originalJwt, issuer.Did, _clock.GetUtcNow()));
+    }
+
+    [Fact]
+    public void RealIssuerSignatureCannotAuthenticateAnInvalidSeventhPolicyField()
+    {
+        var issuer = Identity();
+        var holder = Identity();
+        DateTimeOffset now = _clock.GetUtcNow();
+        using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
+            new { id = holder.Did, membership = "active" }));
+        string genuine = Vcdm20JoseCredential.CreateWithId(
+            issuer.Did, holder.Did, "MembershipCredential", Context,
+            subject.RootElement, issuer.Seed, now.AddMinutes(-1),
+            now.AddMinutes(5), CredentialId);
+        string header = Ed25519JwtSigner.ExtractHeader(genuine);
+        JsonObject payload = JsonNode.Parse(Ed25519JwtSigner.ExtractPayload(genuine))!.AsObject();
+        // The issuer really signs an invalid HTTP identifier. A genuine
+        // Ed25519 signature does not make its non-conforming VC2 valid.
+        payload["id"] = "http://issuer.example/credentials/not-https";
+        string invalid = Ed25519JwtSigner.CreateSignedJwt(
+            header, payload.ToJsonString(), issuer.Seed);
+        Assert.False(Vcdm20JoseCredential.TryVerifyWithId(
+            invalid, issuer.Did, holder.Did, "MembershipCredential",
+            Context, now, out _, out _));
+        Assert.Throws<CryptographicException>(() =>
+            Vcdm20RevocationSnapshot.Create(
+                issuer.Did, [invalid], issuer.Seed, now, _clock));
+        string status = Vcdm20RevocationSnapshot.Create(
+            issuer.Did, [], issuer.Seed, now, _clock);
+        Assert.Equal(Vcdm20RevocationCheckResult.Invalid,
+            Vcdm20RevocationSnapshot.Check(status, invalid, issuer.Did, now));
     }
 
     private static (byte[] Seed, string Did) Identity()
