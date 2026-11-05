@@ -131,7 +131,7 @@ public sealed class DidWebPinnedKeyControlChallengeVerifierTests
         clock.BeforeRead = () =>
         {
             entered.Set();
-            if (!resume.Wait(TimeSpan.FromSeconds(15)))
+            if (!resume.Wait(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken))
             {
                 throw new TimeoutException("Timed out resuming verifier clock read.");
             }
@@ -141,7 +141,7 @@ public sealed class DidWebPinnedKeyControlChallengeVerifierTests
             () => verifier.TryVerifyAndConsume(mutableFirstNonce, secondSignature));
         try
         {
-            Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
             byte[] secondNonce = second.GetNonce();
             Buffer.BlockCopy(secondNonce, 0, mutableFirstNonce, 0, secondNonce.Length);
         }
@@ -150,7 +150,7 @@ public sealed class DidWebPinnedKeyControlChallengeVerifierTests
             resume.Set();
         }
 
-        Assert.False(await substituted);
+        Assert.False(await substituted.ConfigureAwait(false));
         clock.BeforeRead = null;
         Assert.True(verifier.TryVerifyAndConsume(first.GetNonce(), firstSignature));
         Assert.True(verifier.TryVerifyAndConsume(second.GetNonce(), secondSignature));
