@@ -356,8 +356,68 @@ public static class Vcdm20RevocationSnapshot
         DateTimeOffset minimumObservedAtUtc, IPresentationChallengeStore challenges,
         TimeProvider clock, out JsonElement verifiedSubject)
     {
+        ArgumentNullException.ThrowIfNull(presentationJwt);
+        ArgumentNullException.ThrowIfNull(snapshotJwt);
+        ArgumentNullException.ThrowIfNull(challenges);
+        ArgumentNullException.ThrowIfNull(clock);
         verifiedSubject = default;
-        throw new NotSupportedException("Recipient-bound signed-status verifier is not implemented.");
+
+        // The retained issuer DID and exact signed verifier request pin are
+        // verifier-owned, not selected by the holder's VP or by status.
+        if (!PresentationChallengePolicy.IsValidLookup(
+                verifierTenantId, expectedAudience, expectedNonce))
+        {
+            return Vcdm20RevocationCheckResult.Invalid;
+        }
+
+        var retained = challenges.Find(verifierTenantId, expectedAudience, expectedNonce);
+        if (retained is null ||
+            Vcdm20JosePresentation.CheckForAudienceWithIdAndSignedRequest(
+                presentationJwt, signedRequestJwt, trustedRequestSha256,
+                trustedVerifierDid, verifierTenantId, expectedAudience,
+                expectedNonce, expectedCredentialType, expectedContextUri,
+                expectedCredentialId, expectedCredentialAudience, challenges,
+                clock, out JsonElement subject) !=
+                    Vcdm20PresentationCheckResult.SignedButStatusUnchecked ||
+            !TryExtractEnclosedJwt(presentationJwt, out string originalJwt))
+        {
+            return Vcdm20RevocationCheckResult.Invalid;
+        }
+
+        // The genuine VP check has already atomically spent the one-use nonce.
+        // Read status only for the EXACT enclosed issuer JWT, with the original
+        // verifier-enrolled issuer key. An issuer-owned snapshot cannot replace
+        // verifier audience/ID/trust policy.
+        Vcdm20RevocationCheckResult status = CheckWithObservationCutoff(
+            snapshotJwt, originalJwt, retained.TrustedIssuerDid,
+            clock.GetUtcNow(), minimumObservedAtUtc);
+        if (status != Vcdm20RevocationCheckResult.SignedNotListed)
+        {
+            return status;
+        }
+
+        // Genuine Ed25519 signatures have already authenticated both immutable
+        // tokens. A last clock sample prevents releasing a subject after an
+        // expensive status check crossed the VP or snapshot expiry boundary.
+        DateTimeOffset now = clock.GetUtcNow();
+        if (!StrictJwtReader.TryGetString(subject, "id", out string holderDid) ||
+            !holderDid.StartsWith("did:key:", StringComparison.Ordinal) ||
+            !StrictJwtReader.TryRead(presentationJwt, "vp+jwt",
+                MaximumPresentationLength, out JsonElement signedPresentation,
+                holderDid + "#" + holderDid["did:key:".Length..], "vp") ||
+            !PresentationChallengePolicy.TryGetNumericDate(
+                signedPresentation, "exp", out decimal presentationExpires) ||
+            presentationExpires <= PresentationChallengePolicy.NumericDate(now) ||
+            !StrictJwtReader.TryRead(snapshotJwt, SnapshotType,
+                MaximumSnapshotLength, out JsonElement signedSnapshot) ||
+            !StrictJwtReader.TryGetTimestamp(signedSnapshot, "exp", out long statusExpires) ||
+            statusExpires <= now.ToUnixTimeSeconds())
+        {
+            return Vcdm20RevocationCheckResult.Invalid;
+        }
+
+        verifiedSubject = subject;
+        return Vcdm20RevocationCheckResult.SignedNotListed;
     }
 
     // The sole credential extraction, signature, nonce-consumption and status
