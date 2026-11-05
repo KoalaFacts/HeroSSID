@@ -114,7 +114,7 @@ public sealed class Vcdm20AudienceBoundCredentialTests
         Assert.Equal(JsonValueKind.Undefined, denied.ValueKind);
     }
 
-    private bool Check(string jwt, string issuer, string holder, Uri id, Uri audience,
+    private static bool Check(string jwt, string issuer, string holder, Uri id, Uri audience,
         DateTimeOffset now, out JsonElement verified) =>
         Vcdm20JoseCredential.TryVerifyForAudienceWithId(
             jwt, issuer, holder, CredentialType, Context, id, audience, now,
