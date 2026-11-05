@@ -18,13 +18,13 @@ public sealed class DidWebPinnedKeyControlChallengeVerifierTests
         var clock = new ManualClock();
         var verifier = NewVerifier(signer, clock);
         DidWebPinnedKeyControlChallenge challenge = verifier.Issue();
-        byte[] signature = SignatureAlgorithm.Ed25519.Sign(signer, challenge.SigningInput);
+        byte[] signature = SignatureAlgorithm.Ed25519.Sign(signer, challenge.GetSigningInput());
 
-        Assert.Equal(32, challenge.Nonce.Length);
+        Assert.Equal(32, challenge.GetNonce().Length);
         Assert.Equal(InitialTime, challenge.IssuedAt);
         Assert.Equal(InitialTime.AddMinutes(2), challenge.ExpiresAt);
-        Assert.True(verifier.TryVerifyAndConsume(challenge.Nonce, signature));
-        Assert.False(verifier.TryVerifyAndConsume(challenge.Nonce, signature));
+        Assert.True(verifier.TryVerifyAndConsume(challenge.GetNonce(), signature));
+        Assert.False(verifier.TryVerifyAndConsume(challenge.GetNonce(), signature));
     }
 
     [Fact]
@@ -34,18 +34,18 @@ public sealed class DidWebPinnedKeyControlChallengeVerifierTests
         using Key attacker = Key.Create(SignatureAlgorithm.Ed25519);
         var verifier = NewVerifier(signer, new ManualClock());
         DidWebPinnedKeyControlChallenge challenge = verifier.Issue();
-        byte[] genuine = SignatureAlgorithm.Ed25519.Sign(signer, challenge.SigningInput);
-        byte[] forged = SignatureAlgorithm.Ed25519.Sign(attacker, challenge.SigningInput);
-        byte[] changedNonce = challenge.Nonce;
+        byte[] genuine = SignatureAlgorithm.Ed25519.Sign(signer, challenge.GetSigningInput());
+        byte[] forged = SignatureAlgorithm.Ed25519.Sign(attacker, challenge.GetSigningInput());
+        byte[] changedNonce = challenge.GetNonce();
         changedNonce[0] ^= 1;
         byte[] changedSignature = (byte[])genuine.Clone();
         changedSignature[0] ^= 1;
 
-        Assert.False(verifier.TryVerifyAndConsume(challenge.Nonce, forged));
+        Assert.False(verifier.TryVerifyAndConsume(challenge.GetNonce(), forged));
         Assert.False(verifier.TryVerifyAndConsume(changedNonce, genuine));
-        Assert.False(verifier.TryVerifyAndConsume(challenge.Nonce, changedSignature));
+        Assert.False(verifier.TryVerifyAndConsume(challenge.GetNonce(), changedSignature));
         Assert.False(verifier.TryVerifyAndConsume(new byte[31], genuine));
-        Assert.True(verifier.TryVerifyAndConsume(challenge.Nonce, genuine));
+        Assert.True(verifier.TryVerifyAndConsume(challenge.GetNonce(), genuine));
     }
 
     [Fact]
@@ -55,15 +55,15 @@ public sealed class DidWebPinnedKeyControlChallengeVerifierTests
         var clock = new ManualClock();
         var verifier = NewVerifier(signer, clock, capacity: 1);
         DidWebPinnedKeyControlChallenge first = verifier.Issue();
-        byte[] signature = SignatureAlgorithm.Ed25519.Sign(signer, first.SigningInput);
+        byte[] signature = SignatureAlgorithm.Ed25519.Sign(signer, first.GetSigningInput());
         Assert.Throws<InvalidOperationException>(() => verifier.Issue());
 
         clock.Current = first.ExpiresAt;
-        Assert.False(verifier.TryVerifyAndConsume(first.Nonce, signature));
+        Assert.False(verifier.TryVerifyAndConsume(first.GetNonce(), signature));
         DidWebPinnedKeyControlChallenge second = verifier.Issue();
-        Assert.NotEqual(Convert.ToHexString(first.Nonce), Convert.ToHexString(second.Nonce));
-        Assert.True(verifier.TryVerifyAndConsume(second.Nonce,
-            SignatureAlgorithm.Ed25519.Sign(signer, second.SigningInput)));
+        Assert.NotEqual(Convert.ToHexString(first.GetNonce()), Convert.ToHexString(second.GetNonce()));
+        Assert.True(verifier.TryVerifyAndConsume(second.GetNonce(),
+            SignatureAlgorithm.Ed25519.Sign(signer, second.GetSigningInput())));
     }
 
     [Fact]
@@ -72,14 +72,14 @@ public sealed class DidWebPinnedKeyControlChallengeVerifierTests
         using Key signer = Key.Create(SignatureAlgorithm.Ed25519);
         var verifier = NewVerifier(signer, new ManualClock());
         DidWebPinnedKeyControlChallenge challenge = verifier.Issue();
-        byte[] genuine = SignatureAlgorithm.Ed25519.Sign(signer, challenge.SigningInput);
-        byte[] exposedNonce = challenge.Nonce;
-        byte[] exposedInput = challenge.SigningInput;
+        byte[] genuine = SignatureAlgorithm.Ed25519.Sign(signer, challenge.GetSigningInput());
+        byte[] exposedNonce = challenge.GetNonce();
+        byte[] exposedInput = challenge.GetSigningInput();
         exposedNonce[0] ^= 1;
         exposedInput[0] ^= 1;
 
         Assert.False(verifier.TryVerifyAndConsume(exposedNonce, genuine));
-        Assert.True(verifier.TryVerifyAndConsume(challenge.Nonce, genuine));
+        Assert.True(verifier.TryVerifyAndConsume(challenge.GetNonce(), genuine));
     }
 
     [Fact]
@@ -88,10 +88,10 @@ public sealed class DidWebPinnedKeyControlChallengeVerifierTests
         using Key signer = Key.Create(SignatureAlgorithm.Ed25519);
         var verifier = NewVerifier(signer, new ManualClock());
         DidWebPinnedKeyControlChallenge challenge = verifier.Issue();
-        byte[] signature = SignatureAlgorithm.Ed25519.Sign(signer, challenge.SigningInput);
+        byte[] signature = SignatureAlgorithm.Ed25519.Sign(signer, challenge.GetSigningInput());
 
         Task<bool>[] attempts = Enumerable.Range(0, 24)
-            .Select(_ => Task.Run(() => verifier.TryVerifyAndConsume(challenge.Nonce, signature)))
+            .Select(_ => Task.Run(() => verifier.TryVerifyAndConsume(challenge.GetNonce(), signature)))
             .ToArray();
         bool[] results = await Task.WhenAll(attempts);
         Assert.Equal(1, results.Count(static accepted => accepted));
@@ -105,10 +105,10 @@ public sealed class DidWebPinnedKeyControlChallengeVerifierTests
         var verifier = NewVerifier(signer, clock);
         var independentVerifier = NewVerifier(signer, clock);
         DidWebPinnedKeyControlChallenge challenge = verifier.Issue();
-        byte[] signature = SignatureAlgorithm.Ed25519.Sign(signer, challenge.SigningInput);
+        byte[] signature = SignatureAlgorithm.Ed25519.Sign(signer, challenge.GetSigningInput());
 
-        Assert.False(independentVerifier.TryVerifyAndConsume(challenge.Nonce, signature));
-        Assert.True(verifier.TryVerifyAndConsume(challenge.Nonce, signature));
+        Assert.False(independentVerifier.TryVerifyAndConsume(challenge.GetNonce(), signature));
+        Assert.True(verifier.TryVerifyAndConsume(challenge.GetNonce(), signature));
     }
 
     [Fact]
