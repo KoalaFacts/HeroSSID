@@ -43,6 +43,34 @@ dotnet test tests/Unit/HeroSSID.DidOperations.Tests/HeroSSID.DidOperations.Tests
 
 The tests exercise genuine independent Ed25519 keys, a forged signature, a changed nonce, replay under concurrency, expiry, bounded capacity, defensive-copy outputs and different verifier instances. These are local tests, **not** external wallet interoperability or third-party conformance evidence.
 
+## Opt-in combined live publication + one-use signer proof (#key-1)
+
+`DidWebPinnedPublishedKeyControlVerifier` is an **additional admission option** for the *unrotated, exact single-key* `did:web` document profile. It combines the formerly separate checks into one fail-closed entry point: (1) a canonical bounded HTTPS GET must match the **independently operator-pinned** `did:web` and `#key-1` Ed25519 public key; (2) the independently operated signer must produce a real Ed25519 signature over the verifier-issued challenge; (3) that exact nonce is atomically consumed only after both checks pass.
+
+```csharp
+// Application has already approved DID, public key and verifier audience;
+// externalSigner is separate from the verifier in a real deployment.
+using Key externalSigner = Key.Create(SignatureAlgorithm.Ed25519);
+byte[] operatorApprovedPin = externalSigner.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+var admission = new DidWebPinnedPublishedKeyControlVerifier(
+    "did:web:issuer.example.org",
+    new Uri("https://verifier.example.org/key-check"),
+    operatorApprovedPin, TimeProvider.System, capacity: 128);
+
+DidWebPinnedKeyControlChallenge offered = admission.Issue();
+byte[] externallySigned = SignatureAlgorithm.Ed25519.Sign(
+    externalSigner, offered.GetSigningInput());
+
+// Succeeds only when the operator independently publishes exactly this
+// one-key document over valid HTTPS AND the key-holder signed this nonce.
+bool admitted = await admission.TryVerifyAndConsumeWithIsolatedTransportAsync(
+    offered.GetNonce(), externallySigned);
+```
+
+The code above is an **illustrative single-process setup**, not a live example-domain endpoint. The issuer must publish its own exact DID document first. For deterministic tests without a network, inject a credential-free, **non-redirecting** `HttpClient` into `TryVerifyAndConsumeAsync`; those tests do not establish third-party interoperability. The isolated transport should be the deployment default because injected handlers cannot be inspected for redirect/proxy/credential behavior.
+
+An invalid HTTP document, unavailable host, stale/substituted key, wrong signature or replay fails; an HTTP failure **does not burn a valid pending nonce**, allowing a later retry before its hard expiry. The remote fetch happens before signature checking, so authenticate and rate-limit callers and control network egress. Concurrent successful responses remain at most one per verifier instance; neither a restart nor multiple replicas share the in-memory replay barrier. **This combined profile is only for `#key-1` single-key publication**, not `#key-2` overlap/successor retirement. A failed or successful result must not itself alter issuer trust or authorize business/Agent actions.
+
 ## Security and operational boundary
 
 - Constructor pins exact DID, method, HTTPS verifier audience and public key. A remote document or proof **cannot override any of those**. The verifier owns the time source, expiry and cryptographically random 32-byte nonce. `#key-1` and `#key-2` are separate pins and must be approved independently.
