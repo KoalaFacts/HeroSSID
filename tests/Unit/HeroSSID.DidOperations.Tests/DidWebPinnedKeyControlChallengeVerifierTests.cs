@@ -83,7 +83,7 @@ public sealed class DidWebPinnedKeyControlChallengeVerifierTests
     }
 
     [Fact]
-    public async Task ConcurrentDuplicateSubmissionsYieldExactlyOneSuccess()
+    public async Task ConcurrentDuplicateSubmissionsYieldExactlyOneSuccessAsync()
     {
         using Key signer = Key.Create(SignatureAlgorithm.Ed25519);
         var verifier = NewVerifier(signer, new ManualClock());
