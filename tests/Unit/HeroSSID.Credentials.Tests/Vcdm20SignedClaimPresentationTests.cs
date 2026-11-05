@@ -51,6 +51,62 @@ public sealed class Vcdm20SignedClaimPresentationTests
                 _clock, out _, out _));
     }
 
+
+    [Theory]
+    [InlineData("wrong-issuer")]
+    [InlineData("wrong-holder")]
+    [InlineData("wrong-id")]
+    [InlineData("wrong-tenant")]
+    [InlineData("wrong-claim")]
+    public void IndependentVerifierPinsCannotBeReplacedByPresentation(string mismatch)
+    {
+        var issuer = Identity();
+        var holder = Identity();
+        var verifier = Identity();
+        var outsider = Identity();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        Guid tenant = Guid.NewGuid();
+        var challenge = store.Issue(tenant, Audience, issuer.Did);
+        string request = OfflineSignedPresentationRequest.Create(
+            challenge, verifier.Did, verifier.Seed, _clock);
+        using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
+            new { id = holder.Did, membership = "active" }));
+        var now = _clock.GetUtcNow();
+        string original = Vcdm20JoseCredential.CreateWithId(
+            issuer.Did, holder.Did, "MembershipCredential", Context,
+            subject.RootElement, issuer.Seed, now.AddMinutes(-1),
+            now.AddMinutes(5), CredentialId);
+        string presentation = Vcdm20JosePresentation.Create(
+            request, verifier.Did, Audience, original, "MembershipCredential",
+            Context, holder.Did, holder.Seed, _clock);
+        var trusted = mismatch == "wrong-issuer" ? new[] { outsider.Did } : new[] { issuer.Did };
+        string expectedHolder = mismatch == "wrong-holder" ? outsider.Did : holder.Did;
+        Uri expectedId = mismatch == "wrong-id"
+            ? new Uri("https://issuer.example/credentials/other") : CredentialId;
+        Guid expectedTenant = mismatch == "wrong-tenant" ? Guid.NewGuid() : tenant;
+        string expectedMembership = mismatch == "wrong-claim" ? "inactive" : "active";
+        var policy = new Dictionary<string, string> { ["membership"] = expectedMembership };
+        Assert.Equal(Vcdm20PresentationCheckResult.Invalid,
+            Vcdm20SignedClaimPresentation.Check(
+                presentation, expectedTenant, Audience, challenge.Nonce,
+                "MembershipCredential", Context, store, trusted, expectedHolder,
+                expectedId, policy, _clock, out string signer, out JsonElement claims));
+        Assert.Equal(string.Empty, signer);
+        Assert.Equal(JsonValueKind.Undefined, claims.ValueKind);
+
+        if (mismatch == "wrong-tenant")
+        {
+            Assert.Equal(Vcdm20PresentationCheckResult.SignedButStatusUnchecked,
+                Vcdm20SignedClaimPresentation.Check(
+                    presentation, tenant, Audience, challenge.Nonce,
+                    "MembershipCredential", Context, store, [issuer.Did],
+                    holder.Did, CredentialId,
+                    new Dictionary<string, string> { ["membership"] = "active" },
+                    _clock, out signer, out claims));
+            Assert.Equal(issuer.Did, signer);
+        }
+    }
+
     private static (byte[] Seed, string Did) Identity()
     {
         using var key = Key.Create(SignatureAlgorithm.Ed25519,
