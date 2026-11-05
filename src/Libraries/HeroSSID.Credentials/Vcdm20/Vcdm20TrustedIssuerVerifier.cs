@@ -77,4 +77,21 @@ public static class Vcdm20TrustedIssuerVerifier
 
         return false;
     }
+
+    /// <summary>
+    /// Opt-in verification of an issuer-signed VC2 credential with a top-level
+    /// identifier, additionally pinned to one exact verifier-approved credential
+    /// URI and an independently enrolled historical/current issuer allowlist.
+    /// An issuer signature does not establish issuer trust, revocation status,
+    /// holder control or business authorization.
+    /// </summary>
+    public static bool TryVerifyWithId(
+        string issuerSignedJwt, IReadOnlyCollection<string> trustedIssuerDids,
+        string expectedHolderDid, string expectedCredentialType,
+        Uri expectedSubjectContextUri, Uri expectedCredentialId,
+        DateTimeOffset now, out string verifiedIssuerDid,
+        out JsonElement verifiedSubject)
+    {
+        throw new NotSupportedException("Signed credential ID trust-policy verification is not implemented.");
+    }
 }
