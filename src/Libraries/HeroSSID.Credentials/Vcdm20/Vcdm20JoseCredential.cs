@@ -199,6 +199,24 @@ public static class Vcdm20JoseCredential
             expectedSubjectContextUri, now, out verifiedSubject,
             out verifiedCredentialId, true);
 
+    /// <summary>Opt-in named VCDM2 issuer descriptor; unimplemented runtime-RED entry.</summary>
+    public static string CreateWithNamedIssuer(
+        string issuerDid, string issuerName, string holderDid,
+        string credentialType, Uri subjectContextUri, JsonElement credentialSubject,
+        byte[] issuerPrivateKey, DateTimeOffset validFrom, DateTimeOffset validUntil) =>
+        throw new NotSupportedException("RED: VCDM2 named issuer object is not implemented.");
+
+    /// <summary>Verify an independently pinned issuer DID and descriptive name.</summary>
+    public static bool TryVerifyNamedIssuer(
+        string jwt, string trustedIssuerDid, string expectedIssuerName,
+        string expectedHolderDid, string expectedCredentialType,
+        Uri expectedSubjectContextUri, DateTimeOffset now,
+        out JsonElement verifiedSubject)
+    {
+        verifiedSubject = default;
+        throw new NotSupportedException("RED: VCDM2 named issuer object is not implemented.");
+    }
+
     private static bool HasExactArray(JsonElement element, string name, string first, string second)
     {
         if (!element.TryGetProperty(name, out var values) ||
