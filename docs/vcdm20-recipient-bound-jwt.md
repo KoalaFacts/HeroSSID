@@ -91,3 +91,30 @@ revocation status, legal identity, consent attestation, business/Agent
 delegation, or authorization. Integrators still need issuer status validation
 and local authorization before acting. This is a bounded HeroSSID SDK flow,
 not proof of external OpenID4VP wallet interoperability or conformance.
+
+## Original recipient-bound credential status
+
+The issuer's existing private 60-second signed digest snapshot now accepts the
+same **exact issuer-signed eight-field original** used by
+`CreateForAudienceWithId`: both its canonical HTTPS `id` and the single
+canonical HTTPS `aud` must be present. The issuer can list it by exact JWT
+bytes in `Vcdm20RevocationSnapshot.Create`; a separately configured verifier
+can evaluate those exact bytes with `Check` or `CheckWithObservationCutoff`.
+
+```csharp
+string statusJwt = Vcdm20RevocationSnapshot.Create(
+    issuerDid, [recipientBoundCredentialJwt], issuerSeed, observedAt, clock);
+Vcdm20RevocationCheckResult result = Vcdm20RevocationSnapshot.Check(
+    statusJwt, recipientBoundCredentialJwt, independentlyTrustedIssuerDid,
+    clock.GetUtcNow());
+```
+
+Two genuinely issued JWTs addressed to different `aud` values are
+independent revocation entries even if they share an issuer, holder, subject
+and credential `id`. Arrays, HTTP/noncanonical recipients, missing signed
+IDs and unknown extra top-level members remain invalid. The status helper
+does not itself enforce verifier recipient policy or holder possession:
+applications must use the independently pinned VC verifier and holder-signed
+one-use proof as separate gates before releasing claims. `SignedNotListed`
+only asserts absence from this signed snapshot, not a complete or live
+revocation inventory, legal identity, consent or business authorization.
