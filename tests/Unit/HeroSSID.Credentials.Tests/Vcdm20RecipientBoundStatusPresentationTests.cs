@@ -139,6 +139,61 @@ public sealed class Vcdm20RecipientBoundStatusPresentationTests
         Assert.Equal("active", subject.GetProperty("membership").GetString());
     }
 
+    [Theory]
+    [InlineData(61)]
+    [InlineData(360)]
+    public void SignedProofOrIssuerStatusExpiringAtFinalReadMustNotReleaseClaims(
+        int clockJumpSeconds)
+    {
+        // Genuine Ed25519 tokens and independent challenge storage; only the
+        // verifier's observed time crosses expiry during final validation.
+        var (firstTenant, firstStore, firstChallenge, firstRequest) = Request();
+        string firstVp = Present(firstRequest, Issue(Recipient));
+        string firstStatus = Snapshot([]);
+        var stableClock = new BoundaryClock(
+            _clock.GetUtcNow(), int.MaxValue, TimeSpan.FromSeconds(clockJumpSeconds));
+
+        Assert.Equal(Vcdm20RevocationCheckResult.SignedNotListed,
+            Vcdm20RevocationSnapshot.CheckRecipientBoundPresentationWithIssuerStatus(
+                firstVp, firstRequest, Digest(firstRequest), _verifier.Did,
+                firstStatus, firstTenant, Audience, firstChallenge.Nonce,
+                CredentialType, Context, CredentialId, Recipient,
+                DateTimeOffset.UnixEpoch, firstStore, stableClock, out var firstSubject));
+        Assert.Equal("active", firstSubject.GetProperty("membership").GetString());
+        Assert.True(stableClock.ReadCount >= 2);
+
+        // On a separate genuine one-use proof, transition exactly at the last
+        // clock read. In the previous implementation the final time was taken
+        // BEFORE reparsing both signed expiries, leaving a processing race.
+        var (tenant, store, challenge, request) = Request();
+        string vp = Present(request, Issue(Recipient));
+        string snapshot = Snapshot([]);
+        var crossingClock = new BoundaryClock(
+            _clock.GetUtcNow(), stableClock.ReadCount - 1,
+            TimeSpan.FromSeconds(clockJumpSeconds));
+
+        Assert.Equal(Vcdm20RevocationCheckResult.Invalid,
+            Vcdm20RevocationSnapshot.CheckRecipientBoundPresentationWithIssuerStatus(
+                vp, request, Digest(request), _verifier.Did,
+                snapshot, tenant, Audience, challenge.Nonce,
+                CredentialType, Context, CredentialId, Recipient,
+                DateTimeOffset.UnixEpoch, store, crossingClock, out var denied));
+        Assert.Equal(JsonValueKind.Undefined, denied.ValueKind);
+        Assert.Equal(stableClock.ReadCount, crossingClock.ReadCount);
+    }
+
+    private sealed class BoundaryClock(
+        DateTimeOffset initial, int stableReads, TimeSpan advance) : TimeProvider
+    {
+        private int _reads;
+
+        public int ReadCount => global::System.Threading.Volatile.Read(ref _reads);
+
+        public override DateTimeOffset GetUtcNow() =>
+            global::System.Threading.Interlocked.Increment(ref _reads) <= stableReads
+                ? initial : initial.Add(advance);
+    }
+
     private (Guid Tenant, InMemoryPresentationChallengeStore Store,
         PresentationChallenge Challenge, string SignedRequest) Request()
     {
