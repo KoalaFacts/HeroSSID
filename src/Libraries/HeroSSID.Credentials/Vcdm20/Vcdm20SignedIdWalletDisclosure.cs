@@ -1,4 +1,8 @@
+using System.Collections.ObjectModel;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using HeroSSID.Credentials.VerifiablePresentations;
 
 namespace HeroSSID.Credentials.Vcdm20;
 
@@ -30,9 +34,10 @@ public sealed record Vcdm20SignedIdWalletPreview(
 public static class Vcdm20SignedIdWalletDisclosure
 {
     /// <summary>
-    /// Authenticate the verifier request, original issuer signature, exact signed
-    /// credential identifier and required subject values, then genuine issuer status,
-    /// before returning any subject claims or touching the holder private seed.
+    /// Authenticate the policy-bound verifier request, original issuer signature,
+    /// exact signed credential identifier and required subject values, then
+    /// same-issuer status meeting a wallet-owned observation cutoff. Expose no
+    /// subject and access no holder private key unless every check succeeds.
     /// </summary>
     public static bool TryPrepare(
         string signedRequestJwt, string expectedVerifierDid, string expectedAudience,
@@ -42,18 +47,125 @@ public static class Vcdm20SignedIdWalletDisclosure
         DateTimeOffset minimumObservedAtUtc, TimeProvider clock,
         out Vcdm20SignedIdWalletPreview? preview)
     {
+        ArgumentNullException.ThrowIfNull(expectedContextUri);
+        ArgumentNullException.ThrowIfNull(expectedCredentialId);
+        ArgumentNullException.ThrowIfNull(requiredClaims);
+        ArgumentNullException.ThrowIfNull(clock);
         preview = null;
-        throw new NotSupportedException("Runtime RED: signed-ID membership wallet preflight not implemented.");
+
+        if (string.IsNullOrWhiteSpace(signedRequestJwt) ||
+            string.IsNullOrWhiteSpace(expectedVerifierDid) ||
+            string.IsNullOrWhiteSpace(expectedAudience) ||
+            string.IsNullOrWhiteSpace(expectedCredentialType) ||
+            string.IsNullOrWhiteSpace(expectedIssuerDid) ||
+            string.IsNullOrWhiteSpace(credentialJwt) ||
+            string.IsNullOrWhiteSpace(holderDid) ||
+            string.IsNullOrWhiteSpace(issuerSnapshotJwt) ||
+            // Unlike the legacy compatible request preview, this new workflow
+            // requires the verifier itself to sign the exact type and context.
+            !OfflineSignedPresentationRequest.TryReadPolicyBound(
+                signedRequestJwt, expectedVerifierDid, expectedAudience,
+                expectedCredentialType, expectedContextUri, clock,
+                out PresentationChallenge? challenge) ||
+            challenge is null ||
+            !string.Equals(challenge.TrustedIssuerDid, expectedIssuerDid,
+                StringComparison.Ordinal) ||
+            !Vcdm20TrustedIssuerVerifier.TryVerifyWithIdAndRequiredClaims(
+                credentialJwt, [expectedIssuerDid], holderDid,
+                expectedCredentialType, expectedContextUri, expectedCredentialId,
+                requiredClaims, clock.GetUtcNow(), out string actualIssuer,
+                out JsonElement subject) ||
+            !string.Equals(actualIssuer, expectedIssuerDid,
+                StringComparison.Ordinal) ||
+            // Trust and observation cutoff come from the Wallet's own policy,
+            // not the issuer's signed status or the verifier's request.
+            Vcdm20RevocationSnapshot.CheckWithObservationCutoff(
+                issuerSnapshotJwt, credentialJwt, actualIssuer,
+                clock.GetUtcNow(), minimumObservedAtUtc) !=
+                Vcdm20RevocationCheckResult.SignedNotListed)
+        {
+            return false;
+        }
+
+        // Do not retain the caller's mutable trust dictionary in the preview.
+        // The preview remains application data, not a consent attestation.
+        var fixedClaims = new ReadOnlyDictionary<string, string>(
+            new Dictionary<string, string>(requiredClaims, StringComparer.Ordinal));
+        preview = new Vcdm20SignedIdWalletPreview(
+            expectedVerifierDid, expectedAudience, actualIssuer, holderDid,
+            expectedCredentialType, expectedContextUri, expectedCredentialId,
+            fixedClaims, minimumObservedAtUtc, challenge.ExpiresAt,
+            subject, Digest(signedRequestJwt), Digest(credentialJwt),
+            Digest(issuerSnapshotJwt));
+        return true;
     }
 
     /// <summary>
-    /// After the integrating wallet obtains informed consent, reauthenticate
-    /// and bind the exact previewed request, credential, status and subject
-    /// to the holder's real Ed25519-signed full-disclosure presentation.
+    /// After the integrating wallet obtains actual full-disclosure informed
+    /// consent, recheck the exact previewed signed request, issuer credential,
+    /// status, subject, expiry, pinned policy and key before holder signing.
+    /// The verifier independently consumes its one-use challenge.
     /// </summary>
     public static string CreateAfterPreview(
         Vcdm20SignedIdWalletPreview preview, string signedRequestJwt,
         string credentialJwt, string issuerSnapshotJwt, byte[] holderSeed,
-        TimeProvider clock) =>
-        throw new NotSupportedException("Runtime RED: consent-bound signed-ID holder proof not implemented.");
+        TimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(preview);
+        ArgumentNullException.ThrowIfNull(holderSeed);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        if (preview.VerifiedSubject.ValueKind != JsonValueKind.Object ||
+            preview.RequiredClaims is null ||
+            !TryPrepare(signedRequestJwt, preview.VerifierDid, preview.Audience,
+                preview.CredentialType, preview.ContextUri, preview.IssuerDid,
+                credentialJwt, preview.HolderDid, preview.CredentialId,
+                preview.RequiredClaims, issuerSnapshotJwt,
+                preview.MinimumObservedAtUtc, clock, out var reverified) ||
+            reverified is null ||
+            reverified.RequestExpiresAt != preview.RequestExpiresAt ||
+            !string.Equals(reverified.RequestSha256, preview.RequestSha256,
+                StringComparison.Ordinal) ||
+            !string.Equals(reverified.CredentialSha256, preview.CredentialSha256,
+                StringComparison.Ordinal) ||
+            !string.Equals(reverified.SnapshotSha256, preview.SnapshotSha256,
+                StringComparison.Ordinal) ||
+            !string.Equals(reverified.VerifiedSubject.GetRawText(),
+                preview.VerifiedSubject.GetRawText(), StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                "Only the exact live issuer, verifier and status artifacts disclosed in the approved preview may be signed.",
+                nameof(preview));
+        }
+
+        // This existing signer independently checks the issuer's real
+        // signature, exact signed ID, request and true holder Ed25519 seed.
+        string vp = Vcdm20JosePresentation.CreateWithSignedCredentialId(
+            signedRequestJwt, preview.VerifierDid, preview.Audience,
+            credentialJwt, preview.CredentialType, preview.ContextUri,
+            preview.CredentialId, preview.HolderDid, holderSeed, clock);
+
+        // Signing must not return a status-checked proof if either signed
+        // artifact expires or status ceases to satisfy the independent cutoff.
+        if (!OfflineSignedPresentationRequest.TryReadPolicyBound(
+                signedRequestJwt, preview.VerifierDid, preview.Audience,
+                preview.CredentialType, preview.ContextUri, clock,
+                out PresentationChallenge? challenge) ||
+            challenge is null || challenge.ExpiresAt != preview.RequestExpiresAt ||
+            Vcdm20RevocationSnapshot.CheckWithObservationCutoff(
+                issuerSnapshotJwt, credentialJwt, preview.IssuerDid,
+                clock.GetUtcNow(), preview.MinimumObservedAtUtc) !=
+                Vcdm20RevocationCheckResult.SignedNotListed)
+        {
+            throw new ArgumentException(
+                "The verifier request or exact issuer status expired during holder signing.",
+                nameof(issuerSnapshotJwt));
+        }
+
+        return vp;
+    }
+
+    private static string Digest(string artifact) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(artifact)))
+            .ToLowerInvariant();
 }
