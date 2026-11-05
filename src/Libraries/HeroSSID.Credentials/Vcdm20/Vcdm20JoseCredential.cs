@@ -93,8 +93,11 @@ public static class Vcdm20JoseCredential
 
         // Reject mismatched issuer seeds and ambiguous serialized claims before release.
         bool verified = issuerName is not null
-            ? TryVerifyNamedIssuer(jwt, issuerDid, issuerName, holderDid,
-                credentialType, subjectContextUri, validFrom, out _)
+            ? credentialId is not null
+                ? TryVerifyNamedIssuerWithId(jwt, issuerDid, issuerName, holderDid,
+                    credentialType, subjectContextUri, credentialId, validFrom, out _)
+                : TryVerifyNamedIssuer(jwt, issuerDid, issuerName, holderDid,
+                    credentialType, subjectContextUri, validFrom, out _)
             : credentialId is null
                 ? TryVerify(jwt, issuerDid, holderDid, credentialType,
                     subjectContextUri, validFrom, out _)
@@ -127,7 +130,7 @@ public static class Vcdm20JoseCredential
         string expectedCredentialType, Uri expectedSubjectContextUri,
         DateTimeOffset now, out JsonElement verifiedSubject,
         out string? verifiedCredentialId, bool requiresCredentialId,
-        string? expectedIssuerName = null)
+        string? expectedIssuerName = null, Uri? expectedCredentialId = null)
     {
         verifiedCredentialId = null;
         ArgumentNullException.ThrowIfNull(jwt);
@@ -148,7 +151,10 @@ public static class Vcdm20JoseCredential
             credential.EnumerateObject().Count() != (requiresCredentialId ? 7 : 6) ||
             (requiresCredentialId &&
                 (!StrictJwtReader.TryGetString(credential, "id", out string signedId) ||
-                 !ValidCanonicalCredentialId(signedId))) ||
+                 !ValidCanonicalCredentialId(signedId) ||
+                 (expectedCredentialId is not null &&
+                     !string.Equals(signedId, expectedCredentialId.AbsoluteUri,
+                         StringComparison.Ordinal)))) ||
             credential.TryGetProperty("vc", out _) ||
             credential.TryGetProperty("vp", out _) ||
             !MatchesExpectedIssuer(credential, trustedIssuerDid, expectedIssuerName) ||
@@ -246,7 +252,13 @@ public static class Vcdm20JoseCredential
         string credentialType, Uri subjectContextUri, JsonElement credentialSubject,
         byte[] issuerPrivateKey, DateTimeOffset validFrom, DateTimeOffset validUntil,
         Uri credentialId)
-        => throw new NotSupportedException("Named issuer with signed ID is not implemented.");
+    {
+        ArgumentNullException.ThrowIfNull(issuerName);
+        ArgumentNullException.ThrowIfNull(credentialId);
+        return CreateCore(issuerDid, holderDid, credentialType, subjectContextUri,
+            credentialSubject, issuerPrivateKey, validFrom, validUntil,
+            credentialId, issuerName);
+    }
 
     /// <summary>
     /// Release claims only when independently pinned issuer DID, issuer name
@@ -259,7 +271,13 @@ public static class Vcdm20JoseCredential
         DateTimeOffset now, out JsonElement verifiedSubject)
     {
         verifiedSubject = default;
-        throw new NotSupportedException("Named issuer with signed ID is not implemented.");
+        return ValidIssuerName(expectedIssuerName) &&
+            ValidCredentialId(expectedCredentialId) &&
+            TryVerifyCore(jwt, trustedIssuerDid, expectedHolderDid,
+                expectedCredentialType, expectedSubjectContextUri, now,
+                out verifiedSubject, out _, requiresCredentialId: true,
+                expectedIssuerName: expectedIssuerName,
+                expectedCredentialId: expectedCredentialId);
     }
 
     private static bool MatchesExpectedIssuer(
