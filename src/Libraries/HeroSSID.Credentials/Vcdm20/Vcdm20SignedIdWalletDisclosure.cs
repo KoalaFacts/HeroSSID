@@ -166,6 +166,5 @@ public static class Vcdm20SignedIdWalletDisclosure
     }
 
     private static string Digest(string artifact) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(artifact)))
-            .ToLowerInvariant();
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(artifact)));
 }
