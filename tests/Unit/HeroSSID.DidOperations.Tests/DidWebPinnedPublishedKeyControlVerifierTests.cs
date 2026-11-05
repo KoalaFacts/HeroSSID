@@ -110,6 +110,98 @@ public sealed class DidWebPinnedPublishedKeyControlVerifierTests
             cancellationToken: TestContext.Current.CancellationToken));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CallerCannotTurnInvalidEntryProofIntoValidProofDuringHttps(bool changeNonce)
+    {
+        using Key signer = Key.Create(SignatureAlgorithm.Ed25519);
+        byte[] pin = signer.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+        string document = new DidWebMethod().CreateDidDocument(Did, pin);
+        var verifier = NewVerifier(pin);
+        DidWebPinnedKeyControlChallenge challenge = verifier.Issue();
+
+        byte[] genuineNonce = challenge.GetNonce();
+        byte[] genuineSignature = SignatureAlgorithm.Ed25519.Sign(
+            signer, challenge.GetSigningInput());
+        byte[] submittedNonce = (byte[])genuineNonce.Clone();
+        byte[] submittedSignature = (byte[])genuineSignature.Clone();
+        if (changeNonce)
+        {
+            submittedNonce[0] ^= 1;
+        }
+        else
+        {
+            submittedSignature[0] ^= 1;
+        }
+
+        using var handler = new FakeHandler(_ =>
+        {
+            // The initially invalid invocation must not become valid just
+            // because its caller-owned buffer changes during HTTPS retrieval.
+            if (changeNonce)
+            {
+                genuineNonce.CopyTo(submittedNonce, 0);
+            }
+            else
+            {
+                genuineSignature.CopyTo(submittedSignature, 0);
+            }
+
+            return Published(document);
+        });
+        using var http = new HttpClient(handler);
+
+        Assert.False(await verifier.TryVerifyAndConsumeAsync(
+            submittedNonce, submittedSignature, http,
+            cancellationToken: TestContext.Current.CancellationToken));
+
+        // A rejected, forged-at-entry proof cannot consume the genuine nonce.
+        Assert.True(await verifier.TryVerifyAndConsumeAsync(
+            genuineNonce, genuineSignature, http,
+            cancellationToken: TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ValidEntryProofSurvivesCallerBufferMutationDuringHttps(bool changeNonce)
+    {
+        using Key signer = Key.Create(SignatureAlgorithm.Ed25519);
+        byte[] pin = signer.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+        string document = new DidWebMethod().CreateDidDocument(Did, pin);
+        var verifier = NewVerifier(pin);
+        DidWebPinnedKeyControlChallenge challenge = verifier.Issue();
+
+        byte[] submittedNonce = challenge.GetNonce();
+        byte[] submittedSignature = SignatureAlgorithm.Ed25519.Sign(
+            signer, challenge.GetSigningInput());
+        byte[] replayNonce = (byte[])submittedNonce.Clone();
+        byte[] replaySignature = (byte[])submittedSignature.Clone();
+
+        using var handler = new FakeHandler(_ =>
+        {
+            if (changeNonce)
+            {
+                submittedNonce[0] ^= 1;
+            }
+            else
+            {
+                submittedSignature[0] ^= 1;
+            }
+
+            return Published(document);
+        });
+        using var http = new HttpClient(handler);
+
+        Assert.True(await verifier.TryVerifyAndConsumeAsync(
+            submittedNonce, submittedSignature, http,
+            cancellationToken: TestContext.Current.CancellationToken));
+        Assert.False(await verifier.TryVerifyAndConsumeAsync(
+            replayNonce, replaySignature, http,
+            cancellationToken: TestContext.Current.CancellationToken));
+    }
+
     private static DidWebPinnedPublishedKeyControlVerifier NewVerifier(byte[] pin) =>
         new(Did, Audience, pin, TimeProvider.System, capacity: 8,
             lifetime: TimeSpan.FromMinutes(2));
