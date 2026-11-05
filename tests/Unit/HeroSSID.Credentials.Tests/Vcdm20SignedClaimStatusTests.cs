@@ -206,7 +206,7 @@ public sealed class Vcdm20SignedClaimStatusTests
         private int _reads;
 
         public override DateTimeOffset GetUtcNow() =>
-            System.Threading.Interlocked.Increment(ref _reads) <= stableReads
+            global::System.Threading.Interlocked.Increment(ref _reads) <= stableReads
                 ? initial : initial.Add(advance);
     }
 
