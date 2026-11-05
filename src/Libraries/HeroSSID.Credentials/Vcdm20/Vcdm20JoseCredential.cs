@@ -135,6 +135,34 @@ public static class Vcdm20JoseCredential
         return true;
     }
 
+    /// <summary>
+    /// Opt-in VCDM 2.0 direct JOSE credential with an issuer-signed credential
+    /// identifier (the VC's top-level id, not the subject id). The issuer owns
+    /// the identifier; it is not a trust anchor or a revocation check.
+    /// </summary>
+    public static string CreateWithId(
+        string issuerDid, string holderDid, string credentialType,
+        Uri subjectContextUri, JsonElement credentialSubject,
+        byte[] issuerPrivateKey, DateTimeOffset validFrom,
+        DateTimeOffset validUntil, Uri credentialId)
+        => throw new NotSupportedException("VC2 issuer-signed credential id is not implemented.");
+
+    /// <summary>
+    /// Opt-in verification of the original signed VCDM 2.0 credential id
+    /// against independently pinned issuer, holder, context, type and validity.
+    /// Never disclose either id or subject if policy or signature fails.
+    /// </summary>
+    public static bool TryVerifyWithId(
+        string jwt, string trustedIssuerDid, string expectedHolderDid,
+        string expectedCredentialType, Uri expectedSubjectContextUri,
+        DateTimeOffset now, out JsonElement verifiedSubject,
+        out string? verifiedCredentialId)
+    {
+        verifiedSubject = default;
+        verifiedCredentialId = null;
+        throw new NotSupportedException("VC2 issuer-signed credential id is not implemented.");
+    }
+
     private static bool HasExactArray(JsonElement element, string name, string first, string second)
     {
         if (!element.TryGetProperty(name, out var values) ||
