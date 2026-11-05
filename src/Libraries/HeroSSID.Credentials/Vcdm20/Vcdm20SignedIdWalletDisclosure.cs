@@ -87,6 +87,25 @@ public static class Vcdm20SignedIdWalletDisclosure
             return false;
         }
 
+        // An authentic issuer signature or snapshot is not enough if the
+        // verifier request or issuer credential expired during the checks.
+        // Re-evaluate every expiry-sensitive acceptance condition against one
+        // final clock sample before disclosing any subject data. The status
+        // checker alone authenticates the original signature, not validUntil.
+        DateTimeOffset finalNow = clock.GetUtcNow();
+        if (challenge.ExpiresAt <= finalNow ||
+            !Vcdm20TrustedIssuerVerifier.TryVerifyWithIdAndRequiredClaims(
+                credentialJwt, [expectedIssuerDid], holderDid,
+                expectedCredentialType, expectedContextUri, expectedCredentialId,
+                requiredClaims, finalNow, out _, out _) ||
+            Vcdm20RevocationSnapshot.CheckWithObservationCutoff(
+                issuerSnapshotJwt, credentialJwt, actualIssuer,
+                finalNow, minimumObservedAtUtc) !=
+                Vcdm20RevocationCheckResult.SignedNotListed)
+        {
+            return false;
+        }
+
         // Do not retain the caller's mutable trust dictionary in the preview.
         // The preview remains application data, not a consent attestation.
         var fixedClaims = new ReadOnlyDictionary<string, string>(
@@ -145,20 +164,30 @@ public static class Vcdm20SignedIdWalletDisclosure
             credentialJwt, preview.CredentialType, preview.ContextUri,
             preview.CredentialId, preview.HolderDid, holderSeed, clock);
 
-        // Signing must not return a status-checked proof if either signed
-        // artifact expires or status ceases to satisfy the independent cutoff.
+        // Signing may cross the credential's validUntil or the verifier
+        // request/status expiry after the underlying holder signer rechecked
+        // them. Use a final clock sample to gate all three originals together.
+        // The snapshot authenticator does NOT validate credential lifetime.
+        DateTimeOffset finalNow = clock.GetUtcNow();
         if (!OfflineSignedPresentationRequest.TryReadPolicyBound(
                 signedRequestJwt, preview.VerifierDid, preview.Audience,
                 preview.CredentialType, preview.ContextUri, clock,
                 out PresentationChallenge? challenge) ||
             challenge is null || challenge.ExpiresAt != preview.RequestExpiresAt ||
+            challenge.ExpiresAt <= finalNow ||
             Vcdm20RevocationSnapshot.CheckWithObservationCutoff(
                 issuerSnapshotJwt, credentialJwt, preview.IssuerDid,
-                clock.GetUtcNow(), preview.MinimumObservedAtUtc) !=
-                Vcdm20RevocationCheckResult.SignedNotListed)
+                finalNow, preview.MinimumObservedAtUtc) !=
+                Vcdm20RevocationCheckResult.SignedNotListed ||
+            !Vcdm20JoseCredential.TryVerifyWithId(
+                credentialJwt, preview.IssuerDid, preview.HolderDid,
+                preview.CredentialType, preview.ContextUri, finalNow,
+                out _, out string? verifiedCredentialId) ||
+            !string.Equals(verifiedCredentialId, preview.CredentialId.AbsoluteUri,
+                StringComparison.Ordinal))
         {
             throw new ArgumentException(
-                "The verifier request or exact issuer status expired during holder signing.",
+                "The verifier request, issuer credential or exact status expired during holder signing.",
                 nameof(issuerSnapshotJwt));
         }
 
