@@ -93,8 +93,11 @@ public static class Vcdm20JoseCredential
 
         // Reject mismatched issuer seeds and ambiguous serialized claims before release.
         bool verified = issuerName is not null
-            ? TryVerifyNamedIssuer(jwt, issuerDid, issuerName, holderDid,
-                credentialType, subjectContextUri, validFrom, out _)
+            ? credentialId is not null
+                ? TryVerifyNamedIssuerWithId(jwt, issuerDid, issuerName, holderDid,
+                    credentialType, subjectContextUri, credentialId, validFrom, out _)
+                : TryVerifyNamedIssuer(jwt, issuerDid, issuerName, holderDid,
+                    credentialType, subjectContextUri, validFrom, out _)
             : credentialId is null
                 ? TryVerify(jwt, issuerDid, holderDid, credentialType,
                     subjectContextUri, validFrom, out _)
@@ -127,7 +130,7 @@ public static class Vcdm20JoseCredential
         string expectedCredentialType, Uri expectedSubjectContextUri,
         DateTimeOffset now, out JsonElement verifiedSubject,
         out string? verifiedCredentialId, bool requiresCredentialId,
-        string? expectedIssuerName = null)
+        string? expectedIssuerName = null, Uri? expectedCredentialId = null)
     {
         verifiedCredentialId = null;
         ArgumentNullException.ThrowIfNull(jwt);
@@ -148,7 +151,10 @@ public static class Vcdm20JoseCredential
             credential.EnumerateObject().Count() != (requiresCredentialId ? 7 : 6) ||
             (requiresCredentialId &&
                 (!StrictJwtReader.TryGetString(credential, "id", out string signedId) ||
-                 !ValidCanonicalCredentialId(signedId))) ||
+                 !ValidCanonicalCredentialId(signedId) ||
+                 (expectedCredentialId is not null &&
+                     !string.Equals(signedId, expectedCredentialId.AbsoluteUri,
+                         StringComparison.Ordinal)))) ||
             credential.TryGetProperty("vc", out _) ||
             credential.TryGetProperty("vp", out _) ||
             !MatchesExpectedIssuer(credential, trustedIssuerDid, expectedIssuerName) ||
@@ -235,6 +241,43 @@ public static class Vcdm20JoseCredential
                 expectedCredentialType, expectedSubjectContextUri, now,
                 out verifiedSubject, out _, requiresCredentialId: false,
                 expectedIssuerName: expectedIssuerName);
+    }
+
+    /// <summary>
+    /// Opt-in directly signed VC2 named issuer and credential id combination.
+    /// The issuer's descriptive name is not real-world identity evidence.
+    /// </summary>
+    public static string CreateWithNamedIssuerAndId(
+        string issuerDid, string issuerName, string holderDid,
+        string credentialType, Uri subjectContextUri, JsonElement credentialSubject,
+        byte[] issuerPrivateKey, DateTimeOffset validFrom, DateTimeOffset validUntil,
+        Uri credentialId)
+    {
+        ArgumentNullException.ThrowIfNull(issuerName);
+        ArgumentNullException.ThrowIfNull(credentialId);
+        return CreateCore(issuerDid, holderDid, credentialType, subjectContextUri,
+            credentialSubject, issuerPrivateKey, validFrom, validUntil,
+            credentialId, issuerName);
+    }
+
+    /// <summary>
+    /// Release claims only when independently pinned issuer DID, issuer name
+    /// and original signed credential id all match the authentic JWT.
+    /// </summary>
+    public static bool TryVerifyNamedIssuerWithId(
+        string jwt, string trustedIssuerDid, string expectedIssuerName,
+        string expectedHolderDid, string expectedCredentialType,
+        Uri expectedSubjectContextUri, Uri expectedCredentialId,
+        DateTimeOffset now, out JsonElement verifiedSubject)
+    {
+        verifiedSubject = default;
+        return ValidIssuerName(expectedIssuerName) &&
+            ValidCredentialId(expectedCredentialId) &&
+            TryVerifyCore(jwt, trustedIssuerDid, expectedHolderDid,
+                expectedCredentialType, expectedSubjectContextUri, now,
+                out verifiedSubject, out _, requiresCredentialId: true,
+                expectedIssuerName: expectedIssuerName,
+                expectedCredentialId: expectedCredentialId);
     }
 
     private static bool MatchesExpectedIssuer(
