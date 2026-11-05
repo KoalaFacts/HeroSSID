@@ -327,3 +327,67 @@ maintain exact retired-issuer pins, update its own issuer allowlist and apply
 revocation/incident policy. No private-key custody, real identity, domain
 ownership, actual end-user consent, Agent/business authority, third-party
 Wallet test, DID hosting or production deployment is performed.
+
+
+## Verifier-pinned did:web Ed25519 key-possession challenge (opt-in SDK)
+
+A verifier that already **independently pinned** an operator's DID and
+32-byte Ed25519 public key can check that a remote operator controls its
+corresponding private key. This is useful before manually approving the
+`#key-2` successor in an operator-controlled rotation. It is **not** a
+DID ownership proof, W3C verifiable credential or automatic trust enrollment.
+
+```csharp
+using System.Security.Cryptography;
+using HeroSSID.DidOperations.DidMethods;
+using NSec.Cryptography;
+
+// Verifier's own policy must have already approved these exact values.
+string did = "did:web:issuer.example.org";
+string fragment = "#key-2";
+var audience = new Uri("https://verifier.example.org/key-control");
+byte[] pinnedSuccessorPublicKey = /* 32 pre-enrolled bytes */ [];
+byte[] nonce = RandomNumberGenerator.GetBytes(32);
+DateTimeOffset issued = DateTimeOffset.UtcNow;
+DateTimeOffset expires = issued.AddMinutes(3);
+
+// Store (nonce, DID, fragment, audience, expiry) in a verifier-owned
+// atomic one-use challenge store BEFORE requesting the signature.
+byte[] toSign = DidWebPinnedKeyControlProof.CreateSigningInput(
+    did, fragment, audience, nonce, issued, expires);
+
+// Transfer toSign to the independently operating key holder.
+// The holder uses its own signer: Ed25519.Sign(privateKey, toSign).
+// Do not transmit the holder's private key or seed.
+byte[] signedByHolder = /* returned 64-byte Ed25519 signature */ [];
+
+// Only while the matching verifier-owned nonce remains active; consume it
+// atomically on success. TryVerify itself intentionally owns no replay store.
+bool controlsPinnedKey = DidWebPinnedKeyControlProof.TryVerify(
+    did, fragment, audience, nonce, issued, expires,
+    DateTimeOffset.UtcNow, pinnedSuccessorPublicKey, signedByHolder);
+```
+
+The v1 signing bytes are a UTF-8 JSON string array, in exactly this order:
+`["HeroSSID/did:web/pinned-key-possession/v1", did, fragment,
+audience.AbsoluteUri, base64(32-byte nonce), issued UTC round-trip,
+expires UTC round-trip]`. The verifier chooses a new cryptographically
+unpredictable nonce for **every** request, retains the original parameters,
+and accepts no more than five minutes between issuance and expiry. Both
+`#key-1` and `#key-2` require a separately pinned 32-byte public key.
+Verification rejects other DID profiles, fragments, HTTP audiences,
+embedded URI credentials/fragments, malformed signatures, changed bindings,
+not-yet-active and expired challenges. The private seed never enters the
+verifier API.
+
+**Mandatory relying-party duties:** independently enroll the DID, expected
+public key and HTTPS verifier audience; deliver the signing input securely
+to an independently controlled signer; keep a durable one-use challenge
+store shared across any replicas; atomically consume the exact nonce for
+an accepted proof; cap challenge issuance and log rotation decisions;
+establish authority for any trust policy change independently. The SDK
+does **not** provide HTTP challenge hosting, remote key signing, consent UI,
+replay storage, DNS control, actual domain ownership, issuer trust promotion,
+historical credential validity, human/organisation identity verification,
+Agent delegation or business authorization. No third-party wallet/standards
+interoperability is claimed.
