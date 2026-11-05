@@ -168,13 +168,19 @@ public static class Vcdm20SignedIdWalletDisclosure
         // request/status expiry after the underlying holder signer rechecked
         // them. Use a final clock sample to gate all three originals together.
         // The snapshot authenticator does NOT validate credential lifetime.
-        DateTimeOffset finalNow = clock.GetUtcNow();
         if (!OfflineSignedPresentationRequest.TryReadPolicyBound(
                 signedRequestJwt, preview.VerifierDid, preview.Audience,
                 preview.CredentialType, preview.ContextUri, clock,
                 out PresentationChallenge? challenge) ||
-            challenge is null || challenge.ExpiresAt != preview.RequestExpiresAt ||
-            challenge.ExpiresAt <= finalNow ||
+            challenge is null || challenge.ExpiresAt != preview.RequestExpiresAt)
+        {
+            throw new ArgumentException(
+                "The original verifier request expired during holder signing.",
+                nameof(signedRequestJwt));
+        }
+
+        DateTimeOffset finalNow = clock.GetUtcNow();
+        if (challenge.ExpiresAt <= finalNow ||
             Vcdm20RevocationSnapshot.CheckWithObservationCutoff(
                 issuerSnapshotJwt, credentialJwt, preview.IssuerDid,
                 finalNow, preview.MinimumObservedAtUtc) !=
