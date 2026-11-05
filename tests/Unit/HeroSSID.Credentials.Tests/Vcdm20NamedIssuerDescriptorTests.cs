@@ -156,7 +156,7 @@ public sealed class Vcdm20NamedIssuerDescriptorTests
                 StringComparison.Ordinal),
             payload.Replace(
                 "\"name\":\"" + Name + "\"",
-                "\"name\":\"" + Name.ToLowerInvariant() + "\"",
+                "\"name\":\"" + Name.ToUpperInvariant() + "\"",
                 StringComparison.Ordinal)
         ];
 
