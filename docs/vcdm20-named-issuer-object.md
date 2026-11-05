@@ -70,7 +70,8 @@ tampered signature must fail closed with an undefined subject. The signing
 method also verifies its newly produced JWT against the same strict policy
 and rejects a seed that does not control the issuer DID.
 
-This **eight-member** direct-VC2 subset is separate from both legacy
+This **seven-member** direct-VC2 subset (the signed issuer object remains
+a single top-level member) is separate from both legacy
 string-issuer verification and the previous six/seven-member issuer-object /
 signed-ID profiles. Those verifiers deliberately continue to reject the
 combined shape instead of silently accepting additional signed members.
