@@ -109,6 +109,40 @@ public sealed class DidWebPinnedRetiredKeyControlVerifierTests
             cancellationToken: TestContext.Current.CancellationToken));
     }
 
+    [Fact]
+    public async Task AwaitingHttpsCannotSubstituteCallerOwnedNonceAndSignatureArraysAsync()
+    {
+        using Key old = Key.Create(SignatureAlgorithm.Ed25519);
+        using Key next = Key.Create(SignatureAlgorithm.Ed25519);
+        byte[] oldPin = PublicKey(old);
+        byte[] newPin = PublicKey(next);
+        var verifier = NewVerifier(oldPin, newPin);
+        DidWebPinnedKeyControlChallenge challenge = verifier.Issue();
+        byte[] nonce = challenge.GetNonce();
+        byte[] signature = SignatureAlgorithm.Ed25519.Sign(next, challenge.GetSigningInput());
+        string document = DidWebPinnedKeyRetirement.CreateRetirementDocument(Did, oldPin, newPin);
+        using var handler = new FakeHandler(_ =>
+        {
+            // Mutation after API entry but before the HTTPS call completes.
+            nonce[0] ^= 1;
+            signature[0] ^= 1;
+            return Published(document);
+        });
+        using var http = new HttpClient(handler);
+        Assert.True(await verifier.TryVerifyAndConsumeAsync(nonce, signature, http,
+            cancellationToken: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public void RejectsNonDistinctAndMalformedPreapprovedRetirementPins()
+    {
+        using Key next = Key.Create(SignatureAlgorithm.Ed25519);
+        byte[] key = PublicKey(next);
+        Assert.Throws<ArgumentException>(() => NewVerifier(key, key));
+        Assert.Throws<ArgumentException>(() => NewVerifier(new byte[31], key));
+        Assert.Throws<ArgumentException>(() => NewVerifier(key, new byte[31]));
+    }
+
     private static byte[] PublicKey(Key key) =>
         key.PublicKey.Export(KeyBlobFormat.RawPublicKey);
 
