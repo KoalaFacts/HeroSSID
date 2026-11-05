@@ -38,6 +38,47 @@ exact type, context and holder. On any failed verification the returned
 subject remains undefined. The existing `Create` and `TryVerify` accept
 only the **old string form**; they are not broadened or silently changed.
 
+## Named issuer plus exact signed credential identifier
+
+A separate opt-in profile combines the same **two-member signed issuer object**
+with a canonical HTTPS `id` at the **top level** of the signed VC2 payload.
+This is the credential identifier, not `credentialSubject.id`; it is a
+potential cross-presentation correlation identifier, not an issuer enrollment
+record or trust anchor.
+
+```csharp
+string signed = Vcdm20JoseCredential.CreateWithNamedIssuerAndId(
+    issuerDid, "Example Membership Issuer", holderDid,
+    "MembershipCredential", subjectContextUri, subjectJson,
+    issuerPrivateSeed, validFrom, validUntil,
+    new Uri("https://issuer.example/credentials/member/001"));
+
+bool accepted = Vcdm20JoseCredential.TryVerifyNamedIssuerWithId(
+    signed, independentlyTrustedIssuerDid, "Example Membership Issuer",
+    independentlyExpectedHolderDid, "MembershipCredential",
+    independentlyPinnedSubjectContextUri,
+    independentlyPinnedCredentialId, verificationTime,
+    out JsonElement verifiedSubject);
+```
+
+The verifier independently pins the full HTTPS credential ID as well as the
+exact issuer DID, signed descriptive name, holder DID, type, HTTPS context and
+verification time. It checks the original Ed25519 JWT signature before
+releasing claims. An unrelated genuinely signed credential ID, a mismatched
+issuer name, invalid time interval, wrong holder, malformed payload or
+tampered signature must fail closed with an undefined subject. The signing
+method also verifies its newly produced JWT against the same strict policy
+and rejects a seed that does not control the issuer DID.
+
+This **eight-member** direct-VC2 subset is separate from both legacy
+string-issuer verification and the previous six/seven-member issuer-object /
+signed-ID profiles. Those verifiers deliberately continue to reject the
+combined shape instead of silently accepting additional signed members.
+The profile does not independently certify VCDM 2.0 JSON-LD semantics or
+third-party wallet interoperability. Credential ID and issuer name still
+provide no proof of legal identity, holder possession, actual informed consent,
+live revocation or business authorization.
+
 ## Security and interoperability boundaries
 
 An issuer-signed **name** is a descriptive assertion, not independent proof
