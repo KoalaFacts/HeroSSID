@@ -33,7 +33,15 @@ public static class Vcdm20JoseCredential
     public static string Create(
         string issuerDid, string holderDid, string credentialType,
         Uri subjectContextUri, JsonElement credentialSubject,
-        byte[] issuerPrivateKey, DateTimeOffset validFrom, DateTimeOffset validUntil)
+        byte[] issuerPrivateKey, DateTimeOffset validFrom, DateTimeOffset validUntil) =>
+        CreateCore(issuerDid, holderDid, credentialType, subjectContextUri,
+            credentialSubject, issuerPrivateKey, validFrom, validUntil, null);
+
+    private static string CreateCore(
+        string issuerDid, string holderDid, string credentialType,
+        Uri subjectContextUri, JsonElement credentialSubject,
+        byte[] issuerPrivateKey, DateTimeOffset validFrom, DateTimeOffset validUntil,
+        Uri? credentialId)
     {
         ArgumentNullException.ThrowIfNull(issuerDid);
         ArgumentNullException.ThrowIfNull(holderDid);
@@ -45,6 +53,7 @@ public static class Vcdm20JoseCredential
             !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(holderDid, out _) ||
             !ValidType(credentialType) ||
             !ValidContext(subjectContextUri) ||
+            (credentialId is not null && !ValidCredentialId(credentialId)) ||
             issuerPrivateKey.Length != 32 ||
             issuerPrivateKey.All(static b => b == 0) ||
             validUntil <= validFrom ||
@@ -63,7 +72,7 @@ public static class Vcdm20JoseCredential
             cty = "vc",
             kid = KeyId(issuerDid)
         });
-        string payload = JsonSerializer.Serialize(new Dictionary<string, object?>(StringComparer.Ordinal)
+        var credentialClaims = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["@context"] = new[] { BaseContext, subjectContextUri.AbsoluteUri },
             ["type"] = new[] { CredentialBaseType, credentialType },
@@ -71,13 +80,23 @@ public static class Vcdm20JoseCredential
             ["validFrom"] = FormatDate(validFrom),
             ["validUntil"] = FormatDate(validUntil),
             ["credentialSubject"] = credentialSubject
-        });
+        };
+        if (credentialId is not null)
+        {
+            // Signed VC 2.0 top-level id, distinct from credentialSubject.id.
+            credentialClaims["id"] = credentialId.AbsoluteUri;
+        }
+
+        string payload = JsonSerializer.Serialize(credentialClaims);
         string jwt = Ed25519JwtSigner.CreateSignedJwt(header, payload, issuerPrivateKey);
 
         // Reject mismatched issuer seeds and ambiguous serialized claims before release.
-        if (jwt.Length > MaximumJwtLength ||
-            !TryVerify(jwt, issuerDid, holderDid, credentialType,
-                subjectContextUri, validFrom, out _))
+        bool verified = credentialId is null
+            ? TryVerify(jwt, issuerDid, holderDid, credentialType,
+                subjectContextUri, validFrom, out _)
+            : TryVerifyWithId(jwt, issuerDid, holderDid, credentialType,
+                subjectContextUri, validFrom, out _, out _);
+        if (jwt.Length > MaximumJwtLength || !verified)
         {
             throw new ArgumentException("The supplied issuer key or credential data cannot produce a valid VC2 artifact.", nameof(issuerPrivateKey));
         }
@@ -95,8 +114,17 @@ public static class Vcdm20JoseCredential
     public static bool TryVerify(
         string jwt, string trustedIssuerDid, string expectedHolderDid,
         string expectedCredentialType, Uri expectedSubjectContextUri,
-        DateTimeOffset now, out JsonElement verifiedSubject)
+        DateTimeOffset now, out JsonElement verifiedSubject) =>
+        TryVerifyCore(jwt, trustedIssuerDid, expectedHolderDid, expectedCredentialType,
+            expectedSubjectContextUri, now, out verifiedSubject, out _, false);
+
+    private static bool TryVerifyCore(
+        string jwt, string trustedIssuerDid, string expectedHolderDid,
+        string expectedCredentialType, Uri expectedSubjectContextUri,
+        DateTimeOffset now, out JsonElement verifiedSubject,
+        out string? verifiedCredentialId, bool requiresCredentialId)
     {
+        verifiedCredentialId = null;
         ArgumentNullException.ThrowIfNull(jwt);
         ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
         verifiedSubject = default;
@@ -111,7 +139,10 @@ public static class Vcdm20JoseCredential
             // members. In particular it cannot enforce general credentialStatus,
             // proof or evidence semantics; do not authenticate and silently ignore
             // unimplemented signed policy fields before returning subject claims.
-            credential.EnumerateObject().Count() != 6 ||
+            credential.EnumerateObject().Count() != (requiresCredentialId ? 7 : 6) ||
+            (requiresCredentialId &&
+                (!StrictJwtReader.TryGetString(credential, "id", out string signedId) ||
+                 !ValidCanonicalCredentialId(signedId))) ||
             credential.TryGetProperty("vc", out _) ||
             credential.TryGetProperty("vp", out _) ||
             !StrictJwtReader.TryGetString(credential, "issuer", out var signedIssuer) ||
@@ -132,6 +163,8 @@ public static class Vcdm20JoseCredential
         }
 
         verifiedSubject = subject.Clone();
+        verifiedCredentialId = requiresCredentialId
+            ? credential.GetProperty("id").GetString() : null;
         return true;
     }
 
@@ -145,7 +178,11 @@ public static class Vcdm20JoseCredential
         Uri subjectContextUri, JsonElement credentialSubject,
         byte[] issuerPrivateKey, DateTimeOffset validFrom,
         DateTimeOffset validUntil, Uri credentialId)
-        => throw new NotSupportedException("VC2 issuer-signed credential id is not implemented.");
+    {
+        ArgumentNullException.ThrowIfNull(credentialId);
+        return CreateCore(issuerDid, holderDid, credentialType, subjectContextUri,
+            credentialSubject, issuerPrivateKey, validFrom, validUntil, credentialId);
+    }
 
     /// <summary>
     /// Opt-in verification of the original signed VCDM 2.0 credential id
@@ -157,11 +194,9 @@ public static class Vcdm20JoseCredential
         string expectedCredentialType, Uri expectedSubjectContextUri,
         DateTimeOffset now, out JsonElement verifiedSubject,
         out string? verifiedCredentialId)
-    {
-        verifiedSubject = default;
-        verifiedCredentialId = null;
-        throw new NotSupportedException("VC2 issuer-signed credential id is not implemented.");
-    }
+        => TryVerifyCore(jwt, trustedIssuerDid, expectedHolderDid, expectedCredentialType,
+            expectedSubjectContextUri, now, out verifiedSubject,
+            out verifiedCredentialId, true);
 
     private static bool HasExactArray(JsonElement element, string name, string first, string second)
     {
@@ -195,6 +230,19 @@ public static class Vcdm20JoseCredential
 
     private static string KeyId(string issuerDid) =>
         issuerDid + "#" + issuerDid["did:key:".Length..];
+
+    private static bool ValidCanonicalCredentialId(string id) =>
+        id.Length <= 2_048 &&
+        Uri.TryCreate(id, UriKind.Absolute, out Uri? uri) &&
+        ValidCredentialId(uri) &&
+        string.Equals(uri.AbsoluteUri, id, StringComparison.Ordinal);
+
+    private static bool ValidCredentialId(Uri? uri) =>
+        uri is { IsAbsoluteUri: true } &&
+        string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) &&
+        !string.IsNullOrWhiteSpace(uri.Host) &&
+        string.IsNullOrEmpty(uri.UserInfo) &&
+        uri.AbsoluteUri.Length <= 2_048;
 
     private static bool ValidContext(Uri? uri) =>
         uri is { IsAbsoluteUri: true } &&
