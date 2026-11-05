@@ -27,51 +27,8 @@ public static class Vcdm20SignedClaimPresentation
         TimeProvider clock, out string verifiedIssuerDid,
         out JsonElement verifiedSubject)
     {
-        ArgumentNullException.ThrowIfNull(presentationJwt);
-        ArgumentNullException.ThrowIfNull(expectedContextUri);
-        ArgumentNullException.ThrowIfNull(challenges);
-        ArgumentNullException.ThrowIfNull(trustedIssuerDids);
-        ArgumentNullException.ThrowIfNull(expectedHolderDid);
-        ArgumentNullException.ThrowIfNull(expectedCredentialId);
-        ArgumentNullException.ThrowIfNull(requiredSubjectClaims);
-        ArgumentNullException.ThrowIfNull(clock);
-
         verifiedIssuerDid = string.Empty;
         verifiedSubject = default;
-
-        // This inner verifier validates both issuer and holder Ed25519
-        // signatures against the verifier-owned challenge's pinned issuer,
-        // nonce, audience, tenant and expiry, and atomically consumes it.
-        // It returns the original issuer-signed credential and actual holder
-        // only after successful one-use verification.
-        if (Vcdm20JosePresentation.CheckWithAuthenticatedOriginalSignedId(
-                presentationJwt, verifierTenantId, expectedAudience,
-                expectedNonce, expectedCredentialType, expectedContextUri,
-                expectedCredentialId, challenges, clock, out _, out string originalCredentialJwt,
-                out string actualHolderDid) !=
-            Vcdm20PresentationCheckResult.SignedButStatusUnchecked ||
-            !string.Equals(actualHolderDid, expectedHolderDid,
-                StringComparison.Ordinal))
-        {
-            return Vcdm20PresentationCheckResult.Invalid;
-        }
-
-        // Recheck the original JWT with an INDEPENDENT issuer allowlist,
-        // the verifier-pinned top-level credential ID, the exact holder,
-        // context, type, lifetime and 1–16 exact string claims. No subject
-        // escapes if even one check fails. This is not a status lookup or
-        // an entitlement decision.
-        if (!Vcdm20TrustedIssuerVerifier.TryVerifyWithIdAndRequiredClaims(
-                originalCredentialJwt, trustedIssuerDids, expectedHolderDid,
-                expectedCredentialType, expectedContextUri,
-                expectedCredentialId, requiredSubjectClaims, clock.GetUtcNow(),
-                out string issuer, out JsonElement subject))
-        {
-            return Vcdm20PresentationCheckResult.Invalid;
-        }
-
-        verifiedIssuerDid = issuer;
-        verifiedSubject = subject;
-        return Vcdm20PresentationCheckResult.SignedButStatusUnchecked;
+        throw new NotSupportedException("Corrected RED: signed-ID holder claim policy intentionally unimplemented.");
     }
 }
