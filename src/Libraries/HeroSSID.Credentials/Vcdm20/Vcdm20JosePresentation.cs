@@ -55,10 +55,27 @@ public static class Vcdm20JosePresentation
             credentialJwt, expectedCredentialType, expectedContextUri,
             holderDid, holderSeed, clock, bindOriginalRequest: false);
 
+    /// <summary>
+    /// Explicit opt-in holder presentation of an issuer-signed VC2 JWT with a
+    /// top-level credential id, pinned independently by the holder application.
+    /// The legacy Create method intentionally stays six-field only.
+    /// </summary>
+    public static string CreateWithSignedCredentialId(
+        string signedRequestJwt, string trustedVerifierDid, string expectedAudience,
+        string credentialJwt, string expectedCredentialType, Uri expectedContextUri,
+        Uri expectedCredentialId, string holderDid, byte[] holderSeed, TimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(expectedCredentialId);
+        return CreateCore(signedRequestJwt, trustedVerifierDid, expectedAudience,
+            credentialJwt, expectedCredentialType, expectedContextUri,
+            holderDid, holderSeed, clock, bindOriginalRequest: false, expectedCredentialId);
+    }
+
     private static string CreateCore(
         string signedRequestJwt, string trustedVerifierDid, string expectedAudience,
         string credentialJwt, string expectedCredentialType, Uri expectedContextUri,
-        string holderDid, byte[] holderSeed, TimeProvider clock, bool bindOriginalRequest)
+        string holderDid, byte[] holderSeed, TimeProvider clock, bool bindOriginalRequest,
+        Uri? expectedCredentialId = null)
     {
         ArgumentNullException.ThrowIfNull(expectedContextUri);
         ArgumentNullException.ThrowIfNull(holderSeed);
@@ -82,9 +99,9 @@ public static class Vcdm20JosePresentation
         var now = clock.GetUtcNow();
         if (holderSeed.Length != 32 || holderSeed.All(static b => b == 0) ||
             !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(holderDid, out var holderPublicKey) ||
-            !Vcdm20JoseCredential.TryVerify(
-                credentialJwt, challenge.TrustedIssuerDid, holderDid,
-                expectedCredentialType, expectedContextUri, now, out _) ||
+            !VerifyCredential(credentialJwt, challenge.TrustedIssuerDid, holderDid,
+                expectedCredentialType, expectedContextUri, now,
+                expectedCredentialId, out _) ||
             !TryReadCredentialExpiry(credentialJwt, out var credentialUntil))
         {
             throw new ArgumentException("A real holder key and valid issuer-signed VC2 credential are required.", nameof(credentialJwt));
@@ -192,6 +209,26 @@ public static class Vcdm20JosePresentation
             challenges, clock, null, out verifiedSubject, out credentialJwt, out holderDid);
 
     /// <summary>
+    /// Internal signed-id counterpart for the opt-in composite member policy.
+    /// It atomically consumes the challenge only after verifying the holder
+    /// and original credential against the verifier's exact credential ID.
+    /// The older six-field-only verification path remains unchanged.
+    /// </summary>
+    internal static Vcdm20PresentationCheckResult CheckWithAuthenticatedOriginalSignedId(
+        string presentationJwt, Guid verifierTenantId, string expectedAudience,
+        string expectedNonce, string expectedCredentialType, Uri expectedContextUri,
+        Uri expectedCredentialId, IPresentationChallengeStore challenges,
+        TimeProvider clock, out JsonElement verifiedSubject,
+        out string credentialJwt, out string holderDid)
+    {
+        ArgumentNullException.ThrowIfNull(expectedCredentialId);
+        return CheckCore(presentationJwt, verifierTenantId, expectedAudience,
+            expectedNonce, expectedCredentialType, expectedContextUri,
+            challenges, clock, null, out verifiedSubject, out credentialJwt,
+            out holderDid, expectedCredentialId);
+    }
+
+    /// <summary>
     /// Require the verifier's independently retained SHA-256 pin of the EXACT
     /// original eight-field policy-bound request, its genuine Ed25519 signature,
     /// the pinned verifier DID, type/context, and a matching live tenant-owned
@@ -293,7 +330,8 @@ public static class Vcdm20JosePresentation
         string expectedNonce, string expectedCredentialType, Uri expectedContextUri,
         IPresentationChallengeStore challenges, TimeProvider clock,
         string? requiredHolderSignedRequestSha256, out JsonElement verifiedSubject,
-        out string authenticatedCredentialJwt, out string authenticatedHolderDid)
+        out string authenticatedCredentialJwt, out string authenticatedHolderDid,
+        Uri? expectedCredentialId = null)
     {
         authenticatedCredentialJwt = string.Empty;
         authenticatedHolderDid = string.Empty;
@@ -344,8 +382,9 @@ public static class Vcdm20JosePresentation
         if (issuedAt > current || expiresAt <= current || expiresAt <= issuedAt ||
             expiresAt - issuedAt > 300 ||
             expiresAt > PresentationChallengePolicy.NumericDate(challenge.ExpiresAt) ||
-            !Vcdm20JoseCredential.TryVerify(credentialJwt, challenge.TrustedIssuerDid,
-                holderDid, expectedCredentialType, expectedContextUri, now, out var subject) ||
+            !VerifyCredential(credentialJwt, challenge.TrustedIssuerDid, holderDid,
+                expectedCredentialType, expectedContextUri, now,
+                expectedCredentialId, out var subject) ||
             !TryReadCredentialExpiry(credentialJwt, out var credentialUntil) ||
             expiresAt > PresentationChallengePolicy.NumericDate(credentialUntil))
         {
@@ -364,8 +403,9 @@ public static class Vcdm20JosePresentation
         now = clock.GetUtcNow();
         if (challenge.ExpiresAt <= now ||
             expiresAt <= PresentationChallengePolicy.NumericDate(now) ||
-            !Vcdm20JoseCredential.TryVerify(credentialJwt, challenge.TrustedIssuerDid,
-                holderDid, expectedCredentialType, expectedContextUri, now, out _))
+            !VerifyCredential(credentialJwt, challenge.TrustedIssuerDid, holderDid,
+                expectedCredentialType, expectedContextUri, now,
+                expectedCredentialId, out _))
         {
             return Vcdm20PresentationCheckResult.Invalid;
         }
@@ -374,6 +414,32 @@ public static class Vcdm20JosePresentation
         authenticatedCredentialJwt = credentialJwt;
         authenticatedHolderDid = holderDid;
         return Vcdm20PresentationCheckResult.SignedButStatusUnchecked;
+    }
+
+    private static bool VerifyCredential(
+        string credentialJwt, string trustedIssuerDid, string holderDid,
+        string credentialType, Uri contextUri, DateTimeOffset now,
+        Uri? expectedCredentialId, out JsonElement verifiedSubject)
+    {
+        if (expectedCredentialId is null)
+        {
+            return Vcdm20JoseCredential.TryVerify(
+                credentialJwt, trustedIssuerDid, holderDid,
+                credentialType, contextUri, now, out verifiedSubject);
+        }
+
+        // Never accept an identifier copied from the JWT as trusted input.
+        // A signed-id token must match exactly the independently pinned URI.
+        verifiedSubject = default;
+        return expectedCredentialId.IsAbsoluteUri &&
+            string.Equals(expectedCredentialId.Scheme, Uri.UriSchemeHttps,
+                StringComparison.Ordinal) &&
+            Vcdm20JoseCredential.TryVerifyWithId(
+                credentialJwt, trustedIssuerDid, holderDid,
+                credentialType, contextUri, now, out verifiedSubject,
+                out string? signedId) &&
+            string.Equals(signedId, expectedCredentialId.AbsoluteUri,
+                StringComparison.Ordinal);
     }
 
     private static bool TryReadUntrustedHolder(string jwt, out string holderDid)
