@@ -182,6 +182,7 @@ public sealed class Vcdm20SignedClaimStatusTests
                     "MembershipCredential", Context, store, [issuer.Did],
                     holder.Did, CredentialId, policy, now.AddSeconds(-5),
                     verificationClock, out string actualIssuer, out JsonElement actualSubject);
+            Assert.True(verificationClock.Reads <= stableClockReads, $"Unexpected early expiry clock read: {verificationClock.Reads}; status={result}");
             Assert.Equal(Vcdm20RevocationCheckResult.Invalid, result);
             Assert.Equal(string.Empty, actualIssuer);
             Assert.Equal(JsonValueKind.Undefined, actualSubject.ValueKind);
@@ -194,6 +195,7 @@ public sealed class Vcdm20SignedClaimStatusTests
                     "MembershipCredential", Context, store, [issuer.Did],
                     holder.Did, CredentialId, policy, verificationClock,
                     out string actualIssuer, out JsonElement actualSubject);
+            Assert.True(verificationClock.Reads <= stableClockReads, $"Unexpected early expiry clock read: {verificationClock.Reads}; presentation={result}");
             Assert.Equal(Vcdm20PresentationCheckResult.Invalid, result);
             Assert.Equal(string.Empty, actualIssuer);
             Assert.Equal(JsonValueKind.Undefined, actualSubject.ValueKind);
@@ -204,6 +206,8 @@ public sealed class Vcdm20SignedClaimStatusTests
         DateTimeOffset initial, int stableReads, TimeSpan advance) : TimeProvider
     {
         private int _reads;
+
+        public int Reads => global::System.Threading.Volatile.Read(ref _reads);
 
         public override DateTimeOffset GetUtcNow() =>
             global::System.Threading.Interlocked.Increment(ref _reads) <= stableReads
