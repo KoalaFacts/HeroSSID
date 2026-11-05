@@ -116,6 +116,29 @@ public sealed class Vcdm20RecipientBoundStatusPresentationTests
         Assert.Equal("active", subject.GetProperty("membership").GetString());
     }
 
+    [Fact]
+    public void UntrustedVerifierRequestDigestCannotSpendTheRealNonce()
+    {
+        var (tenant, store, challenge, request) = Request();
+        string vp = Present(request, Issue(Recipient));
+        string snapshot = Snapshot([]);
+        string wrongPin = new string('0', 64);
+        Assert.NotEqual(Digest(request), wrongPin);
+
+        Assert.Equal(Vcdm20RevocationCheckResult.Invalid,
+            Vcdm20RevocationSnapshot.CheckRecipientBoundPresentationWithIssuerStatus(
+                vp, request, wrongPin, _verifier.Did, snapshot, tenant,
+                Audience, challenge.Nonce, CredentialType, Context,
+                CredentialId, Recipient, DateTimeOffset.UnixEpoch,
+                store, _clock, out var denied));
+        Assert.Equal(JsonValueKind.Undefined, denied.ValueKind);
+
+        Assert.Equal(Vcdm20RevocationCheckResult.SignedNotListed,
+            Check(vp, request, snapshot, tenant, challenge, store,
+                CredentialId, Recipient, DateTimeOffset.UnixEpoch, out var subject));
+        Assert.Equal("active", subject.GetProperty("membership").GetString());
+    }
+
     private (Guid Tenant, InMemoryPresentationChallengeStore Store,
         PresentationChallenge Challenge, string SignedRequest) Request()
     {
