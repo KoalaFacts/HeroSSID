@@ -41,7 +41,7 @@ public static class Vcdm20JoseCredential
         string issuerDid, string holderDid, string credentialType,
         Uri subjectContextUri, JsonElement credentialSubject,
         byte[] issuerPrivateKey, DateTimeOffset validFrom, DateTimeOffset validUntil,
-        Uri? credentialId)
+        Uri? credentialId, string? issuerName = null)
     {
         ArgumentNullException.ThrowIfNull(issuerDid);
         ArgumentNullException.ThrowIfNull(holderDid);
@@ -53,6 +53,7 @@ public static class Vcdm20JoseCredential
             !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(holderDid, out _) ||
             !ValidType(credentialType) ||
             !ValidContext(subjectContextUri) ||
+            (issuerName is not null && !ValidIssuerName(issuerName)) ||
             (credentialId is not null && !ValidCredentialId(credentialId)) ||
             issuerPrivateKey.Length != 32 ||
             issuerPrivateKey.All(static b => b == 0) ||
@@ -76,7 +77,7 @@ public static class Vcdm20JoseCredential
         {
             ["@context"] = new[] { BaseContext, subjectContextUri.AbsoluteUri },
             ["type"] = new[] { CredentialBaseType, credentialType },
-            ["issuer"] = issuerDid,
+            ["issuer"] = issuerName is null ? (object)issuerDid : new { id = issuerDid, name = issuerName },
             ["validFrom"] = FormatDate(validFrom),
             ["validUntil"] = FormatDate(validUntil),
             ["credentialSubject"] = credentialSubject
@@ -91,11 +92,14 @@ public static class Vcdm20JoseCredential
         string jwt = Ed25519JwtSigner.CreateSignedJwt(header, payload, issuerPrivateKey);
 
         // Reject mismatched issuer seeds and ambiguous serialized claims before release.
-        bool verified = credentialId is null
-            ? TryVerify(jwt, issuerDid, holderDid, credentialType,
-                subjectContextUri, validFrom, out _)
-            : TryVerifyWithId(jwt, issuerDid, holderDid, credentialType,
-                subjectContextUri, validFrom, out _, out _);
+        bool verified = issuerName is not null
+            ? TryVerifyNamedIssuer(jwt, issuerDid, issuerName, holderDid,
+                credentialType, subjectContextUri, validFrom, out _)
+            : credentialId is null
+                ? TryVerify(jwt, issuerDid, holderDid, credentialType,
+                    subjectContextUri, validFrom, out _)
+                : TryVerifyWithId(jwt, issuerDid, holderDid, credentialType,
+                    subjectContextUri, validFrom, out _, out _);
         if (jwt.Length > MaximumJwtLength || !verified)
         {
             throw new ArgumentException("The supplied issuer key or credential data cannot produce a valid VC2 artifact.", nameof(issuerPrivateKey));
@@ -122,7 +126,8 @@ public static class Vcdm20JoseCredential
         string jwt, string trustedIssuerDid, string expectedHolderDid,
         string expectedCredentialType, Uri expectedSubjectContextUri,
         DateTimeOffset now, out JsonElement verifiedSubject,
-        out string? verifiedCredentialId, bool requiresCredentialId)
+        out string? verifiedCredentialId, bool requiresCredentialId,
+        string? expectedIssuerName = null)
     {
         verifiedCredentialId = null;
         ArgumentNullException.ThrowIfNull(jwt);
@@ -146,8 +151,7 @@ public static class Vcdm20JoseCredential
                  !ValidCanonicalCredentialId(signedId))) ||
             credential.TryGetProperty("vc", out _) ||
             credential.TryGetProperty("vp", out _) ||
-            !StrictJwtReader.TryGetString(credential, "issuer", out var signedIssuer) ||
-            !string.Equals(signedIssuer, trustedIssuerDid, StringComparison.Ordinal) ||
+            !MatchesExpectedIssuer(credential, trustedIssuerDid, expectedIssuerName) ||
             !HasExactArray(credential, "@context", BaseContext,
                 expectedSubjectContextUri.AbsoluteUri) ||
             !HasExactArray(credential, "type", CredentialBaseType, expectedCredentialType) ||
@@ -198,6 +202,69 @@ public static class Vcdm20JoseCredential
         => TryVerifyCore(jwt, trustedIssuerDid, expectedHolderDid, expectedCredentialType,
             expectedSubjectContextUri, now, out verifiedSubject,
             out verifiedCredentialId, true);
+
+    /// <summary>
+    /// Opt-in VCDM 2.0 issuer object with id and descriptive name, genuinely
+    /// signed by the issuer's Ed25519 seed. Name is NOT legal identity.
+    /// </summary>
+    public static string CreateWithNamedIssuer(
+        string issuerDid, string issuerName, string holderDid,
+        string credentialType, Uri subjectContextUri, JsonElement credentialSubject,
+        byte[] issuerPrivateKey, DateTimeOffset validFrom, DateTimeOffset validUntil)
+    {
+        ArgumentNullException.ThrowIfNull(issuerName);
+        return CreateCore(issuerDid, holderDid, credentialType, subjectContextUri,
+            credentialSubject, issuerPrivateKey, validFrom, validUntil,
+            credentialId: null, issuerName: issuerName);
+    }
+
+    /// <summary>
+    /// Require independently pinned issuer DID and exact signed descriptive
+    /// name; legacy string-only verification remains unchanged and strict.
+    /// Does not establish remote issuer enrollment or business authorization.
+    /// </summary>
+    public static bool TryVerifyNamedIssuer(
+        string jwt, string trustedIssuerDid, string expectedIssuerName,
+        string expectedHolderDid, string expectedCredentialType,
+        Uri expectedSubjectContextUri, DateTimeOffset now,
+        out JsonElement verifiedSubject)
+    {
+        verifiedSubject = default;
+        return ValidIssuerName(expectedIssuerName) &&
+            TryVerifyCore(jwt, trustedIssuerDid, expectedHolderDid,
+                expectedCredentialType, expectedSubjectContextUri, now,
+                out verifiedSubject, out _, requiresCredentialId: false,
+                expectedIssuerName: expectedIssuerName);
+    }
+
+    private static bool MatchesExpectedIssuer(
+        JsonElement credential, string trustedIssuerDid, string? expectedIssuerName)
+    {
+        if (expectedIssuerName is null)
+        {
+            return StrictJwtReader.TryGetString(credential, "issuer", out string issuer) &&
+                string.Equals(issuer, trustedIssuerDid, StringComparison.Ordinal);
+        }
+
+        if (!credential.TryGetProperty("issuer", out JsonElement descriptor) ||
+            descriptor.ValueKind != JsonValueKind.Object ||
+            descriptor.EnumerateObject().Count() != 2 ||
+            !StrictJwtReader.TryGetString(descriptor, "id", out string issuerId) ||
+            !StrictJwtReader.TryGetString(descriptor, "name", out string issuerName) ||
+            !ValidIssuerName(issuerName))
+        {
+            return false;
+        }
+
+        return string.Equals(issuerId, trustedIssuerDid, StringComparison.Ordinal) &&
+            string.Equals(issuerName, expectedIssuerName, StringComparison.Ordinal);
+    }
+
+    private static bool ValidIssuerName(string? issuerName) =>
+        !string.IsNullOrWhiteSpace(issuerName) &&
+        issuerName.Length <= 128 &&
+        string.Equals(issuerName.Trim(), issuerName, StringComparison.Ordinal) &&
+        !issuerName.Any(char.IsControl);
 
     private static bool HasExactArray(JsonElement element, string name, string first, string second)
     {
