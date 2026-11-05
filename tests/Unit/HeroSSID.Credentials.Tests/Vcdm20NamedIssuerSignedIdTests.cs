@@ -114,7 +114,7 @@ public sealed class Vcdm20NamedIssuerSignedIdTests
                 Now.AddMinutes(10), CredentialId));
     }
 
-    private bool Check(string jwt, string issuerDid, string issuerName, string holderDid,
+    private static bool Check(string jwt, string issuerDid, string issuerName, string holderDid,
         Uri id, DateTimeOffset now, out JsonElement subject) =>
         Vcdm20JoseCredential.TryVerifyNamedIssuerWithId(
             jwt, issuerDid, issuerName, holderDid, CredentialType,
