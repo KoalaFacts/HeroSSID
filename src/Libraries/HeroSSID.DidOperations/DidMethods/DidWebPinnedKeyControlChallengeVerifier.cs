@@ -119,8 +119,9 @@ public sealed class DidWebPinnedKeyControlChallengeVerifier
         lock (_gate)
         {
             DateTimeOffset now = _timeProvider.GetUtcNow();
+            long timestamp = _timeProvider.GetTimestamp();
             foreach (string expired in _entries
-                .Where(entry => entry.Value.ExpiresAt <= now)
+                .Where(entry => IsExpired(entry.Value, now, timestamp))
                 .Select(entry => entry.Key).ToArray())
             {
                 _entries.Remove(expired);
@@ -145,7 +146,7 @@ public sealed class DidWebPinnedKeyControlChallengeVerifier
             byte[] signingInput = DidWebPinnedKeyControlProof.CreateSigningInput(
                 _didIdentifier, _methodFragment, _verifierAudience, nonce, now, expiresAt);
 
-            _entries.Add(nonceKey, new ChallengeWindow(now, expiresAt));
+            _entries.Add(nonceKey, new ChallengeWindow(now, expiresAt, timestamp));
             return new DidWebPinnedKeyControlChallenge(nonce, signingInput, now, expiresAt);
         }
     }
@@ -163,7 +164,10 @@ public sealed class DidWebPinnedKeyControlChallengeVerifier
             return false;
         }
 
-        string nonceKey = Convert.ToHexString(nonce);
+        // The caller owns its input buffer and can mutate it while waiting for
+        // _gate. Keep lookup, verification and removal bound to one snapshot.
+        byte[] nonceSnapshot = (byte[])nonce.Clone();
+        string nonceKey = Convert.ToHexString(nonceSnapshot);
         lock (_gate)
         {
             if (!_entries.TryGetValue(nonceKey, out ChallengeWindow? window))
@@ -172,7 +176,8 @@ public sealed class DidWebPinnedKeyControlChallengeVerifier
             }
 
             DateTimeOffset now = _timeProvider.GetUtcNow();
-            if (now >= window.ExpiresAt)
+            long timestamp = _timeProvider.GetTimestamp();
+            if (IsExpired(window, now, timestamp))
             {
                 _entries.Remove(nonceKey);
                 return false;
@@ -180,7 +185,7 @@ public sealed class DidWebPinnedKeyControlChallengeVerifier
 
             if (now < window.IssuedAt ||
                 !DidWebPinnedKeyControlProof.TryVerify(
-                    _didIdentifier, _methodFragment, _verifierAudience, nonce,
+                    _didIdentifier, _methodFragment, _verifierAudience, nonceSnapshot,
                     window.IssuedAt, window.ExpiresAt, now, _pinnedPublicKey, signature))
             {
                 return false;
@@ -192,5 +197,13 @@ public sealed class DidWebPinnedKeyControlChallengeVerifier
         }
     }
 
-    private sealed record ChallengeWindow(DateTimeOffset IssuedAt, DateTimeOffset ExpiresAt);
+    // UTC is still signed and checked, but wall-clock corrections must never
+    // lengthen a live nonce. The TimeProvider timestamp is elapsed-time based.
+    private bool IsExpired(ChallengeWindow window, DateTimeOffset now, long timestamp) =>
+        now >= window.ExpiresAt ||
+        timestamp < window.IssuedTimestamp ||
+        _timeProvider.GetElapsedTime(window.IssuedTimestamp, timestamp) >= _lifetime;
+
+    private sealed record ChallengeWindow(
+        DateTimeOffset IssuedAt, DateTimeOffset ExpiresAt, long IssuedTimestamp);
 }
