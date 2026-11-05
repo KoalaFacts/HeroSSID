@@ -331,7 +331,43 @@ public sealed class OperatorDidWebPublisherTests
         Assert.Throws<InvalidOperationException>(() => NewPublisher(unexpected));
     }
 
-    private sealed class DidWebHttpFactory(byte[]? keyBytes, byte[]? successorKeyBytes = null) : WebApplicationFactory<Program>
+    [Fact]
+    public async Task ActualAnonymousRoutePublishesOnlyTheApprovedSuccessorAfterRetirement()
+    {
+        using var oldKey = Key.Create(SignatureAlgorithm.Ed25519);
+        using var successor = Key.Create(SignatureAlgorithm.Ed25519);
+        byte[] oldPublicKey = oldKey.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+        byte[] successorPublicKey = successor.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+        using var hosting = new DidWebHttpFactory(
+            oldPublicKey, successorPublicKey, retireOldKey: true);
+        using var client = hosting.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        using var valid = await client.GetAsync(
+            new Uri("https://issuer.example/.well-known/did.json", UriKind.Absolute))
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, valid.StatusCode);
+        Assert.Equal("application/did+ld+json", valid.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("no-store", valid.Headers.CacheControl?.ToString());
+        string document = await valid.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(DidWebPinnedKeyRetirement.MatchesExpectedRetirementDocument(
+            "did:web:issuer.example", oldPublicKey, successorPublicKey, document));
+        Assert.False(DidWebPinnedKeyTransition.MatchesExpectedTransitionDocument(
+            "did:web:issuer.example", oldPublicKey, successorPublicKey, document));
+
+        using var wrongHost = await client.GetAsync(
+            new Uri("https://unapproved.example/.well-known/did.json", UriKind.Absolute))
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, wrongHost.StatusCode);
+        using var wrongPort = await client.GetAsync(
+            new Uri("https://issuer.example:8443/.well-known/did.json", UriKind.Absolute))
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, wrongPort.StatusCode);
+    }
+
+    private sealed class DidWebHttpFactory(byte[]? keyBytes, byte[]? successorKeyBytes = null, bool retireOldKey = false) : WebApplicationFactory<Program>
     {
         private readonly string _database = Guid.NewGuid().ToString("N");
 
@@ -362,6 +398,10 @@ public sealed class OperatorDidWebPublisherTests
                     {
                         entries.Add("DidWebPublication:SuccessorPublicKeyHex",
                             Convert.ToHexStringLower(successorKeyBytes));
+                    }
+                    if (retireOldKey)
+                    {
+                        entries.Add("DidWebPublication:RetireOldKey", "true");
                     }
                 }
 
