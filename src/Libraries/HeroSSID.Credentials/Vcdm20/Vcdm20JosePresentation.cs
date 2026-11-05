@@ -26,7 +26,7 @@ public enum Vcdm20PresentationCheckResult
 /// Full disclosure of exactly one issuer-signed VC2 JWT; not an OpenID4VP
 /// exchange, live status check, JSON-LD processor, wallet or conformance certification.
 /// </summary>
-public static class Vcdm20JosePresentation
+public static partial class Vcdm20JosePresentation
 {
     private const string BaseContext = "https://www.w3.org/ns/credentials/v2";
     private const string DataPrefix = "data:application/vc+jwt,";
@@ -75,7 +75,7 @@ public static class Vcdm20JosePresentation
         string signedRequestJwt, string trustedVerifierDid, string expectedAudience,
         string credentialJwt, string expectedCredentialType, Uri expectedContextUri,
         string holderDid, byte[] holderSeed, TimeProvider clock, bool bindOriginalRequest,
-        Uri? expectedCredentialId = null)
+        Uri? expectedCredentialId = null, Uri? expectedCredentialAudience = null)
     {
         ArgumentNullException.ThrowIfNull(expectedContextUri);
         ArgumentNullException.ThrowIfNull(holderSeed);
@@ -101,7 +101,7 @@ public static class Vcdm20JosePresentation
             !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(holderDid, out var holderPublicKey) ||
             !VerifyCredential(credentialJwt, challenge.TrustedIssuerDid, holderDid,
                 expectedCredentialType, expectedContextUri, now,
-                expectedCredentialId, out _) ||
+                expectedCredentialId, expectedCredentialAudience, out _) ||
             !TryReadCredentialExpiry(credentialJwt, out var credentialUntil))
         {
             throw new ArgumentException("A real holder key and valid issuer-signed VC2 credential are required.", nameof(credentialJwt));
@@ -331,7 +331,7 @@ public static class Vcdm20JosePresentation
         IPresentationChallengeStore challenges, TimeProvider clock,
         string? requiredHolderSignedRequestSha256, out JsonElement verifiedSubject,
         out string authenticatedCredentialJwt, out string authenticatedHolderDid,
-        Uri? expectedCredentialId = null)
+        Uri? expectedCredentialId = null, Uri? expectedCredentialAudience = null)
     {
         authenticatedCredentialJwt = string.Empty;
         authenticatedHolderDid = string.Empty;
@@ -384,7 +384,7 @@ public static class Vcdm20JosePresentation
             expiresAt > PresentationChallengePolicy.NumericDate(challenge.ExpiresAt) ||
             !VerifyCredential(credentialJwt, challenge.TrustedIssuerDid, holderDid,
                 expectedCredentialType, expectedContextUri, now,
-                expectedCredentialId, out var subject) ||
+                expectedCredentialId, expectedCredentialAudience, out var subject) ||
             !TryReadCredentialExpiry(credentialJwt, out var credentialUntil) ||
             expiresAt > PresentationChallengePolicy.NumericDate(credentialUntil))
         {
@@ -405,7 +405,7 @@ public static class Vcdm20JosePresentation
             expiresAt <= PresentationChallengePolicy.NumericDate(now) ||
             !VerifyCredential(credentialJwt, challenge.TrustedIssuerDid, holderDid,
                 expectedCredentialType, expectedContextUri, now,
-                expectedCredentialId, out _))
+                expectedCredentialId, expectedCredentialAudience, out _))
         {
             return Vcdm20PresentationCheckResult.Invalid;
         }
@@ -419,8 +419,19 @@ public static class Vcdm20JosePresentation
     private static bool VerifyCredential(
         string credentialJwt, string trustedIssuerDid, string holderDid,
         string credentialType, Uri contextUri, DateTimeOffset now,
-        Uri? expectedCredentialId, out JsonElement verifiedSubject)
+        Uri? expectedCredentialId, Uri? expectedCredentialAudience,
+        out JsonElement verifiedSubject)
     {
+        if (expectedCredentialAudience is not null)
+        {
+            verifiedSubject = default;
+            return expectedCredentialId is not null &&
+                Vcdm20JoseCredential.TryVerifyForAudienceWithId(
+                    credentialJwt, trustedIssuerDid, holderDid, credentialType,
+                    contextUri, expectedCredentialId, expectedCredentialAudience,
+                    now, out verifiedSubject);
+        }
+
         if (expectedCredentialId is null)
         {
             return Vcdm20JoseCredential.TryVerify(
