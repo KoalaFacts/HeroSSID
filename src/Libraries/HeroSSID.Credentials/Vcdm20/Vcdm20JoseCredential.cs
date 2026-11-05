@@ -41,7 +41,7 @@ public static partial class Vcdm20JoseCredential
         string issuerDid, string holderDid, string credentialType,
         Uri subjectContextUri, JsonElement credentialSubject,
         byte[] issuerPrivateKey, DateTimeOffset validFrom, DateTimeOffset validUntil,
-        Uri? credentialId, string? issuerName = null)
+        Uri? credentialId, string? issuerName = null, Uri? audience = null)
     {
         ArgumentNullException.ThrowIfNull(issuerDid);
         ArgumentNullException.ThrowIfNull(holderDid);
@@ -55,6 +55,8 @@ public static partial class Vcdm20JoseCredential
             !ValidContext(subjectContextUri) ||
             (issuerName is not null && !ValidIssuerName(issuerName)) ||
             (credentialId is not null && !ValidCredentialId(credentialId)) ||
+            (audience is not null &&
+                (credentialId is null || issuerName is not null || !ValidAudience(audience))) ||
             issuerPrivateKey.Length != 32 ||
             issuerPrivateKey.All(static b => b == 0) ||
             validUntil <= validFrom ||
@@ -88,11 +90,20 @@ public static partial class Vcdm20JoseCredential
             credentialClaims["id"] = credentialId.AbsoluteUri;
         }
 
+        if (audience is not null)
+        {
+            // The exact registered JWT aud claim is signed into the original VC2 token.
+            credentialClaims["aud"] = audience.AbsoluteUri;
+        }
+
         string payload = JsonSerializer.Serialize(credentialClaims);
         string jwt = Ed25519JwtSigner.CreateSignedJwt(header, payload, issuerPrivateKey);
 
         // Reject mismatched issuer seeds and ambiguous serialized claims before release.
-        bool verified = issuerName is not null
+        bool verified = audience is not null
+            ? TryVerifyForAudienceWithId(jwt, issuerDid, holderDid, credentialType,
+                subjectContextUri, credentialId!, audience, validFrom, out _)
+            : issuerName is not null
             ? credentialId is not null
                 ? TryVerifyNamedIssuerWithId(jwt, issuerDid, issuerName, holderDid,
                     credentialType, subjectContextUri, credentialId, validFrom, out _)
@@ -130,7 +141,8 @@ public static partial class Vcdm20JoseCredential
         string expectedCredentialType, Uri expectedSubjectContextUri,
         DateTimeOffset now, out JsonElement verifiedSubject,
         out string? verifiedCredentialId, bool requiresCredentialId,
-        string? expectedIssuerName = null, Uri? expectedCredentialId = null)
+        string? expectedIssuerName = null, Uri? expectedCredentialId = null,
+        Uri? expectedAudience = null)
     {
         verifiedCredentialId = null;
         ArgumentNullException.ThrowIfNull(jwt);
@@ -148,7 +160,13 @@ public static partial class Vcdm20JoseCredential
             // general credentialStatus,
             // proof or evidence semantics; do not authenticate and silently ignore
             // unimplemented signed policy fields before returning subject claims.
-            credential.EnumerateObject().Count() != (requiresCredentialId ? 7 : 6) ||
+            credential.EnumerateObject().Count() !=
+                (requiresCredentialId ? 7 : 6) + (expectedAudience is null ? 0 : 1) ||
+            (expectedAudience is not null &&
+                (!StrictJwtReader.TryGetString(credential, "aud", out string signedAudience) ||
+                 !ValidCanonicalAudience(signedAudience) ||
+                 !string.Equals(signedAudience, expectedAudience.AbsoluteUri,
+                     StringComparison.Ordinal))) ||
             (requiresCredentialId &&
                 (!StrictJwtReader.TryGetString(credential, "id", out string signedId) ||
                  !ValidCanonicalCredentialId(signedId) ||
@@ -347,6 +365,21 @@ public static partial class Vcdm20JoseCredential
         Uri.TryCreate(id, UriKind.Absolute, out Uri? uri) &&
         ValidCredentialId(uri) &&
         string.Equals(uri.AbsoluteUri, id, StringComparison.Ordinal);
+
+    private static bool ValidCanonicalAudience(string audience) =>
+        audience.Length <= 2_048 &&
+        Uri.TryCreate(audience, UriKind.Absolute, out Uri? uri) &&
+        ValidAudience(uri) &&
+        string.Equals(uri.AbsoluteUri, audience, StringComparison.Ordinal);
+
+    private static bool ValidAudience(Uri? uri) =>
+        uri is { IsAbsoluteUri: true } &&
+        string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) &&
+        !string.IsNullOrWhiteSpace(uri.Host) &&
+        string.IsNullOrEmpty(uri.UserInfo) &&
+        string.IsNullOrEmpty(uri.Fragment) &&
+        uri.AbsoluteUri.Length <= 2_048 &&
+        string.Equals(uri.OriginalString, uri.AbsoluteUri, StringComparison.Ordinal);
 
     private static bool ValidCredentialId(Uri? uri) =>
         uri is { IsAbsoluteUri: true } &&

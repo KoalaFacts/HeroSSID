@@ -5,24 +5,31 @@ namespace HeroSSID.Credentials.Vcdm20;
 /// <summary>
 /// Opt-in, single-recipient VC2 signed credential identifier profile.
 /// The original issuer signs both the exact credential ID and relying-party audience.
-/// The verifier must pin issuer, holder, context, type, ID and its own audience.
+/// The verifier must independently pin issuer, holder, context, type, ID and its own audience.
 /// </summary>
 public static partial class Vcdm20JoseCredential
 {
     /// <summary>
-    /// Create a VC2 JWT limited to one HTTPS relying-party audience.
-    /// No holder-control proof, recipient identity or business authorization is implied.
+    /// Create a direct VC2 JWT limited to one canonical HTTPS relying-party audience.
+    /// This is not a holder possession proof or business authorization.
     /// </summary>
     public static string CreateForAudienceWithId(
         string issuerDid, string holderDid, string credentialType,
         Uri subjectContextUri, JsonElement credentialSubject,
         byte[] issuerPrivateKey, DateTimeOffset validFrom,
         DateTimeOffset validUntil, Uri credentialId, Uri relyingPartyAudience)
-        => throw new NotSupportedException("RED-first: signed VC2 audience issuance is not implemented.");
+    {
+        ArgumentNullException.ThrowIfNull(credentialId);
+        ArgumentNullException.ThrowIfNull(relyingPartyAudience);
+        return CreateCore(issuerDid, holderDid, credentialType,
+            subjectContextUri, credentialSubject, issuerPrivateKey,
+            validFrom, validUntil, credentialId, audience: relyingPartyAudience);
+    }
 
     /// <summary>
-    /// Verify only a genuine VC2 issuer-signed JWT with an exact HTTPS recipient and credential ID.
-    /// No claims are released on any failure.
+    /// Accept only a real issuer-signed VC2 JWT for this independently pinned HTTPS
+    /// recipient and exact original signed credential ID. Failed validation never
+    /// releases subject claims. Consent, holder control and status are separate.
     /// </summary>
     public static bool TryVerifyForAudienceWithId(
         string jwt, string trustedIssuerDid, string expectedHolderDid,
@@ -31,6 +38,12 @@ public static partial class Vcdm20JoseCredential
         DateTimeOffset now, out JsonElement verifiedSubject)
     {
         verifiedSubject = default;
-        throw new NotSupportedException("RED-first: signed VC2 audience verification is not implemented.");
+        return ValidCredentialId(expectedCredentialId) &&
+            ValidAudience(expectedAudience) &&
+            TryVerifyCore(jwt, trustedIssuerDid, expectedHolderDid,
+                expectedCredentialType, expectedSubjectContextUri,
+                now, out verifiedSubject, out _, requiresCredentialId: true,
+                expectedCredentialId: expectedCredentialId,
+                expectedAudience: expectedAudience);
     }
 }
