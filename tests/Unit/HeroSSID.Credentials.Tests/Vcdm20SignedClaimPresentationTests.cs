@@ -33,9 +33,9 @@ public sealed class Vcdm20SignedClaimPresentationTests
             issuer.Did, holder.Did, "MembershipCredential", Context,
             subject.RootElement, issuer.Seed, now.AddMinutes(-1),
             now.AddMinutes(5), CredentialId);
-        string presentation = Vcdm20JosePresentation.Create(
+        string presentation = Vcdm20JosePresentation.CreateWithSignedCredentialId(
             request, verifier.Did, Audience, credential, "MembershipCredential",
-            Context, holder.Did, holder.Seed, _clock);
+            Context, CredentialId, holder.Did, holder.Seed, _clock);
         var policy = new Dictionary<string, string> { ["membership"] = "active" };
         var result = Vcdm20SignedClaimPresentation.Check(
             presentation, tenant, Audience, challenge.Nonce, "MembershipCredential",
@@ -76,9 +76,9 @@ public sealed class Vcdm20SignedClaimPresentationTests
             issuer.Did, holder.Did, "MembershipCredential", Context,
             subject.RootElement, issuer.Seed, now.AddMinutes(-1),
             now.AddMinutes(5), CredentialId);
-        string presentation = Vcdm20JosePresentation.Create(
+        string presentation = Vcdm20JosePresentation.CreateWithSignedCredentialId(
             request, verifier.Did, Audience, original, "MembershipCredential",
-            Context, holder.Did, holder.Seed, _clock);
+            Context, CredentialId, holder.Did, holder.Seed, _clock);
         var trusted = mismatch == "wrong-issuer" ? new[] { outsider.Did } : new[] { issuer.Did };
         string expectedHolder = mismatch == "wrong-holder" ? outsider.Did : holder.Did;
         Uri expectedId = mismatch == "wrong-id"
