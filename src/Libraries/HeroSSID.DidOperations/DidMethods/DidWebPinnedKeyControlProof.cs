@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Security.Cryptography;
 using System.Text.Json;
 using NSec.Cryptography;
 
@@ -113,17 +112,13 @@ public static class DidWebPinnedKeyControlProof
         {
             byte[] input = CreateSigningInput(didIdentifier, methodFragment,
                 verifierAudience, nonce, issuedAt, expiresAt);
-            using PublicKey publicKey = PublicKey.Import(
-                SignatureAlgorithm.Ed25519, pinnedPublicKey, KeyBlobFormat.RawPublicKey);
-            return SignatureAlgorithm.Ed25519.Verify(publicKey, input, signature);
+            return PublicKey.TryImport(SignatureAlgorithm.Ed25519,
+                pinnedPublicKey, KeyBlobFormat.RawPublicKey, out PublicKey? publicKey) &&
+                SignatureAlgorithm.Ed25519.Verify(publicKey!, input, signature);
         }
         catch (ArgumentException)
         {
             // Invalid challenge, malformed public key or invalid method input.
-            return false;
-        }
-        catch (CryptographicException)
-        {
             return false;
         }
     }
