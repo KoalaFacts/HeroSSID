@@ -134,6 +134,86 @@ public sealed class Vcdm20SignedClaimStatusTests
             Vcdm20RevocationSnapshot.Check(status, invalid, issuer.Did, now));
     }
 
+
+    [Theory]
+    [InlineData(false, 3, 360)]
+    [InlineData(true, 4, 61)]
+    public void MembershipVerifierMustNotReleaseClaimsAfterFinalExpiryBoundary(
+        bool withIssuerStatus, int stableClockReads, int jumpSeconds)
+    {
+        // Real Ed25519 issuance, request and holder proof; only the verifier's
+        // final clock read moves forward. In the currently shipped verifier,
+        // the last time sample precedes returning the already-authenticated
+        // subject, so a status/credential/request that expires at that boundary
+        // is incorrectly released. No mocks or forged JWT signatures.
+        var issuer = Identity();
+        var holder = Identity();
+        var verifier = Identity();
+        Guid tenant = Guid.NewGuid();
+        var store = new InMemoryPresentationChallengeStore(_clock);
+        var challenge = store.Issue(tenant, Audience, issuer.Did);
+        string request = OfflineSignedPresentationRequest.Create(
+            challenge, verifier.Did, verifier.Seed, _clock);
+        DateTimeOffset now = _clock.GetUtcNow();
+        using var subject = JsonDocument.Parse(JsonSerializer.Serialize(
+            new { id = holder.Did, membership = "active" }));
+        string originalJwt = Vcdm20JoseCredential.CreateWithId(
+            issuer.Did, holder.Did, "MembershipCredential", Context,
+            subject.RootElement, issuer.Seed, now.AddMinutes(-1),
+            now.AddMinutes(5), CredentialId);
+        string presentation = Vcdm20JosePresentation.CreateWithSignedCredentialId(
+            request, verifier.Did, Audience, originalJwt,
+            "MembershipCredential", Context, CredentialId,
+            holder.Did, holder.Seed, _clock);
+        string snapshot = Vcdm20RevocationSnapshot.Create(
+            issuer.Did, [], issuer.Seed, now.AddSeconds(-2), _clock);
+        var policy = new Dictionary<string, string> { ["membership"] = "active" };
+
+        // Only the verification clock is controlled. The challenge store uses
+        // the independent real clock, so this tests the verifier's post-crypto
+        // release gate rather than a fake expired nonce at the storage layer.
+        // Signatures and request issuance occur after the first captured now.
+        // A verifier clock from before VP.iat is legitimately rejected; start
+        // after real signing so only the intended expiry boundary is tested.
+        DateTimeOffset verificationNow = _clock.GetUtcNow();
+        var verificationClock = new BoundaryClock(
+            verificationNow, stableClockReads, TimeSpan.FromSeconds(jumpSeconds));
+        if (withIssuerStatus)
+        {
+            Vcdm20RevocationCheckResult result =
+                Vcdm20SignedClaimPresentation.CheckWithIssuerStatus(
+                    presentation, snapshot, tenant, Audience, challenge.Nonce,
+                    "MembershipCredential", Context, store, [issuer.Did],
+                    holder.Did, CredentialId, policy, now.AddSeconds(-5),
+                    verificationClock, out string actualIssuer, out JsonElement actualSubject);
+            Assert.Equal(Vcdm20RevocationCheckResult.Invalid, result);
+            Assert.Equal(string.Empty, actualIssuer);
+            Assert.Equal(JsonValueKind.Undefined, actualSubject.ValueKind);
+        }
+        else
+        {
+            Vcdm20PresentationCheckResult result =
+                Vcdm20SignedClaimPresentation.Check(
+                    presentation, tenant, Audience, challenge.Nonce,
+                    "MembershipCredential", Context, store, [issuer.Did],
+                    holder.Did, CredentialId, policy, verificationClock,
+                    out string actualIssuer, out JsonElement actualSubject);
+            Assert.Equal(Vcdm20PresentationCheckResult.Invalid, result);
+            Assert.Equal(string.Empty, actualIssuer);
+            Assert.Equal(JsonValueKind.Undefined, actualSubject.ValueKind);
+        }
+    }
+
+    private sealed class BoundaryClock(
+        DateTimeOffset initial, int stableReads, TimeSpan advance) : TimeProvider
+    {
+        private int _reads;
+
+        public override DateTimeOffset GetUtcNow() =>
+            global::System.Threading.Interlocked.Increment(ref _reads) <= stableReads
+                ? initial : initial.Add(advance);
+    }
+
     private static (byte[] Seed, string Did) Identity()
     {
         using var key = Key.Create(SignatureAlgorithm.Ed25519,
