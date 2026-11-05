@@ -26,7 +26,7 @@ public enum Vcdm20PresentationCheckResult
 /// Full disclosure of exactly one issuer-signed VC2 JWT; not an OpenID4VP
 /// exchange, live status check, JSON-LD processor, wallet or conformance certification.
 /// </summary>
-public static class Vcdm20JosePresentation
+public static partial class Vcdm20JosePresentation
 {
     private const string BaseContext = "https://www.w3.org/ns/credentials/v2";
     private const string DataPrefix = "data:application/vc+jwt,";
