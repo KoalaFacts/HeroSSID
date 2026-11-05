@@ -111,6 +111,82 @@ public sealed class DidWebPinnedKeyControlChallengeVerifierTests
         Assert.True(verifier.TryVerifyAndConsume(challenge.GetNonce(), signature));
     }
 
+
+    [Fact]
+    public async Task CallerMutatingNonceWhileVerifyHoldsGateCannotConsumeAnotherChallengeAsync()
+    {
+        using Key signer = Key.Create(SignatureAlgorithm.Ed25519);
+        var clock = new ManualClock();
+        var verifier = NewVerifier(signer, clock);
+        DidWebPinnedKeyControlChallenge first = verifier.Issue();
+        DidWebPinnedKeyControlChallenge second = verifier.Issue();
+        byte[] firstSignature = SignatureAlgorithm.Ed25519.Sign(signer, first.GetSigningInput());
+        byte[] secondSignature = SignatureAlgorithm.Ed25519.Sign(signer, second.GetSigningInput());
+        byte[] mutableFirstNonce = first.GetNonce();
+        using var entered = new ManualResetEventSlim(false);
+        using var resume = new ManualResetEventSlim(false);
+
+        // The verifier has already selected the first nonce but has not yet
+        // rebuilt its signed bytes. Hold its lock at the clock read.
+        clock.BeforeRead = () =>
+        {
+            entered.Set();
+            if (!resume.Wait(TimeSpan.FromSeconds(15)))
+            {
+                throw new TimeoutException("Timed out resuming verifier clock read.");
+            }
+        };
+
+        Task<bool> substituted = Task.Run(
+            () => verifier.TryVerifyAndConsume(mutableFirstNonce, secondSignature));
+        try
+        {
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
+            byte[] secondNonce = second.GetNonce();
+            Buffer.BlockCopy(secondNonce, 0, mutableFirstNonce, 0, secondNonce.Length);
+        }
+        finally
+        {
+            resume.Set();
+        }
+
+        Assert.False(await substituted);
+        clock.BeforeRead = null;
+        Assert.True(verifier.TryVerifyAndConsume(first.GetNonce(), firstSignature));
+        Assert.True(verifier.TryVerifyAndConsume(second.GetNonce(), secondSignature));
+    }
+
+    [Fact]
+    public void UtcRollbackCannotExtendAnExpiredMonotonicChallenge()
+    {
+        using Key signer = Key.Create(SignatureAlgorithm.Ed25519);
+        var clock = new ManualClock();
+        var verifier = NewVerifier(signer, clock, capacity: 1);
+        DidWebPinnedKeyControlChallenge challenge = verifier.Issue();
+        byte[] genuine = SignatureAlgorithm.Ed25519.Sign(signer, challenge.GetSigningInput());
+
+        // UTC still appears within the window after a backward correction,
+        // while the verifier's elapsed monotonic time exceeds the TTL.
+        clock.Current = InitialTime.AddSeconds(10);
+        clock.MonotonicTicks = TimeSpan.FromMinutes(3).Ticks;
+        Assert.False(verifier.TryVerifyAndConsume(challenge.GetNonce(), genuine));
+    }
+
+    [Fact]
+    public void ExpiredMonotonicChallengeReleasesCapacityAfterUtcRollback()
+    {
+        using Key signer = Key.Create(SignatureAlgorithm.Ed25519);
+        var clock = new ManualClock();
+        var verifier = NewVerifier(signer, clock, capacity: 1);
+        DidWebPinnedKeyControlChallenge previous = verifier.Issue();
+        clock.Current = InitialTime.AddSeconds(10);
+        clock.MonotonicTicks = TimeSpan.FromMinutes(3).Ticks;
+
+        DidWebPinnedKeyControlChallenge replacement = verifier.Issue();
+        Assert.NotEqual(Convert.ToHexString(previous.GetNonce()),
+            Convert.ToHexString(replacement.GetNonce()));
+    }
+
     [Fact]
     public void RejectsInvalidVerifierConfigurationBeforeIssuing()
     {
@@ -140,6 +216,18 @@ public sealed class DidWebPinnedKeyControlChallengeVerifierTests
     {
         public DateTimeOffset Current { get; set; } = InitialTime;
 
-        public override DateTimeOffset GetUtcNow() => Current;
+        public long MonotonicTicks { get; set; }
+
+        public Action? BeforeRead { get; set; }
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp() => MonotonicTicks;
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            BeforeRead?.Invoke();
+            return Current;
+        }
     }
 }
