@@ -396,33 +396,59 @@ public static class Vcdm20RevocationSnapshot
             return status;
         }
 
-        // Genuine Ed25519 signatures have already authenticated both immutable
-        // tokens. Parse both immutable expiries BEFORE the final clock sample;
-        // an earlier sample would allow expensive JSON parsing to cross the
-        // status or VP deadline and still disclose an expired subject.
-        if (!StrictJwtReader.TryGetString(subject, "id", out string holderDid) ||
-            !holderDid.StartsWith("did:key:", StringComparison.Ordinal) ||
-            !StrictJwtReader.TryRead(presentationJwt, "vp+jwt",
-                MaximumPresentationLength, out JsonElement signedPresentation,
-                holderDid + "#" + holderDid["did:key:".Length..], "vp") ||
-            !PresentationChallengePolicy.TryGetNumericDate(
-                signedPresentation, "exp", out decimal presentationExpires) ||
-            !StrictJwtReader.TryRead(snapshotJwt, SnapshotType,
-                MaximumSnapshotLength, out JsonElement signedSnapshot) ||
-            !StrictJwtReader.TryGetTimestamp(signedSnapshot, "exp", out long statusExpires))
-        {
-            return Vcdm20RevocationCheckResult.Invalid;
-        }
-
-        DateTimeOffset finalNow = clock.GetUtcNow();
-        if (presentationExpires <= PresentationChallengePolicy.NumericDate(finalNow) ||
-            statusExpires <= finalNow.ToUnixTimeSeconds())
+        // Genuine signatures, request pinning and one-use nonce consumption
+        // already passed. The shared final gate samples time only AFTER both
+        // bounded signed-token expiry parses have completed.
+        if (!SignedTokensRemainUnexpiredAtDisclosure(
+                presentationJwt, subject, snapshotJwt, clock))
         {
             return Vcdm20RevocationCheckResult.Invalid;
         }
 
         verifiedSubject = subject;
         return Vcdm20RevocationCheckResult.SignedNotListed;
+    }
+
+    /// <summary>
+    /// Final time-of-disclosure expiry check for ALREADY authenticated issuer
+    /// and holder tokens. This does not authenticate signatures or authorize
+    /// disclosure on its own; only the signed presentation verifier calls it.
+    /// The internal parsing-boundary callback is exclusively a deterministic
+    /// test seam for simulating time passage DURING the second JWT parse.
+    /// </summary>
+    internal static bool SignedTokensRemainUnexpiredAtDisclosure(
+        string presentationJwt, JsonElement authenticatedSubject,
+        string snapshotJwt, TimeProvider clock,
+        Action? afterPresentationParsing = null)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+
+        if (!StrictJwtReader.TryGetString(authenticatedSubject, "id", out string holderDid) ||
+            !holderDid.StartsWith("did:key:", StringComparison.Ordinal) ||
+            !StrictJwtReader.TryRead(presentationJwt, "vp+jwt",
+                MaximumPresentationLength, out JsonElement signedPresentation,
+                holderDid + "#" + holderDid["did:key:".Length..], "vp") ||
+            !PresentationChallengePolicy.TryGetNumericDate(
+                signedPresentation, "exp", out decimal presentationExpires))
+        {
+            return false;
+        }
+
+        // The production path supplies null. A regression can advance its
+        // controlled clock here, between the two actual bounded JWT parses.
+        // Moving the final time sample above either parse must fail that test.
+        afterPresentationParsing?.Invoke();
+
+        if (!StrictJwtReader.TryRead(snapshotJwt, SnapshotType,
+                MaximumSnapshotLength, out JsonElement signedSnapshot) ||
+            !StrictJwtReader.TryGetTimestamp(signedSnapshot, "exp", out long statusExpires))
+        {
+            return false;
+        }
+
+        DateTimeOffset finalNow = clock.GetUtcNow();
+        return presentationExpires > PresentationChallengePolicy.NumericDate(finalNow) &&
+            statusExpires > finalNow.ToUnixTimeSeconds();
     }
 
     // The sole credential extraction, signature, nonce-consumption and status
