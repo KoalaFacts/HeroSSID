@@ -11,7 +11,7 @@ namespace HeroSSID.Credentials.Vcdm20;
 /// did:key signatures. Distinct from legacy nested-vc JWTs; no database,
 /// wallet key escrow, JSON-LD expansion, status lookup or authorization.
 /// </summary>
-public static class Vcdm20JoseCredential
+public static partial class Vcdm20JoseCredential
 {
     private const string BaseContext = "https://www.w3.org/ns/credentials/v2";
     private const string CredentialHeaderType = "vc+jwt";
