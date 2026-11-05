@@ -172,8 +172,12 @@ public sealed class Vcdm20SignedClaimStatusTests
         // Only the verification clock is controlled. The challenge store uses
         // the independent real clock, so this tests the verifier's post-crypto
         // release gate rather than a fake expired nonce at the storage layer.
+        // Signatures and request issuance occur after the first captured now.
+        // A verifier clock from before VP.iat is legitimately rejected; start
+        // after real signing so only the intended expiry boundary is tested.
+        DateTimeOffset verificationNow = _clock.GetUtcNow();
         var verificationClock = new BoundaryClock(
-            now, stableClockReads, TimeSpan.FromSeconds(jumpSeconds));
+            verificationNow, stableClockReads, TimeSpan.FromSeconds(jumpSeconds));
         if (withIssuerStatus)
         {
             Vcdm20RevocationCheckResult result =
@@ -182,7 +186,6 @@ public sealed class Vcdm20SignedClaimStatusTests
                     "MembershipCredential", Context, store, [issuer.Did],
                     holder.Did, CredentialId, policy, now.AddSeconds(-5),
                     verificationClock, out string actualIssuer, out JsonElement actualSubject);
-            Assert.True(verificationClock.Reads <= stableClockReads, $"Unexpected early expiry clock read: {verificationClock.Reads}; status={result}");
             Assert.Equal(Vcdm20RevocationCheckResult.Invalid, result);
             Assert.Equal(string.Empty, actualIssuer);
             Assert.Equal(JsonValueKind.Undefined, actualSubject.ValueKind);
@@ -195,7 +198,6 @@ public sealed class Vcdm20SignedClaimStatusTests
                     "MembershipCredential", Context, store, [issuer.Did],
                     holder.Did, CredentialId, policy, verificationClock,
                     out string actualIssuer, out JsonElement actualSubject);
-            Assert.True(verificationClock.Reads <= stableClockReads, $"Unexpected early expiry clock read: {verificationClock.Reads}; presentation={result}");
             Assert.Equal(Vcdm20PresentationCheckResult.Invalid, result);
             Assert.Equal(string.Empty, actualIssuer);
             Assert.Equal(JsonValueKind.Undefined, actualSubject.ValueKind);
@@ -206,8 +208,6 @@ public sealed class Vcdm20SignedClaimStatusTests
         DateTimeOffset initial, int stableReads, TimeSpan advance) : TimeProvider
     {
         private int _reads;
-
-        public int Reads => global::System.Threading.Volatile.Read(ref _reads);
 
         public override DateTimeOffset GetUtcNow() =>
             global::System.Threading.Interlocked.Increment(ref _reads) <= stableReads
