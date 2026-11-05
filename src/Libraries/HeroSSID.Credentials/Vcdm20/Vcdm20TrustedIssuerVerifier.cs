@@ -152,4 +152,84 @@ public static class Vcdm20TrustedIssuerVerifier
 
         return false;
     }
+
+    /// <summary>
+    /// Opt-in relying-party claim policy for an exactly pinned VC2 identifier.
+    /// Only matching signed top-level string claims may be released; neither
+    /// a valid signature nor a claim value grants business authorization.
+    /// </summary>
+    public static bool TryVerifyWithIdAndRequiredClaims(
+        string issuerSignedJwt, IReadOnlyCollection<string> trustedIssuerDids,
+        string expectedHolderDid, string expectedCredentialType,
+        Uri expectedSubjectContextUri, Uri expectedCredentialId,
+        IReadOnlyDictionary<string, string> requiredSubjectClaims,
+        DateTimeOffset now, out string verifiedIssuerDid,
+        out JsonElement verifiedSubject)
+    {
+        ArgumentNullException.ThrowIfNull(issuerSignedJwt);
+        ArgumentNullException.ThrowIfNull(trustedIssuerDids);
+        ArgumentNullException.ThrowIfNull(expectedHolderDid);
+        ArgumentNullException.ThrowIfNull(expectedCredentialType);
+        ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
+        ArgumentNullException.ThrowIfNull(expectedCredentialId);
+        ArgumentNullException.ThrowIfNull(requiredSubjectClaims);
+
+        verifiedIssuerDid = string.Empty;
+        verifiedSubject = default;
+
+        // The relying party supplies the entire claim policy independently
+        // of the credential; a signature alone is never a claim policy.
+        if (requiredSubjectClaims.Count is < 1 or > 16)
+        {
+            return false;
+        }
+
+        KeyValuePair<string, string>[] required = requiredSubjectClaims.ToArray();
+        if (required.Length != requiredSubjectClaims.Count)
+        {
+            return false;
+        }
+
+        var uniqueNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var claim in required)
+        {
+            string name = claim.Key;
+            string value = claim.Value;
+            if (string.IsNullOrEmpty(name) || name.Length > 64 ||
+                !char.IsAsciiLetter(name[0]) ||
+                !name.All(static c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-') ||
+                string.Equals(name, "id", StringComparison.Ordinal) ||
+                !uniqueNames.Add(name) ||
+                string.IsNullOrWhiteSpace(value) || value.Length > 256)
+            {
+                return false;
+            }
+        }
+
+        // Existing verification authenticates original Ed25519 signature and
+        // independently pinned issuer, holder, type, context, validity and id.
+        if (!TryVerifyWithId(issuerSignedJwt, trustedIssuerDids,
+            expectedHolderDid, expectedCredentialType,
+            expectedSubjectContextUri, expectedCredentialId, now,
+            out string issuer, out JsonElement subject))
+        {
+            return false;
+        }
+
+        // Exact case-sensitive top-level JSON string equality. Missing,
+        // nested, numeric, boolean or array claims never satisfy this policy.
+        foreach (var claim in required)
+        {
+            if (!subject.TryGetProperty(claim.Key, out JsonElement signedValue) ||
+                signedValue.ValueKind != JsonValueKind.String ||
+                !string.Equals(signedValue.GetString(), claim.Value, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        verifiedIssuerDid = issuer;
+        verifiedSubject = subject;
+        return true;
+    }
 }
