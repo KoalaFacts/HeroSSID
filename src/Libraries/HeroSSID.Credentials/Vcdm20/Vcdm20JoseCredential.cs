@@ -232,7 +232,7 @@ public static class Vcdm20JoseCredential
     private static string KeyId(string issuerDid) =>
         issuerDid + "#" + issuerDid["did:key:".Length..];
 
-    private static bool ValidCanonicalCredentialId(string id) =>
+    internal static bool ValidCanonicalCredentialId(string id) =>
         id.Length <= 2_048 &&
         Uri.TryCreate(id, UriKind.Absolute, out Uri? uri) &&
         ValidCredentialId(uri) &&
