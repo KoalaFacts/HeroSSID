@@ -8,7 +8,8 @@ namespace HeroSSID.Api.Features.Dids;
 /// <summary>
 /// Operator-controlled, opt-in root did:web HTTPS document publication.
 /// Optionally advertises two independently operator-pinned public keys during
-/// an explicit overlap; it never promotes either key to verifier trust.
+/// an explicit overlap, or retires the original after explicit opt-in.
+/// It never promotes either key to verifier trust.
 /// Only a public key is configured; no tenant, private key, trust grant,
 /// identity verification or signing capability is exposed by this endpoint.
 /// </summary>
@@ -21,6 +22,7 @@ public sealed class OperatorDidWebPublisher
     /// <summary>
     /// Validates publication policy eagerly. Absent configuration disables
     /// the endpoint; partially configured or unexpected policy fails startup.
+    /// Retirement requires two independently pinned public keys and exact "true".
     /// </summary>
     public OperatorDidWebPublisher(IConfiguration configuration)
     {
@@ -35,12 +37,17 @@ public sealed class OperatorDidWebPublisher
 
         bool hasSuccessor = fields.Any(static field =>
             field.Key == "SuccessorPublicKeyHex");
+        bool retireOldKey = fields.Any(static field =>
+            field.Key == "RetireOldKey");
         if (section.Value is not null ||
-            fields.Length != (hasSuccessor ? 3 : 2) ||
+            (retireOldKey && (!hasSuccessor ||
+                !string.Equals(section["RetireOldKey"], "true",
+                    StringComparison.Ordinal))) ||
+            fields.Length != (hasSuccessor ? (retireOldKey ? 4 : 3) : 2) ||
             fields.Any(static field =>
                 field.Value is null || field.GetChildren().Any() ||
                 field.Key is not ("Domain" or "PublicKeyHex" or
-                    "SuccessorPublicKeyHex")))
+                    "SuccessorPublicKeyHex" or "RetireOldKey")))
         {
             throw new InvalidOperationException(
                 "Invalid operator-owned did:web publication configuration.");
@@ -66,10 +73,15 @@ public sealed class OperatorDidWebPublisher
                 {
                     ["domain"] = domain
                 });
-            Document = hasSuccessor
-                ? DidWebPinnedKeyTransition.CreateTransitionDocument(
-                    Did, publicKey, Convert.FromHexString(successorHex!))
-                : method.CreateDidDocument(Did, publicKey);
+            byte[]? successorKey = hasSuccessor
+                ? Convert.FromHexString(successorHex!) : null;
+            Document = retireOldKey
+                ? DidWebPinnedKeyRetirement.CreateRetirementDocument(
+                    Did, publicKey, successorKey!)
+                : hasSuccessor
+                    ? DidWebPinnedKeyTransition.CreateTransitionDocument(
+                        Did, publicKey, successorKey!)
+                    : method.CreateDidDocument(Did, publicKey);
             _hostname = domain;
         }
         catch (ArgumentException exception)
