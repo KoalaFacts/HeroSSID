@@ -341,6 +341,25 @@ public static class Vcdm20RevocationSnapshot
         return status;
     }
 
+    /// <summary>
+    /// Authenticate one real issuer- and holder-signed VC2 presentation against
+    /// an independently pinned verifier request, exact signed credential ID,
+    /// exact HTTPS recipient and same-issuer signed status before disclosing claims.
+    /// A challenge remains consumed if issuer status subsequently refuses it.
+    /// This does not attest live revocation, consent or business authority.
+    /// </summary>
+    public static Vcdm20RevocationCheckResult CheckRecipientBoundPresentationWithIssuerStatus(
+        string presentationJwt, string signedRequestJwt, string trustedRequestSha256,
+        string trustedVerifierDid, string snapshotJwt, Guid verifierTenantId,
+        string expectedAudience, string expectedNonce, string expectedCredentialType,
+        Uri expectedContextUri, Uri expectedCredentialId, Uri expectedCredentialAudience,
+        DateTimeOffset minimumObservedAtUtc, IPresentationChallengeStore challenges,
+        TimeProvider clock, out JsonElement verifiedSubject)
+    {
+        verifiedSubject = default;
+        throw new NotSupportedException("Recipient-bound signed-status verifier is not implemented.");
+    }
+
     // The sole credential extraction, signature, nonce-consumption and status
     // path for both compatibility and incident-cutoff verification. A bypass
     // cannot arise from applying the cutoff only to standalone credentials.
