@@ -16,3 +16,36 @@ The successful result is `SignedButStatusUnchecked`: **it does not attest curren
 The SDK's `InMemoryPresentationChallengeStore` is process-local. A multi-replica service requires a shared, atomic, durable challenge store; no new schema, database migration or remote endpoint is provided by this package. Never accept a verifier policy supplied by the Wallet itself.
 
 See [VC2 JOSE signed ID](vcdm20-issuer-signed-id.md), [verifier-owned exact string policy](vcdm20-required-signed-claims.md), and [VISION](VISION.md).
+
+## Opt-in exact same-issuer status for a signed-ID membership presentation
+
+The existing `Check` remains explicitly **status-unchecked**. A verifier that
+requires original credential status can call
+`Vcdm20SignedClaimPresentation.CheckWithIssuerStatus` with the same
+verifier-owned enrollment policy plus the issuer's original
+`herossid-vc2-revocation-snapshot+jwt` and an **independently configured**
+`minimumObservedAtUtc`.
+
+The helper consumes the genuine holder's challenge once, verifies the
+original VC2 Ed25519 issuer signature, exact signed HTTPS credential ID,
+independently pinned issuer/holder, context/type/lifetime and required
+top-level string claims. It then checks the genuine 60-second signed status
+for **that exact original JWT from the verified actual issuer** and requires
+the signed observation to be no earlier than the caller's cutoff. An
+authentic but revoked original returns `Revoked`, a wrong signer's status,
+stale observation, invalid claim or replay returns `Invalid`; all refusals
+release empty signer and undefined claims. Only `SignedNotListed` returns
+verified issuer and claims; the challenge is spent even if issuer status
+or claim policy fails.
+
+The private issuer snapshot checker now accepts either the existing
+six-field direct VC2 original or the explicit seven-field direct VC2 with a
+canonical signed HTTPS top-level `id`, without accepting unknown additional
+policy fields. It continues checking the original Ed25519 signature and
+exact digest. This is **not** a W3C Bitstring Status List implementation.
+A real issuer can sign an incomplete or dishonest status set; an old
+compromised key can sign apparently fresh evidence. `SignedNotListed` is
+not proof of complete or live revocation, current membership, informed
+consent, reality-vetted identity, entitlement or business authorization.
+There is no new hosted endpoint, externally tested Wallet compatibility
+or automatic verifier policy enrollment.
