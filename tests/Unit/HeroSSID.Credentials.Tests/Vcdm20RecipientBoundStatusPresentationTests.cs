@@ -182,6 +182,38 @@ public sealed class Vcdm20RecipientBoundStatusPresentationTests
         Assert.Equal(stableClock.ReadCount, crossingClock.ReadCount);
     }
 
+    [Fact]
+    public void CrossingExpiryDuringTheLastSignedJwtParseRejectsDisclosure()
+    {
+        // First authenticate REAL signed verifier, issuer and holder tokens,
+        // exact pins and issuer status through the public one-use entry point.
+        var (tenant, store, challenge, request) = Request();
+        string vp = Present(request, Issue(Recipient));
+        string snapshot = Snapshot([]);
+        Assert.Equal(Vcdm20RevocationCheckResult.SignedNotListed,
+            Check(vp, request, snapshot, tenant, challenge, store,
+                CredentialId, Recipient, DateTimeOffset.UnixEpoch, out var signedSubject));
+
+        // This seam runs strictly BETWEEN the two real bounded JWT reparses.
+        // The former faulty ordering sampled time BEFORE these reparses, so
+        // restoring that ordering will make the second assertion fail.
+        var controlled = new AdvancingClock(_clock.GetUtcNow());
+        Assert.True(Vcdm20RevocationSnapshot.SignedTokensRemainUnexpiredAtDisclosure(
+            vp, signedSubject, snapshot, controlled));
+        Assert.False(Vcdm20RevocationSnapshot.SignedTokensRemainUnexpiredAtDisclosure(
+            vp, signedSubject, snapshot, controlled,
+            () => controlled.Advance(TimeSpan.FromSeconds(61))));
+    }
+
+    private sealed class AdvancingClock(DateTimeOffset initial) : TimeProvider
+    {
+        private DateTimeOffset _now = initial;
+
+        public void Advance(TimeSpan by) => _now = _now.Add(by);
+
+        public override DateTimeOffset GetUtcNow() => _now;
+    }
+
     private sealed class BoundaryClock(
         DateTimeOffset initial, int stableReads, TimeSpan advance) : TimeProvider
     {
