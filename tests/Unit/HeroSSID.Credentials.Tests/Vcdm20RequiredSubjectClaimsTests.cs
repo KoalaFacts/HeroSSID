@@ -84,6 +84,45 @@ public sealed class Vcdm20RequiredSubjectClaimsTests
         Assert.Equal(JsonValueKind.Undefined, claims.ValueKind);
     }
 
+    [Fact]
+    public void SignedClaimMatchingIsCaseSensitiveAndNeverFallsBackToNestedValues()
+    {
+        string jwt = Issue(_issuer, "active");
+        IReadOnlyDictionary<string, string>[] policies =
+        [
+            new Dictionary<string, string> { ["membership"] = "Active" },
+            new Dictionary<string, string> { ["Membership"] = "active" },
+            new Dictionary<string, string> { ["metadata.tier"] = "gold" },
+            new Dictionary<string, string> { ["tier"] = "gold" }
+        ];
+        foreach (var policy in policies)
+        {
+            Assert.False(Check(jwt, [_issuer.Did], policy,
+                out string issuer, out JsonElement claims));
+            Assert.Equal(string.Empty, issuer);
+            Assert.Equal(JsonValueKind.Undefined, claims.ValueKind);
+        }
+    }
+
+    [Fact]
+    public void AuthenticallySignedNonStringMembershipCannotSatisfyStringPolicy()
+    {
+        using var subject = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            id = _holder.Did, membership = true,
+            metadata = new { membership = "active" }
+        }));
+        string jwt = Vcdm20JoseCredential.CreateWithId(
+            _issuer.Did, _holder.Did, CredentialType, Vocabulary,
+            subject.RootElement, _issuer.Seed, Now.AddMinutes(-1),
+            Now.AddMinutes(10), CredentialId);
+        Assert.False(Check(jwt, [_issuer.Did],
+            new Dictionary<string, string> { ["membership"] = "true" },
+            out string issuer, out JsonElement claims));
+        Assert.Equal(string.Empty, issuer);
+        Assert.Equal(JsonValueKind.Undefined, claims.ValueKind);
+    }
+
     private bool Check(string jwt, IReadOnlyCollection<string> trusted,
         IReadOnlyDictionary<string, string> required,
         out string issuerDid, out JsonElement subject) =>
