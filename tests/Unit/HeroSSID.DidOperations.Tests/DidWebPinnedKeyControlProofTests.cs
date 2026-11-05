@@ -80,4 +80,52 @@ public sealed class DidWebPinnedKeyControlProofTests
         Assert.Throws<ArgumentException>(() => DidWebPinnedKeyControlProof.CreateSigningInput(
             Did, "#key-2", Audience, nonce, Issued, Issued.AddMinutes(10)));
     }
+
+    [Fact]
+    public void RejectsTamperedSignatureMalformedPinsAndSubsecondTimestampRebinding()
+    {
+        using Key signer = Key.Create(SignatureAlgorithm.Ed25519);
+        byte[] pin = signer.PublicKey.Export(KeyBlobFormat.RawPublicKey);
+        byte[] nonce = RandomNumberGenerator.GetBytes(32);
+        DateTimeOffset expires = Issued.AddMinutes(3);
+        byte[] bytes = DidWebPinnedKeyControlProof.CreateSigningInput(
+            Did, "#key-2", Audience, nonce, Issued, expires);
+        byte[] signature = SignatureAlgorithm.Ed25519.Sign(signer, bytes);
+        DateTimeOffset now = Issued.AddMinutes(1);
+
+        byte[] tampered = (byte[])signature.Clone();
+        tampered[0] ^= 1;
+        Assert.False(DidWebPinnedKeyControlProof.TryVerify(
+            Did, "#key-2", Audience, nonce, Issued, expires,
+            now, pin, tampered));
+        Assert.False(DidWebPinnedKeyControlProof.TryVerify(
+            Did, "#key-2", Audience, nonce, Issued, expires,
+            now, new byte[31], signature));
+        Assert.False(DidWebPinnedKeyControlProof.TryVerify(
+            Did, "#key-2", Audience, nonce, Issued, expires,
+            now, pin, signature[..32]));
+        Assert.False(DidWebPinnedKeyControlProof.TryVerify(
+            Did, "#key-2", Audience, nonce, Issued.AddTicks(1), expires,
+            now, pin, signature));
+        Assert.False(DidWebPinnedKeyControlProof.TryVerify(
+            Did, "#key-2", Audience, nonce, Issued, expires.AddTicks(1),
+            now, pin, signature));
+        Assert.True(DidWebPinnedKeyControlProof.TryVerify(
+            Did, "#key-2", Audience, nonce, Issued, expires,
+            now, pin, signature));
+    }
+
+    [Fact]
+    public void RejectsAmbiguousVerifierAudienceAndNonPositiveLifetimeBeforeSigning()
+    {
+        byte[] nonce = RandomNumberGenerator.GetBytes(32);
+        Assert.Throws<ArgumentException>(() => DidWebPinnedKeyControlProof.CreateSigningInput(
+            Did, "#key-2", new Uri("https://verifier.example.org/path#fragment"),
+            nonce, Issued, Issued.AddMinutes(1)));
+        Assert.Throws<ArgumentException>(() => DidWebPinnedKeyControlProof.CreateSigningInput(
+            Did, "#key-2", new Uri("https://account@verifier.example.org/path"),
+            nonce, Issued, Issued.AddMinutes(1)));
+        Assert.Throws<ArgumentException>(() => DidWebPinnedKeyControlProof.CreateSigningInput(
+            Did, "#key-2", Audience, nonce, Issued, Issued));
+    }
 }
