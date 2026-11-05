@@ -44,10 +44,10 @@ public static class Vcdm20SignedClaimPresentation
         // nonce, audience, tenant and expiry, and atomically consumes it.
         // It returns the original issuer-signed credential and actual holder
         // only after successful one-use verification.
-        if (Vcdm20JosePresentation.CheckWithAuthenticatedOriginal(
+        if (Vcdm20JosePresentation.CheckWithAuthenticatedOriginalSignedId(
                 presentationJwt, verifierTenantId, expectedAudience,
                 expectedNonce, expectedCredentialType, expectedContextUri,
-                challenges, clock, out _, out string originalCredentialJwt,
+                expectedCredentialId, challenges, clock, out _, out string originalCredentialJwt,
                 out string actualHolderDid) !=
             Vcdm20PresentationCheckResult.SignedButStatusUnchecked ||
             !string.Equals(actualHolderDid, expectedHolderDid,
