@@ -71,6 +71,32 @@ The code above is an **illustrative single-process setup**, not a live example-d
 
 An invalid HTTP document, unavailable host, stale/substituted key, wrong signature or replay fails; an HTTP failure **does not burn a valid pending nonce**, allowing a later retry before its hard expiry. The remote fetch happens before signature checking, so authenticate and rate-limit callers and control network egress. Concurrent successful responses remain at most one per verifier instance; neither a restart nor multiple replicas share the in-memory replay barrier. **This combined profile is only for `#key-1` single-key publication**, not `#key-2` overlap/successor retirement. A failed or successful result must not itself alter issuer trust or authorize business/Agent actions.
 
+## Successor-only retirement admission and #key-2 signer proof
+
+`DidWebPinnedRetiredKeyControlVerifier` is an opt-in **single-process** admission for an operator that has independently preapproved a `did:web` DID, the **distinct old and successor** Ed25519 public keys, and its own HTTPS verifier audience. It checks the original canonical HTTPS publication URI for an exact **successor-only** DID document retaining `#key-2` with no `#key-1`, extra key, authentication or assertion; independently verifies the real successor's Ed25519 signature over the verifier-issued one-use nonce; and atomically consumes it only after both checks pass. Old-key signatures, old-only documents, overlap documents, wrong keys, and replays fail. A failed fetch or forged proof does **not** burn an unexpired challenge.
+
+```csharp
+// Fixture only: production independently enrolls both public pins and keeps
+// the old and successor private keys outside the verifier.
+using Key old = Key.Create(SignatureAlgorithm.Ed25519);
+using Key successor = Key.Create(SignatureAlgorithm.Ed25519);
+var admission = new DidWebPinnedRetiredKeyControlVerifier(
+    "did:web:issuer.example.org",
+    new Uri("https://verifier.example.org/retirement-admission"),
+    old.PublicKey.Export(KeyBlobFormat.RawPublicKey),
+    successor.PublicKey.Export(KeyBlobFormat.RawPublicKey),
+    TimeProvider.System);
+DidWebPinnedKeyControlChallenge challenge = admission.Issue();
+byte[] signature = SignatureAlgorithm.Ed25519.Sign(
+    successor, challenge.GetSigningInput());
+bool accepted = await admission.TryVerifyAndConsumeWithIsolatedTransportAsync(
+    challenge.GetNonce(), signature);
+```
+
+The example succeeds only after the operator has **actually published** its successor-only DID document at the canonical HTTPS URI and the key holder controls `#key-2`. The [independent-key xUnit cases](../tests/Unit/HeroSSID.DidOperations.Tests/DidWebPinnedRetiredKeyControlVerifierTests.cs) use an injected fake `HttpClient` for deterministic testing; run `dotnet test tests/Unit/HeroSSID.DidOperations.Tests/HeroSSID.DidOperations.Tests.csproj --configuration Release`. These tests do not demonstrate actual public DNS/TLS hosting or third-party wallet interoperability.
+
+Use the built-in isolated, non-redirecting public-IP-only HTTPS transport in applications. Authenticate/rate-limit callers, enforce independent network egress, and keep the verifier instance alive; its nonce store is **not durable or multi-instance**. An exact published document match is point-in-time, not a domain ownership attestation. Valid signature is private-key control evidence, not proof of organisation identity, issuer trust, credential revocation, historical signing authority or Agent/business authorization. Any trust change must be separately decided and audited by the relying party. This is a private HeroSSID challenge format, not a W3C VC proof or complete OpenID4VP exchange.
+
 ## Security and operational boundary
 
 - Constructor pins exact DID, method, HTTPS verifier audience and public key. A remote document or proof **cannot override any of those**. The verifier owns the time source, expiry and cryptographically random 32-byte nonce. `#key-1` and `#key-2` are separate pins and must be approved independently.
