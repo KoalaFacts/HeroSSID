@@ -10,10 +10,10 @@ public sealed class DidWebPinnedKeyControlChallenge
     }
 
     /// <summary>The random challenge nonce; callers receive a defensive copy.</summary>
-    public byte[] Nonce => throw new NotSupportedException();
+    public byte[] GetNonce() => throw new NotSupportedException();
 
     /// <summary>Exact bytes the externally controlled Ed25519 key must sign.</summary>
-    public byte[] SigningInput => throw new NotSupportedException();
+    public byte[] GetSigningInput() => throw new NotSupportedException();
 
     /// <summary>Verifier-owned issuance instant.</summary>
     public DateTimeOffset IssuedAt => throw new NotSupportedException();
