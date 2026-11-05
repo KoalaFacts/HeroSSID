@@ -237,6 +237,31 @@ public static class Vcdm20JoseCredential
                 expectedIssuerName: expectedIssuerName);
     }
 
+    /// <summary>
+    /// Opt-in directly signed VC2 named issuer and credential id combination.
+    /// The issuer's descriptive name is not real-world identity evidence.
+    /// </summary>
+    public static string CreateWithNamedIssuerAndId(
+        string issuerDid, string issuerName, string holderDid,
+        string credentialType, Uri subjectContextUri, JsonElement credentialSubject,
+        byte[] issuerPrivateKey, DateTimeOffset validFrom, DateTimeOffset validUntil,
+        Uri credentialId)
+        => throw new NotSupportedException("Named issuer with signed ID is not implemented.");
+
+    /// <summary>
+    /// Release claims only when independently pinned issuer DID, issuer name
+    /// and original signed credential id all match the authentic JWT.
+    /// </summary>
+    public static bool TryVerifyNamedIssuerWithId(
+        string jwt, string trustedIssuerDid, string expectedIssuerName,
+        string expectedHolderDid, string expectedCredentialType,
+        Uri expectedSubjectContextUri, Uri expectedCredentialId,
+        DateTimeOffset now, out JsonElement verifiedSubject)
+    {
+        verifiedSubject = default;
+        throw new NotSupportedException("Named issuer with signed ID is not implemented.");
+    }
+
     private static bool MatchesExpectedIssuer(
         JsonElement credential, string trustedIssuerDid, string? expectedIssuerName)
     {
