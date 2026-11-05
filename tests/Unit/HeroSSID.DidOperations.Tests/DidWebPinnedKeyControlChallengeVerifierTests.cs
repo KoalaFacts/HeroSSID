@@ -150,7 +150,7 @@ public sealed class DidWebPinnedKeyControlChallengeVerifierTests
             resume.Set();
         }
 
-        Assert.False(await substituted.ConfigureAwait(false));
+        Assert.False(await substituted.ConfigureAwait(true));
         clock.BeforeRead = null;
         Assert.True(verifier.TryVerifyAndConsume(first.GetNonce(), firstSignature));
         Assert.True(verifier.TryVerifyAndConsume(second.GetNonce(), secondSignature));
