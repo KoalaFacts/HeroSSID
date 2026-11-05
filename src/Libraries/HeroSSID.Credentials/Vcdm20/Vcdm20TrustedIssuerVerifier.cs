@@ -152,4 +152,20 @@ public static class Vcdm20TrustedIssuerVerifier
 
         return false;
     }
+
+    /// <summary>
+    /// Opt-in relying-party claim policy for an exactly pinned VC2 identifier.
+    /// Only matching signed top-level string claims may be released; neither
+    /// a valid signature nor a claim value grants business authorization.
+    /// </summary>
+    public static bool TryVerifyWithIdAndRequiredClaims(
+        string issuerSignedJwt, IReadOnlyCollection<string> trustedIssuerDids,
+        string expectedHolderDid, string expectedCredentialType,
+        Uri expectedSubjectContextUri, Uri expectedCredentialId,
+        IReadOnlyDictionary<string, string> requiredSubjectClaims,
+        DateTimeOffset now, out string verifiedIssuerDid,
+        out JsonElement verifiedSubject)
+    {
+        throw new NotSupportedException("Claim policy verification not implemented.");
+    }
 }
