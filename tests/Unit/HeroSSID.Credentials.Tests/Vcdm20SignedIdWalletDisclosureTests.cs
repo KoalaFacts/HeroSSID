@@ -90,12 +90,77 @@ public sealed class Vcdm20SignedIdWalletDisclosureTests
                 attacker.Seed, scenario.Clock));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ExpiryDuringStatusAuthenticationNeverReleasesWalletClaims(
+        bool expireVerifierRequest)
+    {
+        var clock = new JumpClock(DateTimeOffset.Parse(
+            "2026-11-05T13:00:00Z", System.Globalization.CultureInfo.InvariantCulture));
+        var scenario = new Scenario(clock: clock,
+            challengeLifetime: expireVerifierRequest ? TimeSpan.FromSeconds(1) : null,
+            credentialLifetime: expireVerifierRequest ? null : TimeSpan.FromSeconds(1));
+
+        // Request is still valid at its first authentication, and credential
+        // is still valid at the next issuer signature verification. Expire it
+        // only during the genuine issuer-status check. The last acceptance
+        // gate must recheck both lifetimes before revealing a signed subject.
+        clock.Arm(3, TimeSpan.FromSeconds(2));
+        Assert.False(scenario.Preview(out var preview));
+        Assert.Null(preview);
+    }
+
+    [Fact]
+    public void CredentialExpiryAfterRealHolderSignatureCannotReturnAStaleVp()
+    {
+        var clock = new JumpClock(DateTimeOffset.Parse(
+            "2026-11-05T13:00:00Z", System.Globalization.CultureInfo.InvariantCulture));
+        var scenario = new Scenario(clock: clock,
+            credentialLifetime: TimeSpan.FromSeconds(1));
+        Assert.True(scenario.Preview(out var preview));
+        Assert.NotNull(preview);
+
+        // Four reads reauthenticate the original preview, three occur inside
+        // the real holder signer, one checks the request, and the ninth
+        // reaches the post-sign final gate. A still-fresh issuer status must
+        // not convert an already-expired original VC into a valid VP.
+        clock.Arm(9, TimeSpan.FromSeconds(2));
+        Assert.Throws<ArgumentException>(() =>
+            Vcdm20SignedIdWalletDisclosure.CreateAfterPreview(
+                preview, scenario.Request, scenario.Credential, scenario.Status,
+                scenario.Holder.Seed, clock));
+    }
+
+    private sealed class JumpClock(DateTimeOffset now) : TimeProvider
+    {
+        private DateTimeOffset _now = now;
+        private int _remainingReads;
+        private TimeSpan _jump;
+
+        public void Arm(int readsUntilJump, TimeSpan jump)
+        {
+            _remainingReads = readsUntilJump;
+            _jump = jump;
+        }
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            if (_remainingReads > 0 && --_remainingReads == 0)
+            {
+                _now = _now.Add(_jump);
+            }
+
+            return _now;
+        }
+    }
+
     private sealed class Scenario
     {
         public (byte[] Seed, string Did) Issuer { get; } = Identity();
         public (byte[] Seed, string Did) Holder { get; } = Identity();
         public (byte[] Seed, string Did) Verifier { get; } = Identity();
-        public TimeProvider Clock { get; } = TimeProvider.System;
+        public TimeProvider Clock { get; }
         public Guid Tenant { get; } = Guid.NewGuid();
         public InMemoryPresentationChallengeStore Store { get; }
         public PresentationChallenge Challenge { get; }
@@ -106,10 +171,12 @@ public sealed class Vcdm20SignedIdWalletDisclosureTests
         public IReadOnlyDictionary<string, string> RequiredClaims { get; } =
             new Dictionary<string, string> { ["membership"] = "active" };
 
-        public Scenario(string variant = "valid")
+        public Scenario(string variant = "valid", TimeProvider? clock = null,
+            TimeSpan? challengeLifetime = null, TimeSpan? credentialLifetime = null)
         {
+            Clock = clock ?? TimeProvider.System;
             Store = new InMemoryPresentationChallengeStore(Clock);
-            Challenge = Store.Issue(Tenant, Audience, Issuer.Did);
+            Challenge = Store.Issue(Tenant, Audience, Issuer.Did, challengeLifetime);
             Request = OfflineSignedPresentationRequest.Create(
                 Challenge with { CredentialType = CredentialType, SubjectContextUri = Context },
                 Verifier.Did, Verifier.Seed, Clock);
@@ -120,7 +187,7 @@ public sealed class Vcdm20SignedIdWalletDisclosureTests
             Credential = Vcdm20JoseCredential.CreateWithId(
                 Issuer.Did, Holder.Did, CredentialType, Context,
                 subject.RootElement, Issuer.Seed, now.AddMinutes(-1),
-                now.AddMinutes(5),
+                now.Add(credentialLifetime ?? TimeSpan.FromMinutes(5)),
                 variant == "wrong-id" ? new Uri("https://issuer.example/member-credentials/other") : CredentialId);
             var statusSigner = variant == "foreign-status" ? Identity() : Issuer;
             DateTimeOffset observed = variant == "stale-status" ? now.AddSeconds(-30) : now.AddSeconds(-2);
