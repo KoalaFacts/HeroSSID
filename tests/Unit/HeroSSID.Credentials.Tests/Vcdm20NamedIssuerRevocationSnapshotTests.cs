@@ -115,7 +115,12 @@ public sealed class Vcdm20NamedIssuerRevocationSnapshotTests
                 authorization = "admin"
             }), StringComparison.Ordinal);
 
-        foreach (string alteredPayload in new[] { wrongId, extraMember })
+        // Even a genuinely signed eighth top-level member cannot expand
+        // the opt-in seven-member named-issuer + ID verification policy.
+        string unverifiedRecipient = original[..^1] +
+            ",\\\"aud\\\":\\\"https://verifier.example/credentials\\\"}";
+
+        foreach (string alteredPayload in new[] { wrongId, extraMember, unverifiedRecipient })
         {
             Assert.NotEqual(original, alteredPayload);
             string signed = Ed25519JwtSigner.CreateSignedJwt(
