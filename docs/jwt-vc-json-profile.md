@@ -51,6 +51,46 @@ This is a **.NET SDK issuance option only**, not an authenticated HTTP
 issuance option, durable credential storage or external wallet interoperability
 certification. It does not claim full W3C VC/OpenID4VP conformance.
 
+### Independently pinned issuer name and credential ID before claim release (SDK opt-in)
+
+The separate `JwtVcJsonCredential.TryVerifyWithPinnedIssuerNameAndId` protects
+organisational credential consumers that require **both** a specific descriptive
+issuer name and an exact original signed HTTPS credential identifier. It
+checks a genuine Ed25519 VC1.1 `jwt_vc_json` signature, an independently pinned
+issuer DID, expected holder, credential type, versioned vocabulary, validity,
+signed `vc.issuer: {id,name}` and signed JWT `jti`. A different, otherwise
+valid issuer-signed name or membership identifier fails before any subject
+claims are returned. Unlike `TryVerifyWithIssuerName`, this method does not
+return claims merely because the issuer-signed name can be read.
+
+```csharp
+// Issuer independently controls the real signing seed.
+string credential = JwtVcJsonCredential.CreateWithIssuerName(
+    issuerDid, holderDid, "MembershipCredential", vocabulary,
+    subject.RootElement, issuerSeed, now.AddMinutes(-1),
+    now.AddMinutes(5), "Australasian Membership Office",
+    new Uri("https://issuer.example/credentials/member-0151"),
+    exactValidity: false);
+
+// The relying party independently configured ALL of these expectations.
+bool accepted = JwtVcJsonCredential.TryVerifyWithPinnedIssuerNameAndId(
+    credential, trustedIssuerDid, "Australasian Membership Office",
+    expectedHolderDid, "MembershipCredential", pinnedVocabulary,
+    new Uri("https://issuer.example/credentials/member-0151"),
+    now, out JsonElement authenticatedSubject);
+```
+
+Failure returns `false` with `authenticatedSubject.ValueKind=Undefined`;
+it never releases the authentically signed but **wrong-policy** subject.
+An absent `vc.issuer.name`, absent `jti`, non-HTTPS/userinfo-bearing
+expected ID, mismatched issuer name/ID/holder or tampered/expired JWT
+also fails. Exact ordinal name and original signed ID comparison is intended
+to prevent silent organisational or membership substitution. Neither
+claim proves legal identity, key possession by the holder, user consent,
+fresh revocation status, actual membership entitlement or business/Agent
+authorization. This is an SDK-only bounded VC1.1 profile, **not** tested
+third-party wallet interoperability or a complete OpenID4VP flow.
+
 ### Opt-in exact 100ns NumericDate issuance
 
 Use `JwtVcJsonCredential.CreateWithExactValidity(issuerDid, holderDid,
