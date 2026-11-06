@@ -52,6 +52,22 @@ public static class JwtVcJsonPinnedDidWebIssuerVerifier
             now, out verifiedSubject);
     }
 
+    /// <summary>
+    /// Require an exact signed descriptive issuer name and credential ID in
+    /// addition to the separately enrolled did:web Ed25519 assertion key.
+    /// No issuer enrollment, DID resolution, holder proof or business
+    /// authorization occurs.
+    /// </summary>
+    public static bool TryVerifyWithPinnedIssuerNameAndId(
+        string jwt, string trustedIssuerDid, string trustedVerificationMethodId,
+        byte[] independentlyPinnedIssuerPublicKey, string expectedIssuerName,
+        Uri expectedCredentialId, string expectedHolderDid,
+        string expectedCredentialType, Uri expectedSubjectContextUri,
+        DateTimeOffset now, out JsonElement verifiedSubject)
+    {
+        throw new NotSupportedException("Named did:web issuer metadata verification is not implemented.");
+    }
+
     private static bool IsRestrictedDidWeb(string did)
     {
         const string prefix = "did:web:";
