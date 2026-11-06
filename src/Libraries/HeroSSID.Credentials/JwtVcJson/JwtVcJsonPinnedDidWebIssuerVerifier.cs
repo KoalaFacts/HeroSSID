@@ -52,6 +52,49 @@ public static class JwtVcJsonPinnedDidWebIssuerVerifier
             now, out verifiedSubject);
     }
 
+    /// <summary>
+    /// Require an exact signed descriptive issuer name and credential ID in
+    /// addition to the separately enrolled did:web Ed25519 assertion key.
+    /// No issuer enrollment, DID resolution, holder proof or business
+    /// authorization occurs.
+    /// </summary>
+    public static bool TryVerifyWithPinnedIssuerNameAndId(
+        string jwt, string trustedIssuerDid, string trustedVerificationMethodId,
+        byte[] independentlyPinnedIssuerPublicKey, string expectedIssuerName,
+        Uri expectedCredentialId, string expectedHolderDid,
+        string expectedCredentialType, Uri expectedSubjectContextUri,
+        DateTimeOffset now, out JsonElement verifiedSubject)
+    {
+        ArgumentNullException.ThrowIfNull(jwt);
+        ArgumentNullException.ThrowIfNull(trustedIssuerDid);
+        ArgumentNullException.ThrowIfNull(trustedVerificationMethodId);
+        ArgumentNullException.ThrowIfNull(independentlyPinnedIssuerPublicKey);
+        ArgumentNullException.ThrowIfNull(expectedIssuerName);
+        ArgumentNullException.ThrowIfNull(expectedCredentialId);
+        ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
+        verifiedSubject = default;
+
+        if (!IsRestrictedDidWeb(trustedIssuerDid) ||
+            !(string.Equals(trustedVerificationMethodId, trustedIssuerDid + "#key-1",
+                StringComparison.Ordinal) ||
+              string.Equals(trustedVerificationMethodId, trustedIssuerDid + "#key-2",
+                StringComparison.Ordinal)) ||
+            independentlyPinnedIssuerPublicKey.Length != 32 ||
+            independentlyPinnedIssuerPublicKey.All(static b => b == 0))
+        {
+            return false;
+        }
+
+        // The key is enrolled out of band. Verify the original JWT signature
+        // and signed metadata together against one stable snapshot of that pin.
+        byte[] pinnedKey = independentlyPinnedIssuerPublicKey.ToArray();
+        return JwtVcJsonCredential.TryVerifyPinnedDidWebIssuerMetadataCore(
+            jwt, trustedIssuerDid, trustedVerificationMethodId, pinnedKey,
+            expectedIssuerName, expectedCredentialId, expectedHolderDid,
+            expectedCredentialType, expectedSubjectContextUri, now,
+            out verifiedSubject);
+    }
+
     private static bool IsRestrictedDidWeb(string did)
     {
         const string prefix = "did:web:";
