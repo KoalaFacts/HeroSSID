@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using HeroSSID.Credentials.CredentialRevocation;
 using HeroSSID.Credentials.JwtVcJson;
+using HeroSSID.Credentials.Utilities;
 using HeroSSID.Credentials.VerifiablePresentations;
 using NSec.Cryptography;
 
@@ -71,6 +72,55 @@ public sealed class JwtVcJsonPinnedDidWebIssuerStatusTests
             Check(f, CreateStatus(f, revoked: false), f.IssuerPublicKey, out _));
     }
 
+
+    [Fact]
+    public void FreshGenuineStatusForDifferentIssuerJwtCannotClearPresentedCredential()
+    {
+        Fixture f = CreateFixture();
+        string changedPayload = Ed25519JwtSigner.ExtractPayload(f.CredentialJwt)
+            .Replace("\"role\":\"member\"", "\"role\":\"visitor\"", StringComparison.Ordinal);
+        Assert.NotEqual(Ed25519JwtSigner.ExtractPayload(f.CredentialJwt), changedPayload);
+        string secondOriginal = Ed25519JwtSigner.CreateSignedJwt(
+            Ed25519JwtSigner.ExtractHeader(f.CredentialJwt),
+            changedPayload, f.IssuerSeed);
+        string status = JwtVcJsonPinnedDidWebIssuerStatus.Create(
+            secondOriginal, IssuerDid, Method, f.IssuerPublicKey,
+            f.IssuerSeed, revoked: false, f.Clock.GetUtcNow(), f.Clock);
+
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            Check(f, status, f.IssuerPublicKey, out JsonElement rejected));
+        Assert.Equal(JsonValueKind.Undefined, rejected.ValueKind);
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            Check(f, CreateStatus(f, revoked: false), f.IssuerPublicKey, out _));
+    }
+
+    [Fact]
+    public void AuthenticallySignedButExpiredStatusCannotReleaseClaims()
+    {
+        var clock = new AdjustableClock(new DateTimeOffset(2026, 11, 6, 23, 0, 0, TimeSpan.Zero));
+        Fixture f = CreateFixture(clock);
+        string status = CreateStatus(f, revoked: false);
+        clock.Advance(TimeSpan.FromSeconds(61));
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            Check(f, status, f.IssuerPublicKey, out JsonElement rejected));
+        Assert.Equal(JsonValueKind.Undefined, rejected.ValueKind);
+    }
+
+    [Fact]
+    public void ReSignedStatusWithAnotherAssertionMethodIsNotTrusted()
+    {
+        Fixture f = CreateFixture();
+        string authentic = CreateStatus(f, revoked: false);
+        string changedHeader = Ed25519JwtSigner.ExtractHeader(authentic)
+            .Replace("#key-2", "#key-1", StringComparison.Ordinal);
+        string foreignMethod = Ed25519JwtSigner.CreateSignedJwt(
+            changedHeader, Ed25519JwtSigner.ExtractPayload(authentic),
+            f.IssuerSeed);
+        Assert.Equal(RevocationSnapshotCheckResult.Invalid,
+            Check(f, foreignMethod, f.IssuerPublicKey, out JsonElement rejected));
+        Assert.Equal(JsonValueKind.Undefined, rejected.ValueKind);
+    }
+
     private static string CreateStatus(Fixture f, bool revoked) =>
         JwtVcJsonPinnedDidWebIssuerStatus.Create(
             f.CredentialJwt, IssuerDid, Method, f.IssuerPublicKey,
@@ -83,12 +133,12 @@ public sealed class JwtVcJsonPinnedDidWebIssuerStatusTests
             IssuerDid, Method, issuerPublicKey, IssuerName, CredentialId,
             CredentialType, Context, f.Store, f.Clock, out subject);
 
-    private static Fixture CreateFixture()
+    private static Fixture CreateFixture(TimeProvider? suppliedClock = null)
     {
         var issuer = Identity();
         var holder = Identity();
         var verifier = Identity();
-        var clock = TimeProvider.System;
+        TimeProvider clock = suppliedClock ?? TimeProvider.System;
         Guid tenant = Guid.NewGuid();
         string audience = "decentralized_identifier:" + verifier.Did;
         var store = new InMemoryPresentationChallengeStore(clock);
@@ -119,6 +169,15 @@ public sealed class JwtVcJsonPinnedDidWebIssuerStatusTests
         publicKey.CopyTo(multicodec, 2);
         return (key.Export(KeyBlobFormat.RawPrivateKey), publicKey,
             "did:key:z" + SimpleBase.Base58.Bitcoin.Encode(multicodec));
+    }
+
+    private sealed class AdjustableClock(DateTimeOffset now) : TimeProvider
+    {
+        private DateTimeOffset _now = now;
+
+        public override DateTimeOffset GetUtcNow() => _now;
+
+        public void Advance(TimeSpan elapsed) => _now = _now.Add(elapsed);
     }
 
     private sealed record Fixture(
