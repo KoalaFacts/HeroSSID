@@ -69,6 +69,67 @@ public sealed class Vcdm20NamedIssuerRevocationSnapshotTests
     }
 
     [Fact]
+    public void SignedNamedIssuerWithoutCredentialIdCannotEnterThisStatusProfile()
+    {
+        using var claims = Subject();
+        DateTimeOffset now = _clock.GetUtcNow();
+        string unnamedId = Vcdm20JoseCredential.CreateWithNamedIssuer(
+            _issuer.Did, IssuerName, _holder.Did, CredentialType, Context,
+            claims.RootElement, _issuer.Seed, now.AddMinutes(-1),
+            now.AddMinutes(10));
+
+        Assert.Throws<CryptographicException>(() =>
+            Vcdm20RevocationSnapshot.Create(_issuer.Did, [unnamedId],
+                _issuer.Seed, Observation(), _clock));
+        Assert.Equal(Vcdm20RevocationCheckResult.Invalid,
+            Vcdm20RevocationSnapshot.Check(Snapshot([]), unnamedId,
+                _issuer.Did, _clock.GetUtcNow()));
+    }
+
+    [Fact]
+    public void SignedIssuerObjectWithForeignIdOrUnknownMemberCannotEnterStatus()
+    {
+        string jwt = IssueNamedCredential();
+        string original = Ed25519JwtSigner.ExtractPayload(jwt);
+        string exactIssuer = JsonSerializer.Serialize(new
+        {
+            id = _issuer.Did,
+            name = IssuerName
+        });
+        string issuerObject = "\"issuer\":" + exactIssuer;
+        Assert.Contains(issuerObject, original, StringComparison.Ordinal);
+        string snapshot = Snapshot([]);
+
+        var foreign = NewIdentity();
+        string wrongId = original.Replace(issuerObject,
+            "\"issuer\":" + JsonSerializer.Serialize(new
+            {
+                id = foreign.Did,
+                name = IssuerName
+            }), StringComparison.Ordinal);
+        string extraMember = original.Replace(issuerObject,
+            "\"issuer\":" + JsonSerializer.Serialize(new
+            {
+                id = _issuer.Did,
+                name = IssuerName,
+                authorization = "admin"
+            }), StringComparison.Ordinal);
+
+        foreach (string alteredPayload in new[] { wrongId, extraMember })
+        {
+            Assert.NotEqual(original, alteredPayload);
+            string signed = Ed25519JwtSigner.CreateSignedJwt(
+                Ed25519JwtSigner.ExtractHeader(jwt), alteredPayload, _issuer.Seed);
+            Assert.Throws<CryptographicException>(() =>
+                Vcdm20RevocationSnapshot.Create(_issuer.Did, [signed],
+                    _issuer.Seed, Observation(), _clock));
+            Assert.Equal(Vcdm20RevocationCheckResult.Invalid,
+                Vcdm20RevocationSnapshot.Check(snapshot, signed,
+                    _issuer.Did, _clock.GetUtcNow()));
+        }
+    }
+
+    [Fact]
     public void ExistingStringIssuerSignedIdRemainsRevocable()
     {
         using var claims = Subject();
