@@ -26,6 +26,10 @@ public enum JwtVcJsonPresentationCheckResult
 /// B.1.3.1.5 nested JWT shape, but the verifier's signed request is a private
 /// HeroSSID profile, NOT OpenID4VP or an independently tested wallet exchange.
 /// </summary>
+internal sealed record PinnedDidWebIssuerPresentationPolicy(
+    string IssuerDid, string VerificationMethodId, byte[] PublicKey,
+    string IssuerName, Uri CredentialId);
+
 public static class JwtVcJsonPresentation
 {
     private const string BaseContext = "https://www.w3.org/2018/credentials/v1";
@@ -67,7 +71,8 @@ public static class JwtVcJsonPresentation
     /// </summary>
     internal static string CreateForAuthenticatedChallenge(PresentationChallenge challenge,
         string credentialJwt, string expectedCredentialType, Uri expectedSubjectContextUri,
-        string holderDid, byte[] holderSeed, TimeProvider clock, string? originalSignedRequestJwt = null)
+        string holderDid, byte[] holderSeed, TimeProvider clock, string? originalSignedRequestJwt = null,
+        PinnedDidWebIssuerPresentationPolicy? pinnedDidWebIssuer = null)
     {
         ArgumentNullException.ThrowIfNull(challenge);
         ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
@@ -79,8 +84,9 @@ public static class JwtVcJsonPresentation
             credentialJwt.Length > MaximumCredentialLength ||
             holderSeed.Length != 32 || holderSeed.All(static value => value == 0) ||
             !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(holderDid, out var holderPublicKey) ||
-            !JwtVcJsonCredential.TryVerify(credentialJwt, challenge.TrustedIssuerDid,
-                holderDid, expectedCredentialType, expectedSubjectContextUri, now, out _) ||
+            !TryVerifyIssuerCredential(credentialJwt, challenge.TrustedIssuerDid,
+                holderDid, expectedCredentialType, expectedSubjectContextUri,
+                now, pinnedDidWebIssuer, out _) ||
             !TryReadCredentialExpiry(credentialJwt, out decimal credentialExpires))
         {
             throw new ArgumentException("An authentic issuer credential and an actual holder signing key are required.",
@@ -168,6 +174,23 @@ public static class JwtVcJsonPresentation
             null, out verifiedSubject);
 
     /// <summary>
+    /// Reuse the original VC1.1 nested holder VP proof, but require the
+    /// verifier's independently pinned did:web assertion key and original
+    /// issuer name/credential ID. The verifier's challenge is consumed only
+    /// after BOTH issuer and holder signatures authenticate.
+    /// </summary>
+    internal static JwtVcJsonPresentationCheckResult CheckWithPinnedDidWebIssuer(
+        string presentationJwt, Guid verifierTenantId, string expectedAudience,
+        string expectedNonce, string expectedCredentialType,
+        Uri expectedSubjectContextUri, IPresentationChallengeStore challenges,
+        TimeProvider clock, PinnedDidWebIssuerPresentationPolicy issuerPolicy,
+        out JsonElement verifiedSubject) =>
+        CheckCore(presentationJwt, verifierTenantId, expectedAudience,
+            expectedNonce, expectedCredentialType, expectedSubjectContextUri,
+            challenges, clock, null, out verifiedSubject,
+            pinnedDidWebIssuer: issuerPolicy);
+
+    /// <summary>
     /// Require the holder's actual Ed25519 signature over the exact original
     /// verifier request digest. The caller MUST authenticate the signed
     /// request and independently retain its SHA-256 before invoking this.
@@ -205,7 +228,8 @@ public static class JwtVcJsonPresentation
         string expectedCredentialType, Uri expectedSubjectContextUri,
         IPresentationChallengeStore? challenges, TimeProvider clock,
         string? requiredOriginalRequestSha256, out JsonElement verifiedSubject,
-        PresentationChallenge? authenticatedWalletChallenge = null)
+        PresentationChallenge? authenticatedWalletChallenge = null,
+        PinnedDidWebIssuerPresentationPolicy? pinnedDidWebIssuer = null)
     {
         ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
         ArgumentNullException.ThrowIfNull(clock);
@@ -230,7 +254,11 @@ public static class JwtVcJsonPresentation
         var challenge = authenticatedWalletChallenge ??
             challenges!.Find(verifierTenantId, expectedAudience, expectedNonce);
         DateTimeOffset now = clock.GetUtcNow();
-        if (challenge is null || challenge.ExpiresAt <= now ||
+        if (challenge is null ||
+            (pinnedDidWebIssuer is not null &&
+                !string.Equals(challenge.TrustedIssuerDid, pinnedDidWebIssuer.IssuerDid,
+                    StringComparison.Ordinal)) ||
+            challenge.ExpiresAt <= now ||
             challenge.ExpiresAt > now.Add(InMemoryPresentationChallengeStore.MaximumLifetime) ||
             !StrictJwtReader.TryRead(presentationJwt, "vp+jwt", MaximumPresentationLength,
                 out var payload, KeyId(holderDid)) ||
@@ -260,8 +288,9 @@ public static class JwtVcJsonPresentation
         if (notBefore != issuedAt || issuedAt > current || expiresAt <= current ||
             expiresAt <= issuedAt || expiresAt - issuedAt > 300 ||
             expiresAt > PresentationChallengePolicy.NumericDate(challenge.ExpiresAt) ||
-            !JwtVcJsonCredential.TryVerify(credentialJwt, challenge.TrustedIssuerDid,
-                holderDid, expectedCredentialType, expectedSubjectContextUri, now, out var subject) ||
+            !TryVerifyIssuerCredential(credentialJwt, challenge.TrustedIssuerDid,
+                holderDid, expectedCredentialType, expectedSubjectContextUri,
+                now, pinnedDidWebIssuer, out var subject) ||
             !TryReadCredentialExpiry(credentialJwt, out decimal credentialExpires) ||
             expiresAt > credentialExpires)
         {
@@ -288,14 +317,41 @@ public static class JwtVcJsonPresentation
         now = clock.GetUtcNow();
         if (challenge.ExpiresAt <= now ||
             expiresAt <= PresentationChallengePolicy.NumericDate(now) ||
-            !JwtVcJsonCredential.TryVerify(credentialJwt, challenge.TrustedIssuerDid,
-                holderDid, expectedCredentialType, expectedSubjectContextUri, now, out _))
+            !TryVerifyIssuerCredential(credentialJwt, challenge.TrustedIssuerDid,
+                holderDid, expectedCredentialType, expectedSubjectContextUri,
+                now, pinnedDidWebIssuer, out _))
         {
             return JwtVcJsonPresentationCheckResult.Invalid;
         }
 
         verifiedSubject = subject;
         return JwtVcJsonPresentationCheckResult.SignedButStatusUnchecked;
+    }
+
+    // The new did:web path never falls back to the legacy self-certifying
+    // did:key verifier. A signature from an unpinned key must not be accepted
+    // merely because the JWT supplies its own issuer or method identifiers.
+    private static bool TryVerifyIssuerCredential(
+        string credentialJwt, string trustedIssuerDid, string holderDid,
+        string credentialType, Uri context, DateTimeOffset now,
+        PinnedDidWebIssuerPresentationPolicy? pinnedDidWebIssuer,
+        out JsonElement verifiedSubject)
+    {
+        if (pinnedDidWebIssuer is null)
+        {
+            return JwtVcJsonCredential.TryVerify(credentialJwt, trustedIssuerDid,
+                holderDid, credentialType, context, now, out verifiedSubject);
+        }
+
+        verifiedSubject = default;
+        return string.Equals(trustedIssuerDid, pinnedDidWebIssuer.IssuerDid,
+                   StringComparison.Ordinal) &&
+            JwtVcJsonPinnedDidWebIssuerVerifier.TryVerifyWithPinnedIssuerNameAndId(
+                credentialJwt, trustedIssuerDid,
+                pinnedDidWebIssuer.VerificationMethodId,
+                pinnedDidWebIssuer.PublicKey, pinnedDidWebIssuer.IssuerName,
+                pinnedDidWebIssuer.CredentialId, holderDid, credentialType,
+                context, now, out verifiedSubject);
     }
 
     private static bool TryReadEmbeddedCredential(JsonElement payload, out string credentialJwt)
