@@ -427,6 +427,36 @@ public static class JwtVcJsonCredential
             expectedContext, now, out verifiedSubject, out _, out _, out _, out _,
             independentlyPinnedIssuerKey: pinnedPublicKey, pinnedVerificationMethodId: pinnedKeyId);
 
+    /// <summary>
+    /// Verify original did:web issuer-signed metadata using the exact, separately
+    /// enrolled assertion key. Reuse all existing JWT VC1.1 structural, temporal
+    /// and cryptographic checks; expose no subject on a metadata pin mismatch.
+    /// </summary>
+    internal static bool TryVerifyPinnedDidWebIssuerMetadataCore(
+        string jwt, string issuerDid, string pinnedKeyId, byte[] pinnedPublicKey,
+        string expectedIssuerName, Uri expectedCredentialId, string expectedHolderDid,
+        string expectedCredentialType, Uri expectedContext, DateTimeOffset now,
+        out JsonElement verifiedSubject)
+    {
+        verifiedSubject = default;
+        if (!ValidIssuerName(expectedIssuerName) ||
+            !ValidCredentialId(expectedCredentialId) ||
+            !TryVerifyCore(jwt, issuerDid, expectedHolderDid, expectedCredentialType,
+                expectedContext, now, out JsonElement signedSubject,
+                out string? signedCredentialId, out string? signedIssuerName,
+                out _, out _, independentlyPinnedIssuerKey: pinnedPublicKey,
+                pinnedVerificationMethodId: pinnedKeyId) ||
+            !string.Equals(signedIssuerName, expectedIssuerName, StringComparison.Ordinal) ||
+            !string.Equals(signedCredentialId, expectedCredentialId.AbsoluteUri,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        verifiedSubject = signedSubject;
+        return true;
+    }
+
     private static bool TryVerifyCore(string jwt, string trustedIssuerDid, string expectedHolderDid,
         string expectedCredentialType, Uri expectedSubjectContextUri,
         DateTimeOffset now, out JsonElement verifiedSubject, out string? verifiedCredentialId,
