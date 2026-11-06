@@ -95,7 +95,7 @@ public static class JwtVcJsonPinnedDidWebIssuerVerifier
             out verifiedSubject);
     }
 
-    private static bool IsRestrictedDidWeb(string did)
+    internal static bool IsRestrictedDidWeb(string did)
     {
         const string prefix = "did:web:";
         if (did.Length > 512 || !did.StartsWith(prefix, StringComparison.Ordinal))
