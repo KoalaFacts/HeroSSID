@@ -177,6 +177,16 @@ public sealed class JwtVcJsonPinnedIssuerNameIdHttpTests(AspireWebApplicationFac
             revocationSnapshot = "not-a-snapshot"
         }).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.BadRequest, unexpectedStatus.StatusCode);
+    }
+
+    [Fact]
+    public async Task LegacyVerifierRejectsUnexpectedIssuerNameAndCredentialIdPolicy()
+    {
+        using var issuer = NewKey();
+        using var holder = NewKey();
+        string issuerDid = Did(issuer);
+        string holderDid = Did(holder);
+        string credential = Issue(issuer, issuerDid, holderDid);
 
         // Before this feature, legacy HTTP verification would silently ignore
         // independent issuer-name and ID policy and return the signed subject.
@@ -188,6 +198,7 @@ public sealed class JwtVcJsonPinnedIssuerNameIdHttpTests(AspireWebApplicationFac
             expectedCredentialId = CredentialId
         }).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.BadRequest, legacy.StatusCode);
+
     }
 
     private static async Task AssertRejectedAsync(HttpResponseMessage response, string status)
