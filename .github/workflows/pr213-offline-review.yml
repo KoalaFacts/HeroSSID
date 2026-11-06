@@ -1,0 +1,131 @@
+name: One-off independent offline PR213 review
+on:
+  push:
+    branches:
+      - review/pr213-offline-20261106
+
+permissions: {}
+
+jobs:
+  review:
+    name: Independent model review of complete PR213 patch
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout immutable helper and pinned candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify pinned source and baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin feat/didweb-vc11-issuer-metadata-pins-20261106:refs/remotes/origin/pr213-reviewed-source
+          test "$(git rev-parse d5fb599b2eec1ac5da4941a53ffcc1166172d468^{commit})" = "d5fb599b2eec1ac5da4941a53ffcc1166172d468"
+          test "$(git rev-parse cca7b7055ad1e5d06b190a38a82e8b7e7212ea7a^{commit})" = "cca7b7055ad1e5d06b190a38a82e8b7e7212ea7a"
+          test "$(git diff --name-only cca7b7055ad1e5d06b190a38a82e8b7e7212ea7a d5fb599b2eec1ac5da4941a53ffcc1166172d468 | wc -l)" -eq 3
+      - name: Install isolated local review model
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location https://ollama.com/install.sh --output /tmp/ollama-install.sh
+          sh /tmp/ollama-install.sh
+          nohup ollama serve >/tmp/ollama-server.log 2>&1 </dev/null &
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null
+          ollama pull qwen2.5-coder:7b
+      - name: Review complete pinned file patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          for part in 1 2; do
+            REVIEW_PART="$part" python3 tools/offline_pr213_review.py
+            test -s "review-$part.md"
+            test -s "review-$part.json"
+            test "$(cat review-head-$part.txt)" = "d5fb599b2eec1ac5da4941a53ffcc1166172d468"
+          done
+      - name: Retain raw review and model evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-pr213-review
+          path: |
+            review-*.md
+            review-*.json
+            review-head-*.txt
+            review-model-*.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  publish:
+    name: Submit verified independent model COMMENTED review
+    needs: review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Download complete model review
+        uses: actions/download-artifact@v4
+        with:
+          name: independent-pr213-review
+      - name: Verify changed files, model evidence and unchanged PR head
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/212 --jq '.head.sha')"
+          test "$actual" = "d5fb599b2eec1ac5da4941a53ffcc1166172d468"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          expected_head = "d5fb599b2eec1ac5da4941a53ffcc1166172d468"
+          expected_files = {
+              "src/Libraries/HeroSSID.Credentials/JwtVcJson/JwtVcJsonCredential.cs",
+              "src/Libraries/HeroSSID.Credentials/JwtVcJson/JwtVcJsonPinnedDidWebIssuerVerifier.cs",
+              "tests/Unit/HeroSSID.Credentials.Tests/JwtVcJsonPinnedDidWebIssuerMetadataTests.cs",
+          }
+          seen = set()
+          for part in (1, 2):
+              payload = json.loads(Path(f"review-{part}.json").read_text())
+              assert payload["head"] == expected_head
+              assert payload["part"] == part
+              files = set(payload["files"])
+              assert files and files.isdisjoint(seen)
+              seen.update(files)
+              assert payload["review"]["verdict"] in (
+                  "no_actionable_findings", "actionable_findings", "inconclusive"
+              )
+              assert Path(f"review-model-{part}.json").stat().st_size > 20
+              assert Path(f"review-{part}.md").stat().st_size > 200
+          assert seen == expected_files
+          PY
+      - name: Publish COMMENTED review (not APPROVED)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo 'Independent local Qwen2.5-Coder 7B automated code review of PR #213.'
+            echo
+            echo 'Exact source: d5fb599b2eec1ac5da4941a53ffcc1166172d468. Baseline: cca7b7055ad1e5d06b190a38a82e8b7e7212ea7a.'
+            echo 'This is NOT human approval, an external audit or independent wallet conformance.'
+            echo 'Investigate every finding against the actual source and tests before merge.'
+            echo
+            cat review-1.md
+            echo
+            cat review-2.md
+            echo
+          } > /tmp/pr213-review.md
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/212/reviews \
+            -f event=COMMENT -f commit_id="d5fb599b2eec1ac5da4941a53ffcc1166172d468" \
+            -f body="$(cat /tmp/pr213-review.md)" \
+            --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
