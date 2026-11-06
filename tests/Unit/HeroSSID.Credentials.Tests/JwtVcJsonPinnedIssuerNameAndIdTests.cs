@@ -104,13 +104,13 @@ public sealed class JwtVcJsonPinnedIssuerNameAndIdTests
         Assert.Equal(JsonValueKind.Undefined, claims.ValueKind);
     }
 
-    private static bool V    private static bool Verify(string jwt, string issuerDid, string issuerName,
+    private static bool Verify(string jwt, string issuerDid, string issuerName,
         string holderDid, Uri credentialId, DateTimeOffset now, out JsonElement claims) =>
         JwtVcJsonCredential.TryVerifyWithPinnedIssuerNameAndId(
             jwt, issuerDid, issuerName, holderDid, CredentialType, Vocabulary,
             credentialId, now, out claims);
 
-] Seed, string Did) NewIdentity()
+    private static (byte[] Seed, string Did) NewIdentity()
     {
         using var key = Key.Create(SignatureAlgorithm.Ed25519,
             new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
