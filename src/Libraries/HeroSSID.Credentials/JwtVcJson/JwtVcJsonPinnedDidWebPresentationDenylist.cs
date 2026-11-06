@@ -111,7 +111,7 @@ public static class JwtVcJsonPinnedDidWebPresentationDenylist
         return JwtVcJsonPinnedDidWebDenylistResult.SignedButStatusUnchecked;
     }
 
-    private static bool TryGetExactOriginalCredential(
+    internal static bool TryGetExactOriginalCredential(
         string presentationJwt, out string originalCredentialJwt)
     {
         originalCredentialJwt = string.Empty;
