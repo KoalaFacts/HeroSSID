@@ -65,7 +65,34 @@ public static class JwtVcJsonPinnedDidWebIssuerVerifier
         string expectedCredentialType, Uri expectedSubjectContextUri,
         DateTimeOffset now, out JsonElement verifiedSubject)
     {
-        throw new NotSupportedException("Named did:web issuer metadata verification is not implemented.");
+        ArgumentNullException.ThrowIfNull(jwt);
+        ArgumentNullException.ThrowIfNull(trustedIssuerDid);
+        ArgumentNullException.ThrowIfNull(trustedVerificationMethodId);
+        ArgumentNullException.ThrowIfNull(independentlyPinnedIssuerPublicKey);
+        ArgumentNullException.ThrowIfNull(expectedIssuerName);
+        ArgumentNullException.ThrowIfNull(expectedCredentialId);
+        ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
+        verifiedSubject = default;
+
+        if (!IsRestrictedDidWeb(trustedIssuerDid) ||
+            !(string.Equals(trustedVerificationMethodId, trustedIssuerDid + "#key-1",
+                StringComparison.Ordinal) ||
+              string.Equals(trustedVerificationMethodId, trustedIssuerDid + "#key-2",
+                StringComparison.Ordinal)) ||
+            independentlyPinnedIssuerPublicKey.Length != 32 ||
+            independentlyPinnedIssuerPublicKey.All(static b => b == 0))
+        {
+            return false;
+        }
+
+        // The key is enrolled out of band. Verify the original JWT signature
+        // and signed metadata together against one stable snapshot of that pin.
+        byte[] pinnedKey = independentlyPinnedIssuerPublicKey.ToArray();
+        return JwtVcJsonCredential.TryVerifyPinnedDidWebIssuerMetadataCore(
+            jwt, trustedIssuerDid, trustedVerificationMethodId, pinnedKey,
+            expectedIssuerName, expectedCredentialId, expectedHolderDid,
+            expectedCredentialType, expectedSubjectContextUri, now,
+            out verifiedSubject);
     }
 
     private static bool IsRestrictedDidWeb(string did)
