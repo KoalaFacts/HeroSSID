@@ -118,3 +118,46 @@ applications must use the independently pinned VC verifier and holder-signed
 one-use proof as separate gates before releasing claims. `SignedNotListed`
 only asserts absence from this signed snapshot, not a complete or live
 revocation inventory, legal identity, consent or business authorization.
+
+## Single-use recipient-bound status gate (SDK opt-in)
+
+`Vcdm20RevocationSnapshot.CheckRecipientBoundPresentationWithIssuerStatus`
+composes the existing real Ed25519 verifier-signed **original request**,
+issuer-signed credential with exact HTTPS `id` and `aud`, holder-signed
+full-disclosure VP, verifier-owned atomic one-use nonce and the **same actual
+issuer's** private, signed 60-second exact-token status. The verifier must
+independently retain the exact signed request SHA-256, expected recipient,
+credential ID, vocabulary, trusted issuer key and minimum signed status
+observation time; none may be supplied as trust policy by the holder.
+
+```csharp
+// request, requestPin, vp, challenges and statusJwt are obtained separately.
+// The verifier supplies its OWN enrolled original request and trust pins.
+Vcdm20RevocationCheckResult decision =
+    Vcdm20RevocationSnapshot.CheckRecipientBoundPresentationWithIssuerStatus(
+        vp, request, requestPin, verifierDid, statusJwt, verifierTenantId,
+        recipient.AbsoluteUri, challenge.Nonce, "MembershipCredential",
+        contextUri, credentialId, recipient, minimumObservedAtUtc,
+        challenges, clock, out JsonElement verifiedClaims);
+
+if (decision == Vcdm20RevocationCheckResult.SignedNotListed)
+{
+    // Claims are authenticated and this status snapshot did not list
+    // the exact original token. Apply separate business authorization here.
+}
+```
+
+A failed verifier request digest, recipient or credential ID pin is rejected
+**without** consuming the challenge. After a genuine issuer/holder proof spends
+the challenge, a revoked, stale, forged, foreign-issuer or missing snapshot
+rejects disclosure **and the nonce stays spent**; the verifier may not retry
+the same proof with a different status token. Before releasing claims the SDK
+rechecks both signed VP and status expiration against one final clock sample
+to prevent a processing-delay expiry race.
+
+`SignedNotListed` means only that this specific, genuine, short-lived issuer
+snapshot omitted the exact signed JWT digest. It does **not** certify a complete
+or live revocation inventory, valid business entitlement, issuer legal identity,
+holder consent, third-party Wallet interoperability or Agent authorization.
+The Wallet UI must obtain actual human consent separately; integrations need
+their own enrollment, status-observation and authorization policies.

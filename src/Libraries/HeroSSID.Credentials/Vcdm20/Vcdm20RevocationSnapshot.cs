@@ -341,6 +341,116 @@ public static class Vcdm20RevocationSnapshot
         return status;
     }
 
+    /// <summary>
+    /// Authenticate one real issuer- and holder-signed VC2 presentation against
+    /// an independently pinned verifier request, exact signed credential ID,
+    /// exact HTTPS recipient and same-issuer signed status before disclosing claims.
+    /// A challenge remains consumed if issuer status subsequently refuses it.
+    /// This does not attest live revocation, consent or business authority.
+    /// </summary>
+    public static Vcdm20RevocationCheckResult CheckRecipientBoundPresentationWithIssuerStatus(
+        string presentationJwt, string signedRequestJwt, string trustedRequestSha256,
+        string trustedVerifierDid, string snapshotJwt, Guid verifierTenantId,
+        string expectedAudience, string expectedNonce, string expectedCredentialType,
+        Uri expectedContextUri, Uri expectedCredentialId, Uri expectedCredentialAudience,
+        DateTimeOffset minimumObservedAtUtc, IPresentationChallengeStore challenges,
+        TimeProvider clock, out JsonElement verifiedSubject)
+    {
+        ArgumentNullException.ThrowIfNull(presentationJwt);
+        ArgumentNullException.ThrowIfNull(snapshotJwt);
+        ArgumentNullException.ThrowIfNull(challenges);
+        ArgumentNullException.ThrowIfNull(clock);
+        verifiedSubject = default;
+
+        // The retained issuer DID and exact signed verifier request pin are
+        // verifier-owned, not selected by the holder's VP or by status.
+        if (!PresentationChallengePolicy.IsValidLookup(
+                verifierTenantId, expectedAudience, expectedNonce))
+        {
+            return Vcdm20RevocationCheckResult.Invalid;
+        }
+
+        var retained = challenges.Find(verifierTenantId, expectedAudience, expectedNonce);
+        if (retained is null ||
+            Vcdm20JosePresentation.CheckForAudienceWithIdAndSignedRequest(
+                presentationJwt, signedRequestJwt, trustedRequestSha256,
+                trustedVerifierDid, verifierTenantId, expectedAudience,
+                expectedNonce, expectedCredentialType, expectedContextUri,
+                expectedCredentialId, expectedCredentialAudience, challenges,
+                clock, out JsonElement subject) !=
+                    Vcdm20PresentationCheckResult.SignedButStatusUnchecked ||
+            !TryExtractEnclosedJwt(presentationJwt, out string originalJwt))
+        {
+            return Vcdm20RevocationCheckResult.Invalid;
+        }
+
+        // The genuine VP check has already atomically spent the one-use nonce.
+        // Read status only for the EXACT enclosed issuer JWT, with the original
+        // verifier-enrolled issuer key. An issuer-owned snapshot cannot replace
+        // verifier audience/ID/trust policy.
+        Vcdm20RevocationCheckResult status = CheckWithObservationCutoff(
+            snapshotJwt, originalJwt, retained.TrustedIssuerDid,
+            clock.GetUtcNow(), minimumObservedAtUtc);
+        if (status != Vcdm20RevocationCheckResult.SignedNotListed)
+        {
+            return status;
+        }
+
+        // Genuine signatures, request pinning and one-use nonce consumption
+        // already passed. The shared final gate samples time only AFTER both
+        // bounded signed-token expiry parses have completed.
+        if (!SignedTokensRemainUnexpiredAtDisclosure(
+                presentationJwt, subject, snapshotJwt, clock))
+        {
+            return Vcdm20RevocationCheckResult.Invalid;
+        }
+
+        verifiedSubject = subject;
+        return Vcdm20RevocationCheckResult.SignedNotListed;
+    }
+
+    /// <summary>
+    /// Final time-of-disclosure expiry check for ALREADY authenticated issuer
+    /// and holder tokens. This does not authenticate signatures or authorize
+    /// disclosure on its own; only the signed presentation verifier calls it.
+    /// The internal parsing-boundary callback is exclusively a deterministic
+    /// test seam for simulating time passage DURING the second JWT parse.
+    /// </summary>
+    internal static bool SignedTokensRemainUnexpiredAtDisclosure(
+        string presentationJwt, JsonElement authenticatedSubject,
+        string snapshotJwt, TimeProvider clock,
+        Action? afterPresentationParsing = null)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+
+        if (!StrictJwtReader.TryGetString(authenticatedSubject, "id", out string holderDid) ||
+            !holderDid.StartsWith("did:key:", StringComparison.Ordinal) ||
+            !StrictJwtReader.TryRead(presentationJwt, "vp+jwt",
+                MaximumPresentationLength, out JsonElement signedPresentation,
+                holderDid + "#" + holderDid["did:key:".Length..], "vp") ||
+            !PresentationChallengePolicy.TryGetNumericDate(
+                signedPresentation, "exp", out decimal presentationExpires))
+        {
+            return false;
+        }
+
+        // The production path supplies null. A regression can advance its
+        // controlled clock here, between the two actual bounded JWT parses.
+        // Moving the final time sample above either parse must fail that test.
+        afterPresentationParsing?.Invoke();
+
+        if (!StrictJwtReader.TryRead(snapshotJwt, SnapshotType,
+                MaximumSnapshotLength, out JsonElement signedSnapshot) ||
+            !StrictJwtReader.TryGetTimestamp(signedSnapshot, "exp", out long statusExpires))
+        {
+            return false;
+        }
+
+        DateTimeOffset finalNow = clock.GetUtcNow();
+        return presentationExpires > PresentationChallengePolicy.NumericDate(finalNow) &&
+            statusExpires > finalNow.ToUnixTimeSeconds();
+    }
+
     // The sole credential extraction, signature, nonce-consumption and status
     // path for both compatibility and incident-cutoff verification. A bypass
     // cannot arise from applying the cutoff only to standalone credentials.
