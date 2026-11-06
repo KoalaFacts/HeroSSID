@@ -115,27 +115,49 @@ public static class JwtVcJsonPinnedDidWebPresentationDenylist
         string presentationJwt, out string originalCredentialJwt)
     {
         originalCredentialJwt = string.Empty;
-        if (!StrictJwtReader.TryRead(presentationJwt, "vp+jwt", 131_072,
-                out JsonElement holderClaims) ||
-            !holderClaims.TryGetProperty("vp", out JsonElement vp) ||
-            vp.ValueKind != JsonValueKind.Object ||
-            !vp.TryGetProperty("verifiableCredential", out JsonElement credentials) ||
-            credentials.ValueKind != JsonValueKind.Array ||
-            credentials.GetArrayLength() != 1 ||
-            credentials[0].ValueKind != JsonValueKind.String)
+        // The immediately preceding Check already authenticated the holder's
+        // complete vp+jwt with its actual did:key kid, rejected duplicate JSON
+        // names and checked its single unchanged issuer-signed JWT. The generic
+        // StrictJwtReader overload with NO expected kid must not be used here:
+        // it expects a two-field JOSE header and rejects valid holder VPs,
+        // which intentionally carry alg, typ AND kid.
+        if (!StrictJwtReader.IsCanonicalCompact(presentationJwt, 131_072))
         {
             return false;
         }
 
-        string? jwt = credentials[0].GetString();
-        if (string.IsNullOrEmpty(jwt) ||
-            !StrictJwtReader.IsCanonicalCompact(jwt, 65_536))
+        try
+        {
+            string[] parts = presentationJwt.Split('.');
+            using var document = JsonDocument.Parse(
+                Base64UrlEncoder.DecodeBytes(parts[1]),
+                new JsonDocumentOptions { MaxDepth = 16 });
+            JsonElement holderClaims = document.RootElement;
+            if (!holderClaims.TryGetProperty("vp", out JsonElement vp) ||
+                vp.ValueKind != JsonValueKind.Object ||
+                !vp.TryGetProperty("verifiableCredential", out JsonElement credentials) ||
+                credentials.ValueKind != JsonValueKind.Array ||
+                credentials.GetArrayLength() != 1 ||
+                credentials[0].ValueKind != JsonValueKind.String)
+            {
+                return false;
+            }
+
+            string? jwt = credentials[0].GetString();
+            if (string.IsNullOrEmpty(jwt) ||
+                !StrictJwtReader.IsCanonicalCompact(jwt, 65_536))
+            {
+                return false;
+            }
+
+            originalCredentialJwt = jwt;
+            return true;
+        }
+        catch (Exception error) when (error is JsonException or FormatException
+            or InvalidOperationException or ArgumentException)
         {
             return false;
         }
-
-        originalCredentialJwt = jwt;
-        return true;
     }
 
     private static bool IsCanonicalDigest(string? digest) =>
