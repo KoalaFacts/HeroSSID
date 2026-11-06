@@ -526,8 +526,7 @@ public static class Vcdm20RevocationSnapshot
                 (!StrictJwtReader.TryGetString(payload, "aud", out string signedAudience) ||
                  !Vcdm20JoseCredential.ValidCanonicalAudience(signedAudience))) ||
             payload.TryGetProperty("vc", out _) || payload.TryGetProperty("vp", out _) ||
-            !StrictJwtReader.TryGetString(payload, "issuer", out var signedIssuer) ||
-            !string.Equals(signedIssuer, issuerDid, StringComparison.Ordinal) ||
+            !MatchesSignedIssuer(payload, issuerDid) ||
             !HasBaseArray(payload, "@context", BaseContext) ||
             !HasBaseArray(payload, "type", "VerifiableCredential") ||
             !StrictJwtReader.TryGetString(payload, "validFrom", out _) ||
@@ -540,6 +539,34 @@ public static class Vcdm20RevocationSnapshot
         }
 
         return true;
+    }
+
+    // An issuer object is status-eligible only with the opt-in signed VC id.
+    // Its descriptive name is authenticated as an issuer statement, not
+    // independently verified legal identity or business authorization.
+    private static bool MatchesSignedIssuer(JsonElement payload, string issuerDid)
+    {
+        if (StrictJwtReader.TryGetString(payload, "issuer", out var signedIssuer))
+        {
+            return string.Equals(signedIssuer, issuerDid, StringComparison.Ordinal);
+        }
+
+        // The combined named-issuer + signed-ID issuance profile has seven
+        // top-level members. A separately signed eighth policy field has no
+        // corresponding named-issuer verifier and must not be silently accepted.
+        if (payload.EnumerateObject().Count() != 7 ||
+            !payload.TryGetProperty("id", out _) ||
+            !payload.TryGetProperty("issuer", out var descriptor) ||
+            descriptor.ValueKind != JsonValueKind.Object ||
+            descriptor.EnumerateObject().Count() != 2 ||
+            !StrictJwtReader.TryGetString(descriptor, "id", out var issuerId) ||
+            !StrictJwtReader.TryGetString(descriptor, "name", out var issuerName) ||
+            !Vcdm20JoseCredential.ValidIssuerName(issuerName))
+        {
+            return false;
+        }
+
+        return string.Equals(issuerId, issuerDid, StringComparison.Ordinal);
     }
 
     private static bool HasBaseArray(JsonElement value, string property, string expected)

@@ -15,6 +15,24 @@ The library checks every listed credential's real Ed25519 issuer signature and d
 
 The issuer may deliver this private snapshot through its own authenticated distribution channel to a verifier that independently pins the issuer DID. The library has no DB, API-hosted publication endpoint, tenant administration, refresh scheduler or trusted issuer registry. An issuer MUST use its tenant-specific ownership and authorization policy before signing or releasing any snapshot. The source of revocation truth, publication cadence and failures remain the issuer's responsibility.
 
+The same status entry points also accept the opt-in **issuer-object plus signed
+credential-ID** profile issued by `Vcdm20JoseCredential.CreateWithNamedIssuerAndId`.
+The original JWT must have a genuine issuer Ed25519 signature, a canonical
+HTTPS top-level `id`, and an `issuer` object with exactly `id` and `name`.
+The signed object `id` must equal the independently trusted signer DID; the
+descriptive `name` must meet the same strict bounds as issuance. A named
+issuer **without** a signed credential ID, an additional issuer field or
+a foreign issuer ID is rejected. Existing string-issuer credentials remain
+supported.
+
+Status checking does **not** independently pin the descriptive issuer name,
+credential ID, holder, context, type, validity or business policy. A verifier
+that needs those assurances must separately call
+`Vcdm20JoseCredential.TryVerifyNamedIssuerWithId` with its own exact issuer
+DID, name, credential ID, holder, context and type, and require both that
+verification and the appropriate issuer status result. A genuinely signed
+issuer name is a claim, never independent legal-identity evidence.
+
 An independent verifier can check an original issued JWT with:
 
 ```csharp

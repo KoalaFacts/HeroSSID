@@ -321,7 +321,7 @@ public static partial class Vcdm20JoseCredential
             string.Equals(issuerName, expectedIssuerName, StringComparison.Ordinal);
     }
 
-    private static bool ValidIssuerName(string? issuerName) =>
+    internal static bool ValidIssuerName(string? issuerName) =>
         !string.IsNullOrWhiteSpace(issuerName) &&
         issuerName.Length <= 128 &&
         string.Equals(issuerName.Trim(), issuerName, StringComparison.Ordinal) &&
