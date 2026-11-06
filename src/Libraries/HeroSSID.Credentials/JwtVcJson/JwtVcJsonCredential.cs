@@ -49,6 +49,44 @@ public static class JwtVcJsonCredential
             expectedSubjectContextUri, now, out verifiedSubject, out verifiedCredentialId, out _, out _, out _);
 
     /// <summary>
+    /// Opt-in verifier-owned issuer policy for a W3C VC1.1 jwt_vc_json:
+    /// release signed subject claims only when the genuine Ed25519 issuer DID,
+    /// exact issuer-signed descriptive name and original signed HTTPS JWT jti
+    /// match independently provisioned expected values. This does not establish
+    /// legal identity, holder key control, live status or business authority.
+    /// </summary>
+    public static bool TryVerifyWithPinnedIssuerNameAndId(string jwt,
+        string trustedIssuerDid, string expectedIssuerName,
+        string expectedHolderDid, string expectedCredentialType,
+        Uri expectedSubjectContextUri, Uri expectedCredentialId,
+        DateTimeOffset now, out JsonElement verifiedSubject)
+    {
+        ArgumentNullException.ThrowIfNull(expectedIssuerName);
+        ArgumentNullException.ThrowIfNull(expectedCredentialId);
+        verifiedSubject = default;
+
+        if (!ValidIssuerName(expectedIssuerName) ||
+            !ValidCredentialId(expectedCredentialId) ||
+            !TryVerifyCore(jwt, trustedIssuerDid, expectedHolderDid,
+                expectedCredentialType, expectedSubjectContextUri, now,
+                out JsonElement signedSubject, out string? signedCredentialId,
+                out string? signedIssuerName, out _, out _) ||
+            !string.Equals(signedIssuerName, expectedIssuerName,
+                StringComparison.Ordinal) ||
+            !string.Equals(signedCredentialId, expectedCredentialId.AbsoluteUri,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        // Only publish the cloned signed subject after ALL independent pins
+        // have passed. A valid signature with another name or credential ID
+        // must never release claims to a relying party.
+        verifiedSubject = signedSubject;
+        return true;
+    }
+
+    /// <summary>
     /// Return original Ed25519-signed VC1.1 descriptive issuer metadata only
     /// after verifying the independently pinned issuer, holder, type, vocabulary
     /// and expiry. On failure clear ALL outputs. Display names do not prove a

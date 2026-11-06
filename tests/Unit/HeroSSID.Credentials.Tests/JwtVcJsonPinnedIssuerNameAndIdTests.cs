@@ -1,4 +1,3 @@
-using System.Reflection;
 using System.Text.Json;
 using HeroSSID.Credentials.JwtVcJson;
 using HeroSSID.Credentials.Utilities;
@@ -105,25 +104,13 @@ public sealed class JwtVcJsonPinnedIssuerNameAndIdTests
         Assert.Equal(JsonValueKind.Undefined, claims.ValueKind);
     }
 
-    private static bool Verify(string jwt, string issuerDid, string issuerName,
-        string holderDid, Uri credentialId, DateTimeOffset now, out JsonElement claims)
-    {
-        // The test-only head compiles against the existing SDK and yields a
-        // genuine xUnit runtime RED for the absent public verification boundary.
-        MethodInfo? method = typeof(JwtVcJsonCredential).GetMethod(
-            "TryVerifyWithPinnedIssuerNameAndId", BindingFlags.Public | BindingFlags.Static);
-        Assert.NotNull(method);
-        object?[] arguments =
-        [
+    private static bool V    private static bool Verify(string jwt, string issuerDid, string issuerName,
+        string holderDid, Uri credentialId, DateTimeOffset now, out JsonElement claims) =>
+        JwtVcJsonCredential.TryVerifyWithPinnedIssuerNameAndId(
             jwt, issuerDid, issuerName, holderDid, CredentialType, Vocabulary,
-            credentialId, now, default(JsonElement)
-        ];
-        bool valid = Assert.IsType<bool>(method.Invoke(null, arguments));
-        claims = Assert.IsType<JsonElement>(arguments[8]);
-        return valid;
-    }
+            credentialId, now, out claims);
 
-    private static (byte[] Seed, string Did) NewIdentity()
+] Seed, string Did) NewIdentity()
     {
         using var key = Key.Create(SignatureAlgorithm.Ed25519,
             new KeyCreationParameters { ExportPolicy = KeyExportPolicies.AllowPlaintextExport });
