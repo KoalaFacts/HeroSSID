@@ -551,7 +551,11 @@ public static class Vcdm20RevocationSnapshot
             return string.Equals(signedIssuer, issuerDid, StringComparison.Ordinal);
         }
 
-        if (!payload.TryGetProperty("id", out _) ||
+        // The combined named-issuer + signed-ID issuance profile has seven
+        // top-level members. A separately signed eighth policy field has no
+        // corresponding named-issuer verifier and must not be silently accepted.
+        if (payload.EnumerateObject().Count() != 7 ||
+            !payload.TryGetProperty("id", out _) ||
             !payload.TryGetProperty("issuer", out var descriptor) ||
             descriptor.ValueKind != JsonValueKind.Object ||
             descriptor.EnumerateObject().Count() != 2 ||
