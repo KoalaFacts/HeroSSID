@@ -414,11 +414,25 @@ public static class JwtVcJsonCredential
             out verifiedNotBefore, out verifiedExpiresAt, expectedAudience);
     }
 
+    /// <summary>
+    /// Internal reuse of the unchanged VC1.1 JWT policy for an exact public key
+    /// independently enrolled against a restricted did:web assertion method.
+    /// The public adapter enforces the DID/key-id/profile boundary first.
+    /// </summary>
+    internal static bool TryVerifyPinnedDidWebIssuerCore(
+        string jwt, string issuerDid, string pinnedKeyId, byte[] pinnedPublicKey,
+        string expectedHolderDid, string expectedCredentialType, Uri expectedContext,
+        DateTimeOffset now, out JsonElement verifiedSubject) =>
+        TryVerifyCore(jwt, issuerDid, expectedHolderDid, expectedCredentialType,
+            expectedContext, now, out verifiedSubject, out _, out _, out _, out _,
+            independentlyPinnedIssuerKey: pinnedPublicKey, pinnedVerificationMethodId: pinnedKeyId);
+
     private static bool TryVerifyCore(string jwt, string trustedIssuerDid, string expectedHolderDid,
         string expectedCredentialType, Uri expectedSubjectContextUri,
         DateTimeOffset now, out JsonElement verifiedSubject, out string? verifiedCredentialId,
         out string? verifiedIssuerName, out DateTimeOffset? verifiedNotBefore,
-        out DateTimeOffset? verifiedExpiresAt, Uri? expectedAudience = null)
+        out DateTimeOffset? verifiedExpiresAt, Uri? expectedAudience = null,
+        byte[]? independentlyPinnedIssuerKey = null, string? pinnedVerificationMethodId = null)
     {
         ArgumentNullException.ThrowIfNull(jwt);
         ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
@@ -428,11 +442,31 @@ public static class JwtVcJsonCredential
         verifiedNotBefore = null;
         verifiedExpiresAt = null;
 
-        if (!OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(trustedIssuerDid, out var issuerPublicKey) ||
-            !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(expectedHolderDid, out _) ||
+        // Keep the existing did:key path self-certifying. Only the explicitly
+        // opted-in did:web entrypoint supplies independently enrolled issuer
+        // public key material; a JWT/header/DID URL can never supply that pin.
+        if ((independentlyPinnedIssuerKey is null) !=
+            (pinnedVerificationMethodId is null))
+        {
+            return false;
+        }
+
+        byte[] issuerPublicKey;
+        if (independentlyPinnedIssuerKey is not null)
+        {
+            issuerPublicKey = independentlyPinnedIssuerKey;
+        }
+        else if (!OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(
+            trustedIssuerDid, out issuerPublicKey))
+        {
+            return false;
+        }
+
+        if (!OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(expectedHolderDid, out _) ||
             !ValidType(expectedCredentialType) ||
             !ValidContext(expectedSubjectContextUri) ||
-            !TryReadSupportedCredentialJwt(jwt, trustedIssuerDid, out var payload, out bool isNormativeJwt) ||
+            !TryReadSupportedCredentialJwt(jwt, trustedIssuerDid,
+                out var payload, out bool isNormativeJwt, pinnedVerificationMethodId) ||
             (expectedAudience is not null && !isNormativeJwt) ||
             !HasSupportedClaims(payload, expectedAudience is not null) ||
             !HasPinnedAudience(payload, expectedAudience) ||
@@ -481,8 +515,19 @@ public static class JwtVcJsonCredential
     }
 
     private static bool TryReadSupportedCredentialJwt(string jwt, string issuerDid,
-        out JsonElement payload, out bool isNormativeJwt)
+        out JsonElement payload, out bool isNormativeJwt,
+        string? pinnedVerificationMethodId = null)
     {
+        if (pinnedVerificationMethodId is not null)
+        {
+            // did:web accepts only an exact independently pinned assertion kid
+            // and normative VC1.1 typ=JWT (or omitted typ). No legacy vc+jwt,
+            // implicit key discovery or unchecked/foreign JOSE kid fallback.
+            isNormativeJwt = StrictJwtReader.TryRead(jwt, JwtType, MaximumJwtLength,
+                out payload, pinnedVerificationMethodId, allowMissingType: true);
+            return isNormativeJwt;
+        }
+
         // W3C VC1.1 REC §6.3.1 makes typ optional (if present, JWT), and
         // kid optional. Both still require an independently pinned Ed25519
         // issuer; the legacy vc+jwt form keeps its mandatory kid and typ. The

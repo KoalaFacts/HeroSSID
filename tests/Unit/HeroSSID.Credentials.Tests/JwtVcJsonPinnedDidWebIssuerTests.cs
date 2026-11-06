@@ -64,6 +64,27 @@ public sealed class JwtVcJsonPinnedDidWebIssuerTests
     }
 
     [Fact]
+    public void RotatedPathBasedDidWebIssuerRequiresSeparateExactSuccessorKeyPin()
+    {
+        var original = Identity();
+        var successor = Identity();
+        var holder = Identity();
+        const string pathDid = "did:web:issuer.example:members";
+        string successorKid = pathDid + "#key-2";
+        string jwt = SignIssuerJwt(successor.Seed, holder.Did, pathDid, successorKid);
+
+        Assert.True(Verify(jwt, pathDid, successorKid, successor.PublicKey,
+            holder.Did, Now, out var subject));
+        Assert.Equal("active", subject.GetProperty("membership").GetString());
+
+        // Even an authentic new issuer signature must not auto-enroll its key.
+        AssertRejected(jwt, pathDid, successorKid, original.PublicKey, holder.Did, Now);
+        AssertRejected(jwt, pathDid, pathDid + "#key-1", successor.PublicKey, holder.Did, Now);
+        AssertRejected(jwt, "did:web:issuer.example:other", successorKid,
+            successor.PublicKey, holder.Did, Now);
+    }
+
+    [Fact]
     public void ExistingDidKeyOnlyVerifierStillFailsClosedForDidWeb()
     {
         var issuer = Identity();
