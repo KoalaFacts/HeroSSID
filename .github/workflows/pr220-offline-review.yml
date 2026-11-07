@@ -29,7 +29,7 @@ jobs:
           test "$(gh api repos/KoalaFacts/HeroSSID/pulls/220 --jq '.head.sha')" = "b8595a341fdf19b1456ad9dbdac377eda8552093"
           test "$(git rev-parse b8595a341fdf19b1456ad9dbdac377eda8552093^{commit})" = "b8595a341fdf19b1456ad9dbdac377eda8552093"
           test "$(git rev-parse fc40089ac40bcd7620dc3917016e8219a4923a93^{commit})" = "fc40089ac40bcd7620dc3917016e8219a4923a93"
-          test "$(git diff --name-only fc40089ac40bcd7620dc3917016e8219a4923a93 b8595a341fdf19b1456ad9dbdac377eda8552093 | wc -l)" -eq 4
+          test "$(git diff --name-only fc40089ac40bcd7620dc3917016e8219a4923a93 b8595a341fdf19b1456ad9dbdac377eda8552093 | wc -l)" -eq 3
       - name: Install isolated independent local model
         shell: bash
         run: |
