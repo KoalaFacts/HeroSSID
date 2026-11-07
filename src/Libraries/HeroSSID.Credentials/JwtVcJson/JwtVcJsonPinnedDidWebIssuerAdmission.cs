@@ -123,9 +123,9 @@ public static class JwtVcJsonPinnedDidWebIssuerAdmission
             return JwtVcJsonPinnedDidWebIssuerAdmissionResult.Invalid;
         }
 
-        string digest = Convert.ToHexStringLower(
+        string credentialDigest = Convert.ToHexStringLower(
             SHA256.HashData(Encoding.UTF8.GetBytes(originalCredentialJwt)));
-        if (deniedDigests.Contains(digest))
+        if (deniedDigests.Contains(credentialDigest))
         {
             return JwtVcJsonPinnedDidWebIssuerAdmissionResult.DeniedByVerifier;
         }
