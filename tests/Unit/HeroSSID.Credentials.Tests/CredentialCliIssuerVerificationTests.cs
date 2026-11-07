@@ -108,12 +108,12 @@ public sealed class CredentialCliIssuerVerificationTests
             "herossid-cli-" + Guid.NewGuid().ToString("N") + ".jwt");
         try
         {
-            await File.WriteAllTextAsync(path, jwt);
+            await File.WriteAllTextAsync(path, jwt).ConfigureAwait(false);
             return await CredentialCommands.CreateCommand(null!).InvokeAsync(
                 ["verify-issuer", "--jwt-file", path,
                     "--trusted-issuer", issuer, "--holder", holder,
                     "--credential-type", credentialType,
-                    "--context", vocabulary.AbsoluteUri]);
+                    "--context", vocabulary.AbsoluteUri]).ConfigureAwait(false);
         }
         finally
         {
