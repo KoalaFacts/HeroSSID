@@ -11,7 +11,7 @@ import sys
 from urllib.request import Request, urlopen
 
 BASE = "471882eb7fbb2f4d37f6af1fbcdedb02fdccc77d"
-HEAD = "885875d1b0a3041693a03748afb9142d20cc2538"
+HEAD = "084ef33debb7ca45ed4ddb7666a58fd9eac000c8"
 MODEL = "qwen2.5-coder:7b"
 PARTS = 2
 CHANGED_FILES = {

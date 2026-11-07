@@ -20,17 +20,17 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Validate exact PR head, baseline and five-file scope
+      - name: Validate exact PR head, baseline and four-file scope
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git fetch origin feat/vc2-didweb-issuer-issuance-sdk-20261108:refs/remotes/origin/pr234-reviewed-source
-          test "$(gh api repos/KoalaFacts/HeroSSID/pulls/234 --jq '.head.sha')" = "885875d1b0a3041693a03748afb9142d20cc2538"
-          test "$(git rev-parse 885875d1b0a3041693a03748afb9142d20cc2538^{commit})" = "885875d1b0a3041693a03748afb9142d20cc2538"
+          test "$(gh api repos/KoalaFacts/HeroSSID/pulls/234 --jq '.head.sha')" = "084ef33debb7ca45ed4ddb7666a58fd9eac000c8"
+          test "$(git rev-parse 084ef33debb7ca45ed4ddb7666a58fd9eac000c8^{commit})" = "084ef33debb7ca45ed4ddb7666a58fd9eac000c8"
           test "$(git rev-parse 471882eb7fbb2f4d37f6af1fbcdedb02fdccc77d^{commit})" = "471882eb7fbb2f4d37f6af1fbcdedb02fdccc77d"
-          test "$(git diff --name-only 471882eb7fbb2f4d37f6af1fbcdedb02fdccc77d 885875d1b0a3041693a03748afb9142d20cc2538 | wc -l)" -eq 4
+          test "$(git diff --name-only 471882eb7fbb2f4d37f6af1fbcdedb02fdccc77d 084ef33debb7ca45ed4ddb7666a58fd9eac000c8 | wc -l)" -eq 4
       - name: Install isolated independent local model
         shell: bash
         run: |
@@ -44,7 +44,7 @@ jobs:
           done
           curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null
           ollama pull qwen2.5-coder:7b
-      - name: Independently evaluate all five exact-head file patches in two shards
+      - name: Independently evaluate all four exact-head file patches in two shards
         shell: bash
         run: |
           set -euo pipefail
@@ -52,7 +52,7 @@ jobs:
             REVIEW_PART="$part" python3 tools/offline_pr234_review.py
             test -s "review-$part.md"
             test -s "review-$part.json"
-            test "$(cat review-head-$part.txt)" = "885875d1b0a3041693a03748afb9142d20cc2538"
+            test "$(cat review-head-$part.txt)" = "084ef33debb7ca45ed4ddb7666a58fd9eac000c8"
           done
       - name: Preserve complete raw findings and model evidence
         if: always()
@@ -87,11 +87,11 @@ jobs:
         run: |
           set -euo pipefail
           actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/234 --jq '.head.sha')"
-          test "$actual" = "885875d1b0a3041693a03748afb9142d20cc2538"
+          test "$actual" = "084ef33debb7ca45ed4ddb7666a58fd9eac000c8"
           python3 - <<'PY'
           import json
           from pathlib import Path
-          expected_head = "885875d1b0a3041693a03748afb9142d20cc2538"
+          expected_head = "084ef33debb7ca45ed4ddb7666a58fd9eac000c8"
           expected_files = {
               "README.md",
               "docs/vcdm20-didweb-issuer-issuance.md",
@@ -122,7 +122,7 @@ jobs:
           {
             echo 'Independent local Qwen2.5-Coder 7B automated full-diff review of PR #234.'
             echo
-            echo 'Exact source: 885875d1b0a3041693a03748afb9142d20cc2538. Baseline: 471882eb7fbb2f4d37f6af1fbcdedb02fdccc77d.'
+            echo 'Exact source: 084ef33debb7ca45ed4ddb7666a58fd9eac000c8. Baseline: 471882eb7fbb2f4d37f6af1fbcdedb02fdccc77d.'
             echo 'Model findings require actual source/test disposition. This is NOT human approval, external audit or wallet conformance.'
             echo
             cat review-1.md
@@ -131,6 +131,6 @@ jobs:
             echo
           } > /tmp/pr234-review.md
           gh api --method POST repos/KoalaFacts/HeroSSID/pulls/234/reviews \
-            -f event=COMMENT -f commit_id="885875d1b0a3041693a03748afb9142d20cc2538" \
+            -f event=COMMENT -f commit_id="084ef33debb7ca45ed4ddb7666a58fd9eac000c8" \
             -f body="$(cat /tmp/pr234-review.md)" \
             --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
