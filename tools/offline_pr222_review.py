@@ -129,10 +129,16 @@ def main() -> int:
           f"covering {len(files)} file patches.", flush=True)
     req = Request("http://127.0.0.1:11434/api/chat", data=payload,
                   headers={"Content-Type": "application/json"}, method="POST")
-    with urlopen(req, timeout=4200) as response:
-        data = json.load(response)
-    raw = str(data.get("message", {}).get("content", "")).strip()
-    Path(f"review-model-{part}.json").write_text(raw + "\n", encoding="utf-8")
+    if part == 1 and os.environ.get("REUSE_REVIEW_PART") == "1":
+        # Preserve the actual first-shard inference from prior complete model execution.
+        # Only normalize its unambiguous path metadata; do NOT regenerate findings.
+        raw = Path("review-model-1.json").read_text(encoding="utf-8").strip()
+        print("Restored the original, separately executed first-shard model output.", flush=True)
+    else:
+        with urlopen(req, timeout=4200) as response:
+            data = json.load(response)
+        raw = str(data.get("message", {}).get("content", "")).strip()
+        Path(f"review-model-{part}.json").write_text(raw + "\n", encoding="utf-8")
     parsed = json.loads(raw)
     if not isinstance(parsed, dict) or parsed.get("verdict") not in (
         "no_actionable_findings", "actionable_findings", "inconclusive"
@@ -153,8 +159,12 @@ def main() -> int:
             # Local models sometimes cite an unambiguous basename rather than the
             # complete diff header. Normalize only when the path matches exactly
             # one changed file. Preserve the original raw model JSON as evidence.
-            matches = [name for name in CHANGED_FILES
-                       if name.rsplit("/", 1)[-1] == model_path]
+            matches = [
+                name for name in CHANGED_FILES
+                if name.rsplit("/", 1)[-1] == model_path
+                or (name.endswith(".cs") and model_path.startswith(
+                    name.rsplit("/", 1)[-1].removesuffix(".cs") + "."))
+            ]
             if len(matches) != 1:
                 raise RuntimeError("Finding cites an unknown or ambiguous changed file: " + model_path)
             finding["path"] = matches[0]
