@@ -393,7 +393,7 @@ public sealed class JwtVcJsonPinnedDidWebIssuerStatusTests
         Assert.False(PrepareEmergency(f, status, [digest, digest], out var duplicate));
         Assert.Null(duplicate);
         Assert.False(PrepareEmergency(f, status,
-            Enumerable.Range(0, 257).Select(static i => i.ToString("x64")).ToArray(),
+            Enumerable.Range(0, 257).Select(static i => i.ToString("x64", System.Globalization.CultureInfo.InvariantCulture)).ToArray(),
             out var oversized));
         Assert.Null(oversized);
         Assert.True(PrepareEmergency(f, status, [new string('0', 64)],
