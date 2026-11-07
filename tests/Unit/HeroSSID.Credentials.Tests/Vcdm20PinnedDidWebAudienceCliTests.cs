@@ -72,6 +72,26 @@ public sealed class Vcdm20PinnedDidWebAudienceCliTests
         Assert.Equal(JsonValueKind.Undefined, subject.ValueKind);
     }
 
+
+    [Theory]
+    [InlineData("#key-1")]
+    [InlineData("#key-2")]
+    public void SdkVerifiesExactlyPinnedRecipientWithoutReleasingClaimsOnMismatch(string suffix)
+    {
+        var issued = Issue(suffix, Recipient);
+        Assert.True(Vcdm20JoseCredential.TryVerifyPinnedDidWebIssuerForAudienceWithId(
+            issued.Jwt, IssuerDid, issued.MethodId, issued.IssuerPublicKey,
+            IssuerName, Id, Recipient, issued.HolderDid, Type, Context,
+            DateTimeOffset.UtcNow, out var subject));
+        Assert.Equal("active", subject.GetProperty("membership").GetString());
+
+        Assert.False(Vcdm20JoseCredential.TryVerifyPinnedDidWebIssuerForAudienceWithId(
+            issued.Jwt, IssuerDid, issued.MethodId, issued.IssuerPublicKey,
+            IssuerName, Id, OtherRecipient, issued.HolderDid, Type, Context,
+            DateTimeOffset.UtcNow, out var failure));
+        Assert.Equal(JsonValueKind.Undefined, failure.ValueKind);
+    }
+
     private static async Task<int> InvokeAsync(
         (string Jwt, string HolderDid, byte[] IssuerPublicKey, string MethodId) issued,
         Uri? audience, string? publicKeyHexOverride = null, string? methodOverride = null)

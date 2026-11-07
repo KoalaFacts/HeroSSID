@@ -386,6 +386,8 @@ internal static class CredentialCommands
             "Exact verifier-approved credential type") { IsRequired = true };
         var contextUri = new Option<string>("--context",
             "Exact approved HTTPS subject vocabulary") { IsRequired = true };
+        var audience = new Option<string>("--audience",
+            "Optional exact independently pinned HTTPS recipient; requires signed aud");
         var verify = new Command("verify-vc2-didweb-issuer",
             "Verify direct VC2 JOSE using separately pinned did:web Ed25519 assertion key");
         verify.AddOption(file);
@@ -397,8 +399,10 @@ internal static class CredentialCommands
         verify.AddOption(holder);
         verify.AddOption(type);
         verify.AddOption(contextUri);
+        verify.AddOption(audience);
         verify.SetHandler((InvocationContext context) =>
         {
+            string? pinnedAudience = context.ParseResult.GetValueForOption(audience);
             if (!TryVerifyDidWebIssuer(
                 context.ParseResult.GetValueForOption(file),
                 context.ParseResult.GetValueForOption(issuer),
@@ -409,7 +413,7 @@ internal static class CredentialCommands
                 context.ParseResult.GetValueForOption(holder),
                 context.ParseResult.GetValueForOption(type),
                 context.ParseResult.GetValueForOption(contextUri),
-                vcdm20: true))
+                vcdm20: true, audience: pinnedAudience))
             {
                 Console.Error.WriteLine(
                     "Direct VC2 did:web credential rejected: issuer signature, key method, signed metadata, validity or file policy failed. No claims released.");
@@ -418,8 +422,11 @@ internal static class CredentialCommands
             }
 
             Console.Out.WriteLine(
-                "Original direct VC2 issuer signature, independently pinned did:web assertion key, name and credential ID verified. " +
-                "DID domain ownership, holder control, consent, revocation, identity, authority and wallet interoperability NOT checked.");
+                pinnedAudience is null
+                    ? "Original direct VC2 issuer signature, independently pinned did:web assertion key, name and credential ID verified. " +
+                      "DID domain ownership, holder control, consent, revocation, identity, authority and wallet interoperability NOT checked."
+                    : "Original direct VC2 issuer signature, independently pinned did:web assertion key, name, ID and exact HTTPS recipient verified. " +
+                      "Holder key control, consent, revocation, identity, authority and wallet interoperability NOT checked.");
             context.ExitCode = 0;
         });
         return verify;
@@ -428,7 +435,7 @@ internal static class CredentialCommands
     private static bool TryVerifyDidWebIssuer(FileInfo? file, string? issuerDid,
         string? assertionMethod, string? publicKeyHex, string? issuerName,
         string? credentialId, string? holderDid, string? credentialType,
-        string? vocabulary, bool vcdm20 = false)
+        string? vocabulary, bool vcdm20 = false, string? audience = null)
     {
         // Every trust anchor comes from the caller's own independently
         // established policy, never from JWT header or claims. Fail closed
@@ -443,6 +450,13 @@ internal static class CredentialCommands
             !Uri.TryCreate(vocabulary, UriKind.Absolute, out Uri? contextUri) ||
             contextUri.Scheme != Uri.UriSchemeHttps ||
             contextUri.UserInfo.Length != 0 || contextUri.Fragment.Length != 0)
+        {
+            return false;
+        }
+
+        Uri? pinnedAudience = null;
+        if (audience is not null &&
+            (!vcdm20 || !TryCanonicalHttpsPin(audience, out pinnedAudience)))
         {
             return false;
         }
@@ -488,10 +502,15 @@ internal static class CredentialCommands
             string originalJwt = new UTF8Encoding(false, true)
                 .GetString(bytes, 0, length).TrimEnd('\r', '\n');
             return vcdm20
-                ? Vcdm20JoseCredential.TryVerifyPinnedDidWebIssuerNameAndId(
-                    originalJwt, issuerDid, assertionMethod, pinnedKey, issuerName,
-                    expectedId!, holderDid, credentialType, contextUri,
-                    DateTimeOffset.UtcNow, out _)
+                ? pinnedAudience is not null
+                    ? Vcdm20JoseCredential.TryVerifyPinnedDidWebIssuerForAudienceWithId(
+                        originalJwt, issuerDid, assertionMethod, pinnedKey, issuerName,
+                        expectedId!, pinnedAudience, holderDid, credentialType, contextUri,
+                        DateTimeOffset.UtcNow, out _)
+                    : Vcdm20JoseCredential.TryVerifyPinnedDidWebIssuerNameAndId(
+                        originalJwt, issuerDid, assertionMethod, pinnedKey, issuerName,
+                        expectedId!, holderDid, credentialType, contextUri,
+                        DateTimeOffset.UtcNow, out _)
                 : JwtVcJsonPinnedDidWebIssuerVerifier.TryVerifyWithPinnedIssuerNameAndId(
                     originalJwt, issuerDid, assertionMethod, pinnedKey, issuerName,
                     expectedId!, holderDid, credentialType, contextUri,
