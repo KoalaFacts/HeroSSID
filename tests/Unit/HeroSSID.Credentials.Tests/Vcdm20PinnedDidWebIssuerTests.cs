@@ -1,7 +1,7 @@
 using System.CommandLine;
 using System.Globalization;
-using HeroSSID.Cli.Commands;
 using System.Text.Json;
+using HeroSSID.Cli.Commands;
 using HeroSSID.Credentials.Utilities;
 using HeroSSID.Credentials.Vcdm20;
 using NSec.Cryptography;
@@ -101,12 +101,12 @@ public sealed class Vcdm20PinnedDidWebIssuerTests
     public async Task CliAcceptsRealVc2DidWebIssuerOnlyWithCorrectExternalPins(string suffix)
     {
         var issued = Issue(suffix);
-        Assert.Equal(0, await InvokeCliAsync(issued).ConfigureAwait(false));
+        Assert.Equal(0, await InvokeCliAsync(issued).ConfigureAwait(true));
         Assert.NotEqual(0, await InvokeCliAsync(issued,
             methodOverride: IssuerDid + (suffix == "#key-1" ? "#key-2" : "#key-1"))
-            .ConfigureAwait(false));
+            .ConfigureAwait(true));
         Assert.NotEqual(0, await InvokeCliAsync(issued,
-            publicKeyHexOverride: new string('0', 64)).ConfigureAwait(false));
+            publicKeyHexOverride: new string('0', 64)).ConfigureAwait(true));
     }
 
     private static async Task<int> InvokeCliAsync(
@@ -117,7 +117,7 @@ public sealed class Vcdm20PinnedDidWebIssuerTests
             "herossid-vc2-didweb-cli-" + Guid.NewGuid().ToString("N") + ".jwt");
         try
         {
-            await File.WriteAllTextAsync(path, issued.Jwt).ConfigureAwait(false);
+            await File.WriteAllTextAsync(path, issued.Jwt).ConfigureAwait(true);
             return await CredentialCommands.CreateCommand(null!).InvokeAsync(
                 ["verify-vc2-didweb-issuer", "--jwt-file", path,
                  "--trusted-issuer", IssuerDid,
@@ -127,7 +127,7 @@ public sealed class Vcdm20PinnedDidWebIssuerTests
                  "--credential-id", CredentialId.AbsoluteUri,
                  "--holder", issued.HolderDid,
                  "--credential-type", Type,
-                 "--context", Context.AbsoluteUri]).ConfigureAwait(false);
+                 "--context", Context.AbsoluteUri]).ConfigureAwait(true);
         }
         finally
         {
