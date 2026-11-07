@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Text;
 using HeroSSID.Credentials.JwtVcJson;
+using HeroSSID.Credentials.Vcdm20;
 
 namespace HeroSSID.Cli.Commands;
 
@@ -78,11 +79,70 @@ internal static class CredentialCommands
         // Historical simulated 'issue' and 'verify' handlers returned success
         // without signing or verifying any credential. They are removed.
         credentials.AddCommand(verify);
+
+        // Do not re-parent System.CommandLine options: each command owns its
+        // own independently supplied verifier policy and its own file option.
+        var vc2File = new Option<FileInfo>("--jwt-file",
+            "Path to the unchanged issuer-signed compact direct VCDM 2.0 JOSE JWT")
+        {
+            IsRequired = true
+        };
+        var vc2Issuer = new Option<string>("--trusted-issuer",
+            "Independently enrolled issuer did:key, never learned from JWT")
+        {
+            IsRequired = true
+        };
+        var vc2Holder = new Option<string>("--holder",
+            "Expected credential holder DID; not proof of private-key control")
+        {
+            IsRequired = true
+        };
+        var vc2Type = new Option<string>("--credential-type",
+            "Exact credential type independently approved by the verifier")
+        {
+            IsRequired = true
+        };
+        var vc2Context = new Option<string>("--context",
+            "Exact preapproved HTTPS subject vocabulary URI")
+        {
+            IsRequired = true
+        };
+
+        var verifyVc2 = new Command("verify-vc2-issuer",
+            "Verify a direct VCDM 2.0 vc+jwt issuer Ed25519 signature and pinned fields only");
+        verifyVc2.AddOption(vc2File);
+        verifyVc2.AddOption(vc2Issuer);
+        verifyVc2.AddOption(vc2Holder);
+        verifyVc2.AddOption(vc2Type);
+        verifyVc2.AddOption(vc2Context);
+        verifyVc2.SetHandler((InvocationContext context) =>
+        {
+            FileInfo? file = context.ParseResult.GetValueForOption(vc2File);
+            string? issuerDid = context.ParseResult.GetValueForOption(vc2Issuer);
+            string? holderDid = context.ParseResult.GetValueForOption(vc2Holder);
+            string? credentialType = context.ParseResult.GetValueForOption(vc2Type);
+            string? vocabulary = context.ParseResult.GetValueForOption(vc2Context);
+            if (!IsIssuerSignatureVerified(file, issuerDid, holderDid,
+                    credentialType, vocabulary, vcdm20: true))
+            {
+                Console.Error.WriteLine(
+                    "Direct VC2 JOSE issuer credential rejected: signature, pin, format, validity, or file check failed. No claims released.");
+                context.ExitCode = 1;
+                return;
+            }
+
+            Console.Out.WriteLine(
+                "Issuer signature and independently pinned VCDM 2.0 direct JOSE fields verified. " +
+                "Holder key control, consent, status, legal identity and business authorization NOT checked.");
+            context.ExitCode = 0;
+        });
+        credentials.AddCommand(verifyVc2);
         return credentials;
     }
 
     private static bool IsIssuerSignatureVerified(FileInfo? file, string? issuerDid,
-        string? holderDid, string? credentialType, string? vocabulary)
+        string? holderDid, string? credentialType, string? vocabulary,
+        bool vcdm20 = false)
     {
         if (file is null || string.IsNullOrWhiteSpace(issuerDid) ||
             !issuerDid.StartsWith("did:key:", StringComparison.Ordinal) ||
@@ -120,9 +180,15 @@ internal static class CredentialCommands
 
             string originalJwt = new UTF8Encoding(false, true)
                 .GetString(bytes, 0, length).TrimEnd('\r', '\n');
-            return JwtVcJsonCredential.TryVerify(originalJwt,
-                issuerDid, holderDid, credentialType, contextUri,
-                DateTimeOffset.UtcNow, out _);
+            // The formats are deliberately separate: direct VC2 JOSE must not
+            // fall back to VC1.1 nested JWT or a private HeroSSID vc.context.
+            return vcdm20
+                ? Vcdm20JoseCredential.TryVerify(originalJwt, issuerDid,
+                    holderDid, credentialType, contextUri,
+                    DateTimeOffset.UtcNow, out _)
+                : JwtVcJsonCredential.TryVerify(originalJwt, issuerDid,
+                    holderDid, credentialType, contextUri,
+                    DateTimeOffset.UtcNow, out _);
         }
         catch (IOException)
         {
