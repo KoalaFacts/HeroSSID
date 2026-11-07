@@ -24,7 +24,7 @@ public sealed class Vcdm20PinnedDidWebIssuerTests
     public void GenuineDirectVc2IssuerSignatureAndAllIndependentPinsAreAccepted(string keySuffix)
     {
         var issued = Issue(keySuffix);
-        Assert.True(Check(issued, issued.Jwt, IssuerDid, issued.MethodId,
+        Assert.True(Check(issued.Jwt, IssuerDid, issued.MethodId,
             issued.IssuerPublicKey, IssuerName, CredentialId, issued.HolderDid,
             Type, Context, out var subject));
         Assert.Equal("active", subject.GetProperty("membership").GetString());
@@ -59,7 +59,7 @@ public sealed class Vcdm20PinnedDidWebIssuerTests
         };
         foreach (var item in cases)
         {
-            Assert.False(Check(issued, issued.Jwt, item.Issuer, item.Method,
+            Assert.False(Check(issued.Jwt, item.Issuer, item.Method,
                 item.Key, item.Name, item.Id, item.Holder,
                 item.CredentialType, item.Vocabulary, out var subject));
             Assert.Equal(JsonValueKind.Undefined, subject.ValueKind);
@@ -74,27 +74,26 @@ public sealed class Vcdm20PinnedDidWebIssuerTests
         char[] signature = sections[2].ToCharArray();
         signature[0] = signature[0] == 'A' ? 'B' : 'A';
         sections[2] = new string(signature);
-        Assert.False(Check(issued, string.Join('.', sections),
+        Assert.False(Check(string.Join('.', sections),
             IssuerDid, issued.MethodId, issued.IssuerPublicKey,
             IssuerName, CredentialId, issued.HolderDid, Type, Context,
             out var tamperedSubject));
         Assert.Equal(JsonValueKind.Undefined, tamperedSubject.ValueKind);
-        Assert.False(Check(issued, issued.Jwt, IssuerDid, issued.MethodId,
+        Assert.False(Check(issued.Jwt, IssuerDid, issued.MethodId,
             new byte[32], IssuerName, CredentialId, issued.HolderDid,
             Type, Context, out var zeroKeySubject));
         Assert.Equal(JsonValueKind.Undefined, zeroKeySubject.ValueKind);
-        Assert.False(Check(issued, issued.Jwt, IssuerDid, issued.MethodId,
+        Assert.False(Check(issued.Jwt, IssuerDid, issued.MethodId,
             new byte[31], IssuerName, CredentialId, issued.HolderDid,
             Type, Context, out var wrongLengthSubject));
         Assert.Equal(JsonValueKind.Undefined, wrongLengthSubject.ValueKind);
-        Assert.False(Check(issued, issued.Jwt, IssuerDid, issued.MethodId,
+        Assert.False(Check(issued.Jwt, IssuerDid, issued.MethodId,
             issued.IssuerPublicKey, IssuerName, CredentialId, issued.HolderDid,
             Type, Context, out var expiredSubject, now: DateTimeOffset.UtcNow.AddHours(1)));
         Assert.Equal(JsonValueKind.Undefined, expiredSubject.ValueKind);
     }
 
     private static bool Check(
-        (string Jwt, string HolderDid, byte[] IssuerPublicKey, string MethodId) issued,
         string jwt, string trustedIssuer, string trustedMethod, byte[] pinnedKey,
         string trustedName, Uri pinnedId, string holder, string type, Uri vocabulary,
         out JsonElement subject, DateTimeOffset? now = null)
