@@ -362,13 +362,73 @@ internal static class CredentialCommands
             context.ExitCode = 0;
         });
         credentials.AddCommand(verifyDidWeb);
+        credentials.AddCommand(CreateVc2DidWebCommand());
         return credentials;
+    }
+
+    private static Command CreateVc2DidWebCommand()
+    {
+        var file = new Option<FileInfo>("--jwt-file",
+            "Original issuer-signed direct VCDM 2.0 vc+jwt") { IsRequired = true };
+        var issuer = new Option<string>("--trusted-issuer",
+            "Independently enrolled did:web issuer") { IsRequired = true };
+        var method = new Option<string>("--verification-method",
+            "Exact pre-enrolled #key-1 or #key-2 assertion method") { IsRequired = true };
+        var key = new Option<string>("--public-key-hex",
+            "Independently pinned raw Ed25519 public key (64 hex characters)") { IsRequired = true };
+        var issuerName = new Option<string>("--issuer-name",
+            "Exact separately approved signed descriptive issuer name") { IsRequired = true };
+        var id = new Option<string>("--credential-id",
+            "Exact separately approved signed HTTPS VC2 ID") { IsRequired = true };
+        var holder = new Option<string>("--holder",
+            "Exact expected credential subject DID, not proof of holder key control") { IsRequired = true };
+        var type = new Option<string>("--credential-type",
+            "Exact verifier-approved credential type") { IsRequired = true };
+        var contextUri = new Option<string>("--context",
+            "Exact approved HTTPS subject vocabulary") { IsRequired = true };
+        var verify = new Command("verify-vc2-didweb-issuer",
+            "Verify direct VC2 JOSE using separately pinned did:web Ed25519 assertion key");
+        verify.AddOption(file);
+        verify.AddOption(issuer);
+        verify.AddOption(method);
+        verify.AddOption(key);
+        verify.AddOption(issuerName);
+        verify.AddOption(id);
+        verify.AddOption(holder);
+        verify.AddOption(type);
+        verify.AddOption(contextUri);
+        verify.SetHandler((InvocationContext context) =>
+        {
+            if (!TryVerifyDidWebIssuer(
+                context.ParseResult.GetValueForOption(file),
+                context.ParseResult.GetValueForOption(issuer),
+                context.ParseResult.GetValueForOption(method),
+                context.ParseResult.GetValueForOption(key),
+                context.ParseResult.GetValueForOption(issuerName),
+                context.ParseResult.GetValueForOption(id),
+                context.ParseResult.GetValueForOption(holder),
+                context.ParseResult.GetValueForOption(type),
+                context.ParseResult.GetValueForOption(contextUri),
+                vcdm20: true))
+            {
+                Console.Error.WriteLine(
+                    "Direct VC2 did:web credential rejected: issuer signature, key method, signed metadata, validity or file policy failed. No claims released.");
+                context.ExitCode = 1;
+                return;
+            }
+
+            Console.Out.WriteLine(
+                "Original direct VC2 issuer signature, independently pinned did:web assertion key, name and credential ID verified. " +
+                "DID domain ownership, holder control, consent, revocation, identity, authority and wallet interoperability NOT checked.");
+            context.ExitCode = 0;
+        });
+        return verify;
     }
 
     private static bool TryVerifyDidWebIssuer(FileInfo? file, string? issuerDid,
         string? assertionMethod, string? publicKeyHex, string? issuerName,
         string? credentialId, string? holderDid, string? credentialType,
-        string? vocabulary)
+        string? vocabulary, bool vcdm20 = false)
     {
         // Every trust anchor comes from the caller's own independently
         // established policy, never from JWT header or claims. Fail closed
@@ -427,10 +487,15 @@ internal static class CredentialCommands
 
             string originalJwt = new UTF8Encoding(false, true)
                 .GetString(bytes, 0, length).TrimEnd('\r', '\n');
-            return JwtVcJsonPinnedDidWebIssuerVerifier.TryVerifyWithPinnedIssuerNameAndId(
-                originalJwt, issuerDid, assertionMethod, pinnedKey, issuerName,
-                expectedId!, holderDid, credentialType, contextUri,
-                DateTimeOffset.UtcNow, out _);
+            return vcdm20
+                ? Vcdm20JoseCredential.TryVerifyPinnedDidWebIssuerNameAndId(
+                    originalJwt, issuerDid, assertionMethod, pinnedKey, issuerName,
+                    expectedId!, holderDid, credentialType, contextUri,
+                    DateTimeOffset.UtcNow, out _)
+                : JwtVcJsonPinnedDidWebIssuerVerifier.TryVerifyWithPinnedIssuerNameAndId(
+                    originalJwt, issuerDid, assertionMethod, pinnedKey, issuerName,
+                    expectedId!, holderDid, credentialType, contextUri,
+                    DateTimeOffset.UtcNow, out _);
         }
         catch (IOException)
         {
