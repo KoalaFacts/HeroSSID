@@ -580,7 +580,11 @@ public sealed class JwtVcJsonPinnedDidWebIssuerStatusTests
             HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Calls++;
-            return Task.FromResult(respond(request));
+            HttpResponseMessage response = respond(request);
+            // Real HTTP handlers attach the exact executed request to the final response.
+            // Keep the production exact-response-URI check strict; model HTTP metadata here.
+            response.RequestMessage ??= request;
+            return Task.FromResult(response);
         }
     }
 
