@@ -225,6 +225,117 @@ public sealed class JwtVcJsonPinnedDidWebIssuerStatusTests
             CheckAdmission(f, genuineStatus, [], f.IssuerPublicKey, out _));
     }
 
+    [Fact]
+    public void WalletPreflightShowsAuthenticatedClaimsBeforeKeyUseAndSignsOnlyAfterApproval()
+    {
+        Fixture f = CreateFixture();
+        string status = CreateStatus(f, revoked: false);
+        Assert.True(PrepareWallet(f, status, f.CredentialJwt, f.IssuerPublicKey,
+            f.Challenge, out var preview));
+        Assert.NotNull(preview);
+        Assert.Equal("member", preview.VerifiedSubject.GetProperty("role").GetString());
+
+        string holderVp = JwtVcJsonPinnedDidWebWalletPreflight.CreateAfterPreview(
+            preview, f.Challenge, f.CredentialJwt, status,
+            f.IssuerPublicKey, f.HolderSeed, f.Clock);
+        Assert.Equal(JwtVcJsonPresentationCheckResult.SignedButStatusUnchecked,
+            JwtVcJsonPinnedDidWebIssuerPresentation.Check(
+                holderVp, f.Tenant, f.Audience, f.Nonce,
+                IssuerDid, Method, f.IssuerPublicKey, IssuerName,
+                CredentialId, CredentialType, Context, f.Store, f.Clock,
+                out JsonElement admitted));
+        Assert.Equal("member", admitted.GetProperty("role").GetString());
+    }
+
+    [Fact]
+    public void WalletPreflightRefusesRevokedForgedForeignOrMissingStatusWithoutDisclosure()
+    {
+        Fixture f = CreateFixture();
+        var attacker = Identity();
+        string validStatus = CreateStatus(f, revoked: false);
+        string forgedStatus = Ed25519JwtSigner.CreateSignedJwt(
+            Ed25519JwtSigner.ExtractHeader(validStatus),
+            Ed25519JwtSigner.ExtractPayload(validStatus), attacker.Seed);
+
+        Assert.False(PrepareWallet(f, CreateStatus(f, revoked: true),
+            f.CredentialJwt, f.IssuerPublicKey, f.Challenge, out var revoked));
+        Assert.Null(revoked);
+        Assert.False(PrepareWallet(f, forgedStatus,
+            f.CredentialJwt, f.IssuerPublicKey, f.Challenge, out var forged));
+        Assert.Null(forged);
+        Assert.False(PrepareWallet(f, string.Empty,
+            f.CredentialJwt, f.IssuerPublicKey, f.Challenge, out var absent));
+        Assert.Null(absent);
+        Assert.False(PrepareWallet(f, validStatus,
+            f.CredentialJwt, attacker.PublicKey, f.Challenge, out var foreign));
+        Assert.Null(foreign);
+    }
+
+    [Fact]
+    public void WalletPostConsentRefusesStatusOrCredentialSwapAndChangedChallenge()
+    {
+        Fixture f = CreateFixture();
+        string status = CreateStatus(f, revoked: false);
+        Assert.True(PrepareWallet(f, status, f.CredentialJwt, f.IssuerPublicKey,
+            f.Challenge, out var preview));
+        Assert.NotNull(preview);
+
+        Assert.Throws<ArgumentException>(() =>
+            JwtVcJsonPinnedDidWebWalletPreflight.CreateAfterPreview(
+                preview, f.Challenge, f.CredentialJwt, CreateStatus(f, revoked: true),
+                f.IssuerPublicKey, f.HolderSeed, f.Clock));
+
+        string differentPayload = Ed25519JwtSigner.ExtractPayload(f.CredentialJwt)
+            .Replace("\"role\":\"member\"", "\"role\":\"guest\"",
+                StringComparison.Ordinal);
+        string anotherCredential = Ed25519JwtSigner.CreateSignedJwt(
+            Ed25519JwtSigner.ExtractHeader(f.CredentialJwt),
+            differentPayload, f.IssuerSeed);
+        Assert.Throws<ArgumentException>(() =>
+            JwtVcJsonPinnedDidWebWalletPreflight.CreateAfterPreview(
+                preview, f.Challenge, anotherCredential, status,
+                f.IssuerPublicKey, f.HolderSeed, f.Clock));
+
+        PresentationChallenge changed = f.Challenge with { Audience = "another-verifier" };
+        Assert.Throws<ArgumentException>(() =>
+            JwtVcJsonPinnedDidWebWalletPreflight.CreateAfterPreview(
+                preview, changed, f.CredentialJwt, status,
+                f.IssuerPublicKey, f.HolderSeed, f.Clock));
+    }
+
+    [Fact]
+    public void WalletPreflightRejectsStaleStatusAndExpiredVerifierRequest()
+    {
+        var clock = new AdjustableClock(new DateTimeOffset(2026, 11, 7, 0, 0, 0, TimeSpan.Zero));
+        Fixture f = CreateFixture(clock);
+        string status = CreateStatus(f, revoked: false);
+        Assert.True(PrepareWallet(f, status, f.CredentialJwt, f.IssuerPublicKey,
+            f.Challenge, out var preview));
+        Assert.NotNull(preview);
+        clock.Advance(TimeSpan.FromSeconds(61));
+        Assert.False(PrepareWallet(f, status, f.CredentialJwt, f.IssuerPublicKey,
+            f.Challenge, out var expiredStatus));
+        Assert.Null(expiredStatus);
+        Assert.Throws<ArgumentException>(() =>
+            JwtVcJsonPinnedDidWebWalletPreflight.CreateAfterPreview(
+                preview, f.Challenge, f.CredentialJwt, status,
+                f.IssuerPublicKey, f.HolderSeed, f.Clock));
+        clock.Advance(TimeSpan.FromMinutes(5));
+        Assert.False(PrepareWallet(f, CreateStatus(f, revoked: false),
+            f.CredentialJwt, f.IssuerPublicKey, f.Challenge,
+            out var expiredChallenge));
+        Assert.Null(expiredChallenge);
+    }
+
+    private static bool PrepareWallet(
+        Fixture f, string status, string originalJwt, byte[] publicKey,
+        PresentationChallenge challenge,
+        out JwtVcJsonPinnedDidWebWalletPreview? preview) =>
+        JwtVcJsonPinnedDidWebWalletPreflight.TryPrepare(
+            challenge, originalJwt, status, IssuerDid, Method, publicKey,
+            IssuerName, CredentialId, CredentialType, Context, f.HolderDid,
+            f.Clock, out preview);
+
     private static JwtVcJsonPinnedDidWebIssuerAdmissionResult CheckAdmission(
         Fixture f, string status, IReadOnlyCollection<string> denied,
         byte[] issuerPublicKey, out JsonElement subject) =>
@@ -267,7 +378,8 @@ public sealed class JwtVcJsonPinnedDidWebIssuerStatusTests
             IssuerName, CredentialId, CredentialType, Context,
             holder.Did, holder.Seed, clock);
         return new Fixture(credential, vp, tenant, audience, challenge.Nonce,
-            issuer.Seed, issuer.PublicKey, store, clock);
+            issuer.Seed, issuer.PublicKey, store, clock,
+            challenge, holder.Did, holder.Seed);
     }
 
     private static (byte[] Seed, byte[] PublicKey, string Did) Identity()
@@ -295,5 +407,6 @@ public sealed class JwtVcJsonPinnedDidWebIssuerStatusTests
     private sealed record Fixture(
         string CredentialJwt, string PresentationJwt, Guid Tenant, string Audience,
         string Nonce, byte[] IssuerSeed, byte[] IssuerPublicKey,
-        IPresentationChallengeStore Store, TimeProvider Clock);
+        IPresentationChallengeStore Store, TimeProvider Clock,
+        PresentationChallenge Challenge, string HolderDid, byte[] HolderSeed);
 }
