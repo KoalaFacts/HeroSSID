@@ -387,15 +387,22 @@ internal static class CredentialCommands
             return false;
         }
 
-        Span<byte> decodedKey = stackalloc byte[32];
-        if (!Convert.TryFromHexString(publicKeyHex, decodedKey, out int keyLength) ||
-            keyLength != decodedKey.Length)
+        // Convert.FromHexString is strict; only one exact raw Ed25519 public
+        // key is allowed, not a JWK, private seed or multicodec encoding.
+        byte[] pinnedKey;
+        try
+        {
+            pinnedKey = Convert.FromHexString(publicKeyHex);
+        }
+        catch (FormatException)
         {
             return false;
         }
 
-        // A stable public-key copy is pinned before parsing the untrusted JWT.
-        byte[] pinnedKey = decodedKey.ToArray();
+        if (pinnedKey.Length != 32)
+        {
+            return false;
+        }
         try
         {
             using var input = new FileStream(file.FullName, FileMode.Open,
