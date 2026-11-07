@@ -20,8 +20,30 @@ public static partial class Vcdm20JoseCredential
         string expectedCredentialType, Uri expectedSubjectContextUri,
         DateTimeOffset now, out JsonElement verifiedSubject)
     {
+        ArgumentNullException.ThrowIfNull(jwt);
+        ArgumentNullException.ThrowIfNull(trustedIssuerDid);
+        ArgumentNullException.ThrowIfNull(trustedVerificationMethodId);
+        ArgumentNullException.ThrowIfNull(independentlyPinnedIssuerPublicKey);
+        ArgumentNullException.ThrowIfNull(expectedIssuerName);
+        ArgumentNullException.ThrowIfNull(expectedCredentialId);
+        ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
         verifiedSubject = default;
-        // Test-first RED: no direct VC2 did:web verification exists yet.
-        return false;
+
+        // A matching signed descriptive name does not verify an organisation.
+        // Enroll DID, verification method, public key, name, ID, type, subject
+        // and context independently before processing the untrusted JWT.
+        if (!ValidIssuerName(expectedIssuerName) ||
+            !ValidCredentialId(expectedCredentialId))
+        {
+            return false;
+        }
+
+        return TryVerifyCore(jwt, trustedIssuerDid, expectedHolderDid,
+            expectedCredentialType, expectedSubjectContextUri, now,
+            out verifiedSubject, out _, requiresCredentialId: true,
+            expectedIssuerName: expectedIssuerName,
+            expectedCredentialId: expectedCredentialId,
+            pinnedDidWebMethod: trustedVerificationMethodId,
+            pinnedDidWebKey: independentlyPinnedIssuerPublicKey);
     }
 }
