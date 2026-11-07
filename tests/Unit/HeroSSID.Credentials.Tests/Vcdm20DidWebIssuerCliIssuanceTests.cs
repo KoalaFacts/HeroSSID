@@ -1,3 +1,4 @@
+using System.CommandLine;
 using System.Text;
 using System.Text.Json;
 using HeroSSID.Cli.Commands;
@@ -16,7 +17,7 @@ public sealed class Vcdm20DidWebIssuerCliIssuanceTests
     private static readonly Uri Context = new("https://issuer.example/vocab/member");
 
     [Fact]
-    public void PipeSeedIssuesAuthenticVc2WithIndependentVerifierAndNeverEchoesSeed()
+    public async Task PipeSeedIssuesAuthenticVc2WithIndependentVerifierAndNeverEchoesSeed()
     {
         var issuer = Identity();
         var holder = Identity();
@@ -37,6 +38,34 @@ public sealed class Vcdm20DidWebIssuerCliIssuanceTests
                 CredentialId, Audience, holder.Did, "MembershipCredential", Context,
                 DateTimeOffset.UtcNow, out JsonElement claims));
             Assert.Equal("active", claims.GetProperty("membership").GetString());
+            if (!OperatingSystem.IsWindows())
+            {
+                Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite,
+                    File.GetUnixFileMode(output));
+            }
+
+            // This is a real command-to-command roundtrip: issuance never
+            // adds trust to the verifier, which still pins the original key.
+            string[] verification =
+            [
+                "verify-vc2-didweb-recipient-claim", "--jwt-file", output,
+                "--trusted-issuer", IssuerDid,
+                "--verification-method", IssuerDid + "#key-1",
+                "--public-key-hex", Convert.ToHexString(issuer.PublicKey),
+                "--issuer-name", IssuerName,
+                "--credential-id", CredentialId.AbsoluteUri,
+                "--audience", Audience.AbsoluteUri,
+                "--holder", holder.Did,
+                "--credential-type", "MembershipCredential",
+                "--context", Context.AbsoluteUri,
+                "--claim-name", "membership",
+                "--claim-value", "active"
+            ];
+            Assert.Equal(0, await CredentialCommands.CreateCommand(null!)
+                .InvokeAsync(verification).ConfigureAwait(true));
+            verification[^1] = "expired";
+            Assert.NotEqual(0, await CredentialCommands.CreateCommand(null!)
+                .InvokeAsync(verification).ConfigureAwait(true));
             Assert.False(Vcdm20JoseCredential.TryVerifyPinnedDidWebIssuerForAudienceWithId(
                 jwt, IssuerDid, IssuerDid + "#key-1", issuer.PublicKey, IssuerName,
                 CredentialId, new Uri("https://different.example/entry"), holder.Did,
