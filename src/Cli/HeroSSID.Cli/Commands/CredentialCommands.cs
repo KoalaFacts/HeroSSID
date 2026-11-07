@@ -419,7 +419,7 @@ internal static class CredentialCommands
             }
 
             string originalJwt = new UTF8Encoding(false, true)
-                .GetString(bytes, 0, length).TrimEnd('\\r', '\\n');
+                .GetString(bytes, 0, length).TrimEnd('\r', '\n');
             return JwtVcJsonPinnedDidWebIssuerVerifier.TryVerifyWithPinnedIssuerNameAndId(
                 originalJwt, issuerDid, assertionMethod, pinnedKey, issuerName,
                 expectedId!, holderDid, credentialType, contextUri,
