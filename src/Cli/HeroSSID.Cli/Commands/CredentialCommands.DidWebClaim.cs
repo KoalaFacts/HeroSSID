@@ -75,7 +75,7 @@ internal static partial class CredentialCommands
                     invocation.ParseResult.GetValueForOption(claimValue)))
             {
                 Console.Error.WriteLine(
-                    "VC2 did:web recipient-bound issuer claim rejected: signature, exact pins, original status, validity, or string value check failed. No claims released.");
+                    "VC2 did:web recipient-bound issuer claim rejected: signature, original JWT, exact pins, validity, or string value check failed. No claims released.");
                 invocation.ExitCode = 1;
                 return;
             }
