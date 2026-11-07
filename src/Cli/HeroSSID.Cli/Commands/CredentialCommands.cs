@@ -303,7 +303,140 @@ internal static class CredentialCommands
             context.ExitCode = 0;
         });
         credentials.AddCommand(verifyVc2Claim);
+
+        // Organisation-owned did:web keys require independent enrollment: a
+        // signed DID, a JWT kid and a signed display name are NOT trust anchors.
+        // The CLI never fetches a DID document or promotes a key on rotation.
+        var didWebFile = new Option<FileInfo>("--jwt-file",
+            "Original, unchanged Ed25519-signed VC1.1 JWT") { IsRequired = true };
+        var didWebIssuer = new Option<string>("--trusted-issuer",
+            "Independently approved restricted did:web issuer") { IsRequired = true };
+        var didWebMethod = new Option<string>("--verification-method",
+            "Independently pinned did:web#key-1 or #key-2 assertion method") { IsRequired = true };
+        var didWebPublicKey = new Option<string>("--public-key-hex",
+            "Independently enrolled raw 32-byte Ed25519 issuer public key, as 64 hex characters")
+        { IsRequired = true };
+        var didWebIssuerName = new Option<string>("--issuer-name",
+            "Exact independently approved issuer-signed descriptive name") { IsRequired = true };
+        var didWebId = new Option<string>("--credential-id",
+            "Exact independently pinned HTTPS signed credential ID") { IsRequired = true };
+        var didWebHolder = new Option<string>("--holder",
+            "Expected credential subject DID, not private-key control") { IsRequired = true };
+        var didWebType = new Option<string>("--credential-type",
+            "Independently approved exact VC1.1 credential type") { IsRequired = true };
+        var didWebContext = new Option<string>("--context",
+            "Independently approved HTTPS subject vocabulary") { IsRequired = true };
+        var verifyDidWeb = new Command("verify-vc11-didweb-issuer",
+            "Verify original VC1.1 did:web issuer Ed25519 signature against exact offline key and metadata pins");
+        verifyDidWeb.AddOption(didWebFile);
+        verifyDidWeb.AddOption(didWebIssuer);
+        verifyDidWeb.AddOption(didWebMethod);
+        verifyDidWeb.AddOption(didWebPublicKey);
+        verifyDidWeb.AddOption(didWebIssuerName);
+        verifyDidWeb.AddOption(didWebId);
+        verifyDidWeb.AddOption(didWebHolder);
+        verifyDidWeb.AddOption(didWebType);
+        verifyDidWeb.AddOption(didWebContext);
+        verifyDidWeb.SetHandler((InvocationContext context) =>
+        {
+            if (!TryVerifyDidWebIssuer(
+                context.ParseResult.GetValueForOption(didWebFile),
+                context.ParseResult.GetValueForOption(didWebIssuer),
+                context.ParseResult.GetValueForOption(didWebMethod),
+                context.ParseResult.GetValueForOption(didWebPublicKey),
+                context.ParseResult.GetValueForOption(didWebIssuerName),
+                context.ParseResult.GetValueForOption(didWebId),
+                context.ParseResult.GetValueForOption(didWebHolder),
+                context.ParseResult.GetValueForOption(didWebType),
+                context.ParseResult.GetValueForOption(didWebContext)))
+            {
+                Console.Error.WriteLine(
+                    "Pinned VC1.1 did:web issuer credential rejected: key, signature, exact metadata pins, validity or file check failed. No claims released.");
+                context.ExitCode = 1;
+                return;
+            }
+
+            Console.Out.WriteLine(
+                "Original VC1.1 did:web issuer signature, exact assertion key, signed issuer name and credential ID verified. " +
+                "Domain ownership, holder control, consent, status, legal identity and business authorization NOT checked.");
+            context.ExitCode = 0;
+        });
+        credentials.AddCommand(verifyDidWeb);
         return credentials;
+    }
+
+    private static bool TryVerifyDidWebIssuer(FileInfo? file, string? issuerDid,
+        string? assertionMethod, string? publicKeyHex, string? issuerName,
+        string? credentialId, string? holderDid, string? credentialType,
+        string? vocabulary)
+    {
+        // Every trust anchor comes from the caller's own independently
+        // established policy, never from JWT header or claims. Fail closed
+        // before opening a credential file if an essential pin is missing.
+        if (file is null || string.IsNullOrWhiteSpace(issuerDid) ||
+            string.IsNullOrWhiteSpace(assertionMethod) ||
+            string.IsNullOrWhiteSpace(issuerName) ||
+            string.IsNullOrWhiteSpace(holderDid) ||
+            string.IsNullOrWhiteSpace(credentialType) ||
+            publicKeyHex is null || publicKeyHex.Length != 64 ||
+            !TryCanonicalHttpsPin(credentialId, out Uri? expectedId) ||
+            !Uri.TryCreate(vocabulary, UriKind.Absolute, out Uri? contextUri) ||
+            contextUri.Scheme != Uri.UriSchemeHttps ||
+            contextUri.UserInfo.Length != 0 || contextUri.Fragment.Length != 0)
+        {
+            return false;
+        }
+
+        Span<byte> decodedKey = stackalloc byte[32];
+        if (!Convert.TryFromHexString(publicKeyHex, decodedKey, out int keyLength) ||
+            keyLength != decodedKey.Length)
+        {
+            return false;
+        }
+
+        // A stable public-key copy is pinned before parsing the untrusted JWT.
+        byte[] pinnedKey = decodedKey.ToArray();
+        try
+        {
+            using var input = new FileStream(file.FullName, FileMode.Open,
+                FileAccess.Read, FileShare.Read, 4096, FileOptions.SequentialScan);
+            byte[] bytes = new byte[MaximumCredentialFileBytes + 1];
+            int length = 0;
+            while (length < bytes.Length)
+            {
+                int read = input.Read(bytes, length, bytes.Length - length);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                length += read;
+            }
+
+            if (length == 0 || length > MaximumCredentialFileBytes)
+            {
+                return false;
+            }
+
+            string originalJwt = new UTF8Encoding(false, true)
+                .GetString(bytes, 0, length).TrimEnd('\\r', '\\n');
+            return JwtVcJsonPinnedDidWebIssuerVerifier.TryVerifyWithPinnedIssuerNameAndId(
+                originalJwt, issuerDid, assertionMethod, pinnedKey, issuerName,
+                expectedId!, holderDid, credentialType, contextUri,
+                DateTimeOffset.UtcNow, out _);
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (DecoderFallbackException)
+        {
+            return false;
+        }
     }
 
     private static bool IsIssuerSignatureVerified(FileInfo? file, string? issuerDid,
