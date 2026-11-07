@@ -207,6 +207,24 @@ public sealed class JwtVcJsonPinnedDidWebIssuerStatusTests
             CheckAdmission(f, good, [], f.IssuerPublicKey, out _));
     }
 
+    [Fact]
+    public void CombinedAdmissionForgedIssuerStatusConsumesGenuineProofWithoutClaimDisclosure()
+    {
+        Fixture f = CreateFixture();
+        var attacker = Identity();
+        string genuineStatus = CreateStatus(f, revoked: false);
+        string forgedStatus = Ed25519JwtSigner.CreateSignedJwt(
+            Ed25519JwtSigner.ExtractHeader(genuineStatus),
+            Ed25519JwtSigner.ExtractPayload(genuineStatus), attacker.Seed);
+
+        Assert.Equal(JwtVcJsonPinnedDidWebIssuerAdmissionResult.Invalid,
+            CheckAdmission(f, forgedStatus, [], f.IssuerPublicKey,
+                out JsonElement rejected));
+        Assert.Equal(JsonValueKind.Undefined, rejected.ValueKind);
+        Assert.Equal(JwtVcJsonPinnedDidWebIssuerAdmissionResult.Invalid,
+            CheckAdmission(f, genuineStatus, [], f.IssuerPublicKey, out _));
+    }
+
     private static JwtVcJsonPinnedDidWebIssuerAdmissionResult CheckAdmission(
         Fixture f, string status, IReadOnlyCollection<string> denied,
         byte[] issuerPublicKey, out JsonElement subject) =>
