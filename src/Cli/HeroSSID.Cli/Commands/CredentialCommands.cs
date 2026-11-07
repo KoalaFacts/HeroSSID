@@ -364,6 +364,7 @@ internal static partial class CredentialCommands
         credentials.AddCommand(verifyDidWeb);
         credentials.AddCommand(CreateVc2DidWebCommand());
         credentials.AddCommand(CreateVc2DidWebRecipientClaimCommand());
+        credentials.AddCommand(CreateVc2DidWebIssuerCommand());
         return credentials;
     }
 
