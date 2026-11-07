@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using HeroSSID.Credentials.CredentialVerification;
+using HeroSSID.Credentials.JwtVcJson;
 using HeroSSID.Credentials.Utilities;
 
 namespace HeroSSID.Credentials.Vcdm20;
@@ -142,18 +143,51 @@ public static partial class Vcdm20JoseCredential
         DateTimeOffset now, out JsonElement verifiedSubject,
         out string? verifiedCredentialId, bool requiresCredentialId,
         string? expectedIssuerName = null, Uri? expectedCredentialId = null,
-        Uri? expectedAudience = null)
+        Uri? expectedAudience = null, string? pinnedDidWebMethod = null,
+        byte[]? pinnedDidWebKey = null)
     {
         verifiedCredentialId = null;
         ArgumentNullException.ThrowIfNull(jwt);
         ArgumentNullException.ThrowIfNull(expectedSubjectContextUri);
         verifiedSubject = default;
-        if (!OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(trustedIssuerDid, out var issuerPublicKey) ||
-            !OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(expectedHolderDid, out _) ||
+        // Existing did:key callers retain their original DID-derived issuer
+        // key. The opt-in did:web path accepts only a separately enrolled,
+        // exact assertion method and raw Ed25519 key; JWT kid cannot enroll it.
+        byte[] issuerPublicKey;
+        string expectedKid;
+        if (pinnedDidWebMethod is null && pinnedDidWebKey is null)
+        {
+            if (!OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(
+                trustedIssuerDid, out issuerPublicKey))
+            {
+                return false;
+            }
+
+            expectedKid = KeyId(trustedIssuerDid);
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(trustedIssuerDid) ||
+                pinnedDidWebKey is not { Length: 32 } ||
+                pinnedDidWebKey.All(static value => value == 0) ||
+                !JwtVcJsonPinnedDidWebIssuerVerifier.IsRestrictedDidWeb(trustedIssuerDid) ||
+                !(string.Equals(pinnedDidWebMethod, trustedIssuerDid + "#key-1",
+                    StringComparison.Ordinal) ||
+                  string.Equals(pinnedDidWebMethod, trustedIssuerDid + "#key-2",
+                    StringComparison.Ordinal)))
+            {
+                return false;
+            }
+
+            issuerPublicKey = pinnedDidWebKey.ToArray();
+            expectedKid = pinnedDidWebMethod!;
+        }
+
+        if (!OfflineCredentialVerifier.TryDecodeDidKeyPublicKey(expectedHolderDid, out _) ||
             !ValidType(expectedCredentialType) ||
             !ValidContext(expectedSubjectContextUri) ||
             !StrictJwtReader.TryRead(jwt, CredentialHeaderType, MaximumJwtLength,
-                out var credential, KeyId(trustedIssuerDid), "vc") ||
+                out var credential, expectedKid, "vc") ||
             !Ed25519JwtSigner.VerifySignedJwt(jwt, issuerPublicKey) ||
             // The existing profile implements six direct VC2 members; the
             // opt-in id profile implements exactly seven. Neither enforces
