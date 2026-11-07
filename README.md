@@ -6,6 +6,7 @@ HeroSSID is a development-stage .NET foundation for issuing, holding and verifyi
 
 For issuer-only checks without a hosted service, the .NET 10 CLI supports
 [VC1.1 `jwt_vc_json`](docs/cli-vc11-issuer-check.md),
+[separately pinned `did:web` VC1.1 issuer keys](docs/cli-vc11-didweb-issuer-check.md),
 [direct VCDM 2.0 `vc+jwt` JOSE](docs/cli-vc2-jose-issuer-check.md), and a
 [recipient-bound direct VC2 JWT with exact signed credential ID](docs/cli-vc2-recipient-bound-check.md),
 and [an exact issuer-signed VC2 string claim under verifier-pinned recipient policy](docs/cli-vc2-recipient-claim-check.md).
