@@ -11,7 +11,7 @@ namespace HeroSSID.Cli.Commands;
 /// Human-invoked, deliberately issuer-only credential checks.
 /// No CLI flow may simulate signature verification or issuer issuance.
 /// </summary>
-internal static class CredentialCommands
+internal static partial class CredentialCommands
 {
     private const int MaximumCredentialFileBytes = 65_536;
 
@@ -363,6 +363,7 @@ internal static class CredentialCommands
         });
         credentials.AddCommand(verifyDidWeb);
         credentials.AddCommand(CreateVc2DidWebCommand());
+        credentials.AddCommand(CreateVc2DidWebRecipientClaimCommand());
         return credentials;
     }
 
@@ -436,7 +437,18 @@ internal static class CredentialCommands
         string? assertionMethod, string? publicKeyHex, string? issuerName,
         string? credentialId, string? holderDid, string? credentialType,
         string? vocabulary, bool vcdm20 = false, string? audience = null)
+        => TryVerifyDidWebIssuerWithSubject(file, issuerDid, assertionMethod,
+            publicKeyHex, issuerName, credentialId, holderDid, credentialType,
+            vocabulary, out _, vcdm20, audience);
+
+    private static bool TryVerifyDidWebIssuerWithSubject(FileInfo? file,
+        string? issuerDid, string? assertionMethod, string? publicKeyHex,
+        string? issuerName, string? credentialId, string? holderDid,
+        string? credentialType, string? vocabulary,
+        out JsonElement verifiedSubject, bool vcdm20 = false,
+        string? audience = null)
     {
+        verifiedSubject = default;
         // Every trust anchor comes from the caller's own independently
         // established policy, never from JWT header or claims. Fail closed
         // before opening a credential file if an essential pin is missing.
@@ -506,15 +518,15 @@ internal static class CredentialCommands
                     ? Vcdm20JoseCredential.TryVerifyPinnedDidWebIssuerForAudienceWithId(
                         originalJwt, issuerDid, assertionMethod, pinnedKey, issuerName,
                         expectedId!, pinnedAudience, holderDid, credentialType, contextUri,
-                        DateTimeOffset.UtcNow, out _)
+                        DateTimeOffset.UtcNow, out verifiedSubject)
                     : Vcdm20JoseCredential.TryVerifyPinnedDidWebIssuerNameAndId(
                         originalJwt, issuerDid, assertionMethod, pinnedKey, issuerName,
                         expectedId!, holderDid, credentialType, contextUri,
-                        DateTimeOffset.UtcNow, out _)
+                        DateTimeOffset.UtcNow, out verifiedSubject)
                 : JwtVcJsonPinnedDidWebIssuerVerifier.TryVerifyWithPinnedIssuerNameAndId(
                     originalJwt, issuerDid, assertionMethod, pinnedKey, issuerName,
                     expectedId!, holderDid, credentialType, contextUri,
-                    DateTimeOffset.UtcNow, out _);
+                    DateTimeOffset.UtcNow, out verifiedSubject);
         }
         catch (IOException)
         {
