@@ -8,7 +8,7 @@ using Spectre.Console;
 
 // Build configuration
 IConfiguration configuration = new ConfigurationBuilder()
-    .SetBasePath(Directory.GetCurrentDirectory())
+    .SetBasePath(AppContext.BaseDirectory)
     .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
     .Build();
 
@@ -26,6 +26,7 @@ var rootCommand = new RootCommand("HeroSSID CLI - Decentralized Identity Managem
 
 // Add DID commands
 rootCommand.AddCommand(DidCommands.CreateCommand(serviceProvider));
+rootCommand.AddCommand(CredentialCommands.CreateCommand(serviceProvider));
 
 // Display banner
 AnsiConsole.Write(
@@ -33,7 +34,7 @@ AnsiConsole.Write(
         .LeftJustified()
         .Color(Color.Cyan1));
 
-AnsiConsole.MarkupLine("[dim]W3C-compliant Decentralized Identity Management[/]");
+AnsiConsole.MarkupLine("[dim]Issuer signature verification is not holder proof, revocation, identity or authorization[/]");
 AnsiConsole.WriteLine();
 
 // Execute command

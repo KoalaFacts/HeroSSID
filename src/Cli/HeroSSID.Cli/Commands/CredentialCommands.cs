@@ -1,53 +1,140 @@
 using System.CommandLine;
-using Spectre.Console;
+using System.CommandLine.Invocation;
+using System.Text;
+using HeroSSID.Credentials.JwtVcJson;
 
 namespace HeroSSID.Cli.Commands;
 
 /// <summary>
-/// Verifiable credential CLI commands
+/// Human-invoked, deliberately issuer-only credential checks.
+/// No CLI flow may simulate signature verification or issuer issuance.
 /// </summary>
 internal static class CredentialCommands
 {
+    private const int MaximumCredentialFileBytes = 65_536;
+
     public static Command CreateCommand(IServiceProvider serviceProvider)
     {
-        var credentialCommand = new Command("credential", "Verifiable credential operations");
+        var credentials = new Command("credential",
+            "Explicitly pinned verifiable credential issuer-signature operations");
 
-        var issueCommand = new Command("issue", "Issue a verifiable credential");
-        issueCommand.SetHandler(async () =>
+        var fileOption = new Option<FileInfo>("--jwt-file",
+            "Path to the unchanged issuer-signed compact VC1.1 JWT")
         {
-            await AnsiConsole.Status()
-                .StartAsync("Issuing credential...", async ctx =>
-                {
-                    ctx.Spinner(Spinner.Known.Dots);
-                    ctx.SpinnerStyle(Style.Parse("yellow"));
+            IsRequired = true
+        };
+        var issuerOption = new Option<string>("--trusted-issuer",
+            "Independently enrolled issuer did:key, never learned from JWT")
+        {
+            IsRequired = true
+        };
+        var holderOption = new Option<string>("--holder",
+            "Expected credential holder DID, not a key-possession proof")
+        {
+            IsRequired = true
+        };
+        var typeOption = new Option<string>("--credential-type",
+            "Exact credential type approved by the verifier")
+        {
+            IsRequired = true
+        };
+        var contextOption = new Option<string>("--context",
+            "Exact preapproved HTTPS subject vocabulary URI")
+        {
+            IsRequired = true
+        };
 
-                    // TODO: Implement credential issuance logic
-                    await Task.Delay(2000).ConfigureAwait(false); // Simulate work
+        var verify = new Command("verify-issuer",
+            "Verify issuer Ed25519 signature and VC1.1 fields only; no holder proof or status");
+        verify.AddOption(fileOption);
+        verify.AddOption(issuerOption);
+        verify.AddOption(holderOption);
+        verify.AddOption(typeOption);
+        verify.AddOption(contextOption);
+        verify.SetHandler((InvocationContext context) =>
+        {
+            FileInfo? file = context.ParseResult.GetValueForOption(fileOption);
+            string? issuerDid = context.ParseResult.GetValueForOption(issuerOption);
+            string? holderDid = context.ParseResult.GetValueForOption(holderOption);
+            string? credentialType = context.ParseResult.GetValueForOption(typeOption);
+            string? vocabulary = context.ParseResult.GetValueForOption(contextOption);
 
-                    AnsiConsole.MarkupLine("[green]Success:[/] Credential issued!");
-                    AnsiConsole.MarkupLine("[dim]Credential ID: cred-12345[/]");
-                }).ConfigureAwait(false);
+            if (!IsIssuerSignatureVerified(file, issuerDid, holderDid,
+                    credentialType, vocabulary))
+            {
+                // Never echo potentially sensitive, untrusted JWT or claims.
+                Console.Error.WriteLine(
+                    "Issuer credential rejected: signature, pin, format, validity, or file check failed. No claims released.");
+                context.ExitCode = 1;
+                return;
+            }
+
+            Console.Out.WriteLine(
+                "Issuer signature and independently pinned VC1.1 fields verified. " +
+                "Holder key control, consent, revocation, legal identity and business authorization NOT checked.");
+            context.ExitCode = 0;
         });
 
-        var verifyCommand = new Command("verify", "Verify a credential");
-        verifyCommand.SetHandler(async () =>
+        // Historical simulated 'issue' and 'verify' handlers returned success
+        // without signing or verifying any credential. They are removed.
+        credentials.AddCommand(verify);
+        return credentials;
+    }
+
+    private static bool IsIssuerSignatureVerified(FileInfo? file, string? issuerDid,
+        string? holderDid, string? credentialType, string? vocabulary)
+    {
+        if (file is null || string.IsNullOrWhiteSpace(issuerDid) ||
+            !issuerDid.StartsWith("did:key:", StringComparison.Ordinal) ||
+            string.IsNullOrWhiteSpace(holderDid) ||
+            string.IsNullOrWhiteSpace(credentialType) ||
+            !Uri.TryCreate(vocabulary, UriKind.Absolute, out Uri? contextUri) ||
+            contextUri.Scheme != Uri.UriSchemeHttps ||
+            contextUri.UserInfo.Length != 0 || contextUri.Fragment.Length != 0)
         {
-            await AnsiConsole.Status()
-                .StartAsync("Verifying credential...", async ctx =>
+            return false;
+        }
+
+        try
+        {
+            // Bound the actual file read, including races with file changes.
+            using var input = new FileStream(file.FullName, FileMode.Open,
+                FileAccess.Read, FileShare.Read, 4096, FileOptions.SequentialScan);
+            byte[] bytes = new byte[MaximumCredentialFileBytes + 1];
+            int length = 0;
+            while (length < bytes.Length)
+            {
+                int read = input.Read(bytes, length, bytes.Length - length);
+                if (read == 0)
                 {
-                    ctx.Spinner(Spinner.Known.Dots);
-                    ctx.SpinnerStyle(Style.Parse("cyan"));
+                    break;
+                }
 
-                    // TODO: Implement credential verification logic
-                    await Task.Delay(1500).ConfigureAwait(false); // Simulate work
+                length += read;
+            }
 
-                    AnsiConsole.MarkupLine("[green]Success:[/] Credential is valid!");
-                }).ConfigureAwait(false);
-        });
+            if (length == 0 || length > MaximumCredentialFileBytes)
+            {
+                return false;
+            }
 
-        credentialCommand.AddCommand(issueCommand);
-        credentialCommand.AddCommand(verifyCommand);
-
-        return credentialCommand;
+            string originalJwt = new UTF8Encoding(false, true)
+                .GetString(bytes, 0, length).TrimEnd('\r', '\n');
+            return JwtVcJsonCredential.TryVerify(originalJwt,
+                issuerDid, holderDid, credentialType, contextUri,
+                DateTimeOffset.UtcNow, out _);
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (DecoderFallbackException)
+        {
+            return false;
+        }
     }
 }

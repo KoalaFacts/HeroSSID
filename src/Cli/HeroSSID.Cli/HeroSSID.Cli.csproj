@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Libraries\HeroSSID.Core\HeroSSID.Core.csproj" />
+    <ProjectReference Include="..\..\Libraries\HeroSSID.Credentials\HeroSSID.Credentials.csproj" />
     <ProjectReference Include="..\..\Libraries\HeroSSID.Data\HeroSSID.Data.csproj" />
     <ProjectReference Include="..\..\Libraries\HeroSSID.DidOperations\HeroSSID.DidOperations.csproj" />
     <ProjectReference Include="..\..\Libraries\HeroSSID.Observability\HeroSSID.Observability.csproj" />
