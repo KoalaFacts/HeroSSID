@@ -1,6 +1,7 @@
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Text;
+using System.Text.Json;
 using HeroSSID.Credentials.JwtVcJson;
 using HeroSSID.Credentials.Vcdm20;
 
@@ -212,13 +213,111 @@ internal static class CredentialCommands
             context.ExitCode = 0;
         });
         credentials.AddCommand(verifyVc2Recipient);
+
+        // Exact verifier-owned business data acceptance is distinct from issuer
+        // authenticity. This bounded string equality policy cannot be inferred
+        // from an untrusted JWT and does not establish holder control or authority.
+        var claimFile = new Option<FileInfo>("--jwt-file",
+            "Path to the original issuer-signed recipient-bound VC2 JWT")
+        {
+            IsRequired = true
+        };
+        var claimIssuer = new Option<string>("--trusted-issuer",
+            "Independently enrolled Ed25519 issuer did:key")
+        {
+            IsRequired = true
+        };
+        var claimHolder = new Option<string>("--holder",
+            "Exact expected credential subject DID (not proof of possession)")
+        {
+            IsRequired = true
+        };
+        var claimType = new Option<string>("--credential-type",
+            "Verifier-approved exact credential type")
+        {
+            IsRequired = true
+        };
+        var claimContext = new Option<string>("--context",
+            "Verifier-approved HTTPS subject vocabulary")
+        {
+            IsRequired = true
+        };
+        var claimId = new Option<string>("--credential-id",
+            "Independently pinned exact signed HTTPS VC ID")
+        {
+            IsRequired = true
+        };
+        var claimAudience = new Option<string>("--audience",
+            "Independently pinned canonical HTTPS receiving service")
+        {
+            IsRequired = true
+        };
+        var claimName = new Option<string>("--claim-name",
+            "Exact non-reserved top-level credentialSubject string property")
+        {
+            IsRequired = true
+        };
+        var claimValue = new Option<string>("--claim-value",
+            "Exact verifier-required value, compared ordinally without disclosure")
+        {
+            IsRequired = true
+        };
+        var verifyVc2Claim = new Command("verify-vc2-recipient-claim",
+            "Require a signed VC2 recipient, credential ID and exact approved subject string value");
+        verifyVc2Claim.AddOption(claimFile);
+        verifyVc2Claim.AddOption(claimIssuer);
+        verifyVc2Claim.AddOption(claimHolder);
+        verifyVc2Claim.AddOption(claimType);
+        verifyVc2Claim.AddOption(claimContext);
+        verifyVc2Claim.AddOption(claimId);
+        verifyVc2Claim.AddOption(claimAudience);
+        verifyVc2Claim.AddOption(claimName);
+        verifyVc2Claim.AddOption(claimValue);
+        verifyVc2Claim.SetHandler((InvocationContext context) =>
+        {
+            FileInfo? file = context.ParseResult.GetValueForOption(claimFile);
+            string? issuerDid = context.ParseResult.GetValueForOption(claimIssuer);
+            string? holderDid = context.ParseResult.GetValueForOption(claimHolder);
+            string? credentialType = context.ParseResult.GetValueForOption(claimType);
+            string? vocabulary = context.ParseResult.GetValueForOption(claimContext);
+            string? signedId = context.ParseResult.GetValueForOption(claimId);
+            string? recipient = context.ParseResult.GetValueForOption(claimAudience);
+            string? requiredName = context.ParseResult.GetValueForOption(claimName);
+            string? requiredValue = context.ParseResult.GetValueForOption(claimValue);
+
+            if (!TryVerifyIssuerWithSubject(file, issuerDid, holderDid, credentialType,
+                    vocabulary, out JsonElement verifiedSubject, vcdm20: true,
+                    credentialId: signedId, audience: recipient) ||
+                !MatchesPinnedStringClaim(verifiedSubject, requiredName, requiredValue))
+            {
+                // Neither success nor failure prints the JWT or any claim value.
+                Console.Error.WriteLine(
+                    "VC2 recipient-bound signed claim rejected: issuer signature, exact pins, value, validity, or file check failed. No claims released.");
+                context.ExitCode = 1;
+                return;
+            }
+
+            Console.Out.WriteLine(
+                "Original issuer-signed VC2 credential, pinned recipient, exact ID and verifier-required string claim checked. " +
+                "Holder key control, consent, revocation, real identity and business authorization NOT checked.");
+            context.ExitCode = 0;
+        });
+        credentials.AddCommand(verifyVc2Claim);
         return credentials;
     }
 
     private static bool IsIssuerSignatureVerified(FileInfo? file, string? issuerDid,
         string? holderDid, string? credentialType, string? vocabulary,
-        bool vcdm20 = false, string? credentialId = null, string? audience = null)
+        bool vcdm20 = false, string? credentialId = null, string? audience = null) =>
+        TryVerifyIssuerWithSubject(file, issuerDid, holderDid, credentialType,
+            vocabulary, out _, vcdm20, credentialId, audience);
+
+    private static bool TryVerifyIssuerWithSubject(FileInfo? file, string? issuerDid,
+        string? holderDid, string? credentialType, string? vocabulary,
+        out JsonElement verifiedSubject, bool vcdm20 = false,
+        string? credentialId = null, string? audience = null)
     {
+        verifiedSubject = default;
         if (file is null || string.IsNullOrWhiteSpace(issuerDid) ||
             !issuerDid.StartsWith("did:key:", StringComparison.Ordinal) ||
             string.IsNullOrWhiteSpace(holderDid) ||
@@ -276,16 +375,16 @@ internal static class CredentialCommands
                 return Vcdm20JoseCredential.TryVerifyForAudienceWithId(
                     originalJwt, issuerDid, holderDid, credentialType,
                     contextUri, expectedId!, expectedAudience!,
-                    DateTimeOffset.UtcNow, out _);
+                    DateTimeOffset.UtcNow, out verifiedSubject);
             }
 
             return vcdm20
                 ? Vcdm20JoseCredential.TryVerify(originalJwt, issuerDid,
                     holderDid, credentialType, contextUri,
-                    DateTimeOffset.UtcNow, out _)
+                    DateTimeOffset.UtcNow, out verifiedSubject)
                 : JwtVcJsonCredential.TryVerify(originalJwt, issuerDid,
                     holderDid, credentialType, contextUri,
-                    DateTimeOffset.UtcNow, out _);
+                    DateTimeOffset.UtcNow, out verifiedSubject);
         }
         catch (IOException)
         {
@@ -299,6 +398,58 @@ internal static class CredentialCommands
         {
             return false;
         }
+    }
+
+    private static bool MatchesPinnedStringClaim(
+        JsonElement verifiedSubject, string? name, string? value)
+    {
+        // A verifier must explicitly choose exactly one simple non-reserved key
+        // and a bounded string value. JSON numbers, arrays, objects, nulls and
+        // duplicate property names are never silently coerced or accepted.
+        if (verifiedSubject.ValueKind != JsonValueKind.Object ||
+            string.IsNullOrEmpty(name) || name.Length > 64 ||
+            !char.IsAsciiLetter(name[0]) ||
+            string.Equals(name, "id", StringComparison.Ordinal) ||
+            string.IsNullOrEmpty(value) || value.Length > 256 ||
+            !string.Equals(value.Trim(), value, StringComparison.Ordinal) ||
+            value.Any(char.IsControl))
+        {
+            return false;
+        }
+
+        for (int i = 1; i < name.Length; i++)
+        {
+            char character = name[i];
+            if (!char.IsAsciiLetterOrDigit(character) &&
+                character != '_' && character != '-')
+            {
+                return false;
+            }
+        }
+
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        bool matched = false;
+        foreach (JsonProperty property in verifiedSubject.EnumerateObject())
+        {
+            if (!names.Add(property.Name))
+            {
+                return false;
+            }
+
+            if (string.Equals(property.Name, name, StringComparison.Ordinal))
+            {
+                if (property.Value.ValueKind != JsonValueKind.String ||
+                    !string.Equals(property.Value.GetString(), value,
+                        StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                matched = true;
+            }
+        }
+
+        return matched;
     }
 
     private static bool TryCanonicalHttpsPin(string? text, out Uri? uri)
