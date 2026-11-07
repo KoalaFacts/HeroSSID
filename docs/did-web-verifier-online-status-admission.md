@@ -54,8 +54,13 @@ the SDK cannot introspect its internals.
 
 ## Fail-closed outcomes and replay
 
-1. Pre-network: reject inconsistent original JWT/VP and malformed local policy
-   without HTTP access or consuming the challenge.
+1. Pre-network: reject inconsistent original JWT/VP, malformed local policy,
+   and an issuer JWT whose **genuine pinned did:web Ed25519 signature, exact
+   issuer name/credential ID/type/context or validity** fails the independently
+   configured verifier policy. No HTTP request, nonce consumption or subject
+   disclosure occurs for these mismatches. The signed credential's `sub` is
+   used only as a candidate for validating issuer-signed holder binding; it
+   never selects the issuer DID, method, verification key or verifier policy.
 2. Fetch: verify the issuer's real Ed25519 signature over the exact original
    JWT and independently pinned method; authenticate the issuer's 60-second
    signed status and exact original JWT SHA-256. An unavailable, redirected,
