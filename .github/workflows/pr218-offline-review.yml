@@ -26,10 +26,10 @@ jobs:
         run: |
           set -euo pipefail
           git fetch origin feature/didweb-vc11-atomic-admission:refs/remotes/origin/pr218-reviewed-source
-          test "$(gh api repos/KoalaFacts/HeroSSID/pulls/217 --jq '.head.sha')" = "50c75457aeb626f2e023dcc89f813e54f30cd9c6"
-          test "$(git rev-parse 50c75457aeb626f2e023dcc89f813e54f30cd9c6^{commit})" = "50c75457aeb626f2e023dcc89f813e54f30cd9c6"
+          test "$(gh api repos/KoalaFacts/HeroSSID/pulls/218 --jq '.head.sha')" = "4444a5dab3a71d8fd23a5c72cdc12e606284ef45"
+          test "$(git rev-parse 4444a5dab3a71d8fd23a5c72cdc12e606284ef45^{commit})" = "4444a5dab3a71d8fd23a5c72cdc12e606284ef45"
           test "$(git rev-parse e839eaddd4a6081ca0dd867815f61850efaee51c^{commit})" = "e839eaddd4a6081ca0dd867815f61850efaee51c"
-          test "$(git diff --name-only e839eaddd4a6081ca0dd867815f61850efaee51c 50c75457aeb626f2e023dcc89f813e54f30cd9c6 | wc -l)" -eq 5
+          test "$(git diff --name-only e839eaddd4a6081ca0dd867815f61850efaee51c 4444a5dab3a71d8fd23a5c72cdc12e606284ef45 | wc -l)" -eq 5
       - name: Install isolated independent local model
         shell: bash
         run: |
@@ -51,7 +51,7 @@ jobs:
             REVIEW_PART="$part" python3 tools/offline_pr218_review.py
             test -s "review-$part.md"
             test -s "review-$part.json"
-            test "$(cat review-head-$part.txt)" = "50c75457aeb626f2e023dcc89f813e54f30cd9c6"
+            test "$(cat review-head-$part.txt)" = "4444a5dab3a71d8fd23a5c72cdc12e606284ef45"
           done
       - name: Preserve complete raw findings and model evidence
         if: always()
@@ -85,12 +85,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/217 --jq '.head.sha')"
-          test "$actual" = "50c75457aeb626f2e023dcc89f813e54f30cd9c6"
+          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/218 --jq '.head.sha')"
+          test "$actual" = "4444a5dab3a71d8fd23a5c72cdc12e606284ef45"
           python3 - <<'PY'
           import json
           from pathlib import Path
-          expected_head = "50c75457aeb626f2e023dcc89f813e54f30cd9c6"
+          expected_head = "4444a5dab3a71d8fd23a5c72cdc12e606284ef45"
           expected_files = {
               "README.md",
               "docs/jwt-vc-json-pinned-didweb-issuer-admission.md",
@@ -122,7 +122,7 @@ jobs:
           {
             echo 'Independent local Qwen2.5-Coder 7B automated full-source review of PR #218.'
             echo
-            echo 'Exact source: 50c75457aeb626f2e023dcc89f813e54f30cd9c6. Baseline: e839eaddd4a6081ca0dd867815f61850efaee51c.'
+            echo 'Exact source: 4444a5dab3a71d8fd23a5c72cdc12e606284ef45. Baseline: e839eaddd4a6081ca0dd867815f61850efaee51c.'
             echo 'Model findings require actual source/test disposition. This is NOT human approval, external audit or wallet conformance.'
             echo
             cat review-1.md
@@ -130,7 +130,7 @@ jobs:
             cat review-2.md
             echo
           } > /tmp/pr218-review.md
-          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/217/reviews \
-            -f event=COMMENT -f commit_id="50c75457aeb626f2e023dcc89f813e54f30cd9c6" \
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/218/reviews \
+            -f event=COMMENT -f commit_id="4444a5dab3a71d8fd23a5c72cdc12e606284ef45" \
             -f body="$(cat /tmp/pr218-review.md)" \
             --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
