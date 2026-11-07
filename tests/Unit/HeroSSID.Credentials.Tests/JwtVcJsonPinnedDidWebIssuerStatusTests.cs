@@ -327,6 +327,88 @@ public sealed class JwtVcJsonPinnedDidWebIssuerStatusTests
         Assert.Null(expiredChallenge);
     }
 
+
+    [Fact]
+    public void WalletEmergencyAllowsRealIssuerStatusAndHolderSignatureOnlyWithClearLocalPolicy()
+    {
+        Fixture f = CreateFixture();
+        string status = CreateStatus(f, revoked: false);
+        Assert.True(PrepareEmergency(f, status, [], out var preview));
+        Assert.NotNull(preview);
+        Assert.Equal("member", preview.Disclosure.VerifiedSubject.GetProperty("role").GetString());
+
+        string vp = JwtVcJsonPinnedDidWebWalletPreflight.CreateAfterEmergencyDenylistPreview(
+            preview, f.Challenge, f.CredentialJwt, status, f.IssuerPublicKey,
+            [], f.HolderSeed, f.Clock);
+        Assert.Equal(JwtVcJsonPinnedDidWebIssuerAdmissionResult.SignedNotRevoked,
+            JwtVcJsonPinnedDidWebIssuerAdmission.Check(
+                vp, status, f.Tenant, f.Audience, f.Nonce, IssuerDid, Method,
+                f.IssuerPublicKey, IssuerName, CredentialId, CredentialType,
+                Context, [], f.Store, f.Clock, out JsonElement verified));
+        Assert.Equal("member", verified.GetProperty("role").GetString());
+    }
+
+    [Fact]
+    public void WalletEmergencySuppressesPreviewDespiteAuthenticIssuerSignedNotRevoked()
+    {
+        Fixture f = CreateFixture();
+        string status = CreateStatus(f, revoked: false);
+        string digest = Convert.ToHexStringLower(
+            SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(f.CredentialJwt)));
+        Assert.False(PrepareEmergency(f, status, [digest], out var preview));
+        Assert.Null(preview);
+    }
+
+    [Fact]
+    public void WalletEmergencyRequiresNewConsentIfLocalIncidentPolicyChangesAfterPreview()
+    {
+        Fixture f = CreateFixture();
+        string status = CreateStatus(f, revoked: false);
+        Assert.True(PrepareEmergency(f, status, [], out var preview));
+        Assert.NotNull(preview);
+        string digest = Convert.ToHexStringLower(
+            SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(f.CredentialJwt)));
+        Assert.Throws<ArgumentException>(() =>
+            JwtVcJsonPinnedDidWebWalletPreflight.CreateAfterEmergencyDenylistPreview(
+                preview, f.Challenge, f.CredentialJwt, status, f.IssuerPublicKey,
+                [digest], f.HolderSeed, f.Clock));
+
+        string unrelatedDigest = new('0', 64);
+        Assert.NotEqual(digest, unrelatedDigest);
+        Assert.Throws<ArgumentException>(() =>
+            JwtVcJsonPinnedDidWebWalletPreflight.CreateAfterEmergencyDenylistPreview(
+                preview, f.Challenge, f.CredentialJwt, status, f.IssuerPublicKey,
+                [unrelatedDigest], f.HolderSeed, f.Clock));
+    }
+
+    [Fact]
+    public void WalletEmergencyRejectsNonCanonicalDuplicateAndOversizedLocalPolicies()
+    {
+        Fixture f = CreateFixture();
+        string status = CreateStatus(f, revoked: false);
+        string digest = Convert.ToHexStringLower(
+            SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(f.CredentialJwt)));
+        Assert.False(PrepareEmergency(f, status, ["NOT-A-DIGEST"], out var malformed));
+        Assert.Null(malformed);
+        Assert.False(PrepareEmergency(f, status, [digest, digest], out var duplicate));
+        Assert.Null(duplicate);
+        Assert.False(PrepareEmergency(f, status,
+            Enumerable.Range(0, 257).Select(static i => i.ToString("x64")).ToArray(),
+            out var oversized));
+        Assert.Null(oversized);
+        Assert.True(PrepareEmergency(f, status, [new string('0', 64)],
+            out var unrelated));
+        Assert.NotNull(unrelated);
+    }
+
+    private static bool PrepareEmergency(
+        Fixture f, string status, IReadOnlyCollection<string> denied,
+        out JwtVcJsonPinnedDidWebWalletEmergencyPreview? preview) =>
+        JwtVcJsonPinnedDidWebWalletPreflight.TryPrepareWithEmergencyDenylist(
+            f.Challenge, f.CredentialJwt, status, IssuerDid, Method, f.IssuerPublicKey,
+            IssuerName, CredentialId, CredentialType, Context, f.HolderDid,
+            denied, f.Clock, out preview);
+
     private static bool PrepareWallet(
         Fixture f, string status, string originalJwt, byte[] publicKey,
         PresentationChallenge challenge,

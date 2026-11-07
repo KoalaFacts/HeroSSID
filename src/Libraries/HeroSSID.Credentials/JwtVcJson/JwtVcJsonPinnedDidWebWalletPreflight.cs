@@ -19,6 +19,14 @@ public sealed record JwtVcJsonPinnedDidWebWalletPreview(
     JsonElement VerifiedSubject, string CredentialSha256,
     string StatusSha256, string IssuerPublicKeySha256);
 
+
+/// <summary>
+/// An authenticated did:web Wallet preview and its exact locally approved
+/// emergency policy. A preview never proves that a human consented.
+/// </summary>
+public sealed record JwtVcJsonPinnedDidWebWalletEmergencyPreview(
+    JwtVcJsonPinnedDidWebWalletPreview Disclosure, string DenylistSha256);
+
 /// <summary>
 /// Holder-side, SDK-only did:web VC1.1 full-disclosure preflight.
 /// The integrating wallet must independently authenticate the verifier's
@@ -27,6 +35,33 @@ public sealed record JwtVcJsonPinnedDidWebWalletPreview(
 /// </summary>
 public static class JwtVcJsonPinnedDidWebWalletPreflight
 {
+
+    /// <summary>
+    /// Opt-in Wallet emergency denial: local exact-JWT policy must be checked
+    /// before preview and after consent. Status signed by the issuer is separate.
+    /// </summary>
+    public static bool TryPrepareWithEmergencyDenylist(
+        PresentationChallenge authenticatedChallenge, string credentialJwt,
+        string statusJwt, string trustedIssuerDid, string trustedVerificationMethodId,
+        byte[] independentlyPinnedIssuerPublicKey, string expectedIssuerName,
+        Uri expectedCredentialId, string expectedCredentialType,
+        Uri expectedSubjectContextUri, string holderDid,
+        IReadOnlyCollection<string> deniedCredentialSha256, TimeProvider clock,
+        out JwtVcJsonPinnedDidWebWalletEmergencyPreview? preview)
+    {
+        preview = null;
+        throw new NotSupportedException("Wallet emergency policy preflight not yet implemented.");
+    }
+
+    /// <summary>Fail closed if local incident policy changes after the preview.</summary>
+    public static string CreateAfterEmergencyDenylistPreview(
+        JwtVcJsonPinnedDidWebWalletEmergencyPreview preview,
+        PresentationChallenge authenticatedChallenge, string credentialJwt,
+        string statusJwt, byte[] independentlyPinnedIssuerPublicKey,
+        IReadOnlyCollection<string> deniedCredentialSha256,
+        byte[] holderSeed, TimeProvider clock) =>
+        throw new NotSupportedException("Wallet emergency post-consent policy not yet implemented.");
+
     private const int MaximumCredentialLength = 65_536;
     private const int MaximumStatusLength = 8_192;
 
