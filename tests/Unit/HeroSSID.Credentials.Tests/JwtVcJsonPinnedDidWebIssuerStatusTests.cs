@@ -537,6 +537,29 @@ public sealed class JwtVcJsonPinnedDidWebIssuerStatusTests
         }
     }
 
+
+    [Fact]
+    public void StatusFetchIsolatedHandlerHasNoAmbientCredentialsOrRedirects()
+    {
+        using var handler = JwtVcJsonPinnedDidWebIssuerStatusTransport
+            .CreateIsolatedStatusTransportHandler();
+        Assert.False(handler.AllowAutoRedirect);
+        Assert.False(handler.UseCookies);
+        Assert.False(handler.UseProxy);
+        Assert.False(handler.PreAuthenticate);
+        Assert.Null(handler.Credentials);
+        Assert.Null(handler.DefaultProxyCredentials);
+        Assert.Null(handler.ActivityHeadersPropagator);
+        Assert.Equal(System.Net.DecompressionMethods.None, handler.AutomaticDecompression);
+        Assert.Equal(System.Security.Cryptography.X509Certificates.X509RevocationMode.Online,
+            handler.SslOptions.CertificateRevocationCheckMode);
+        Assert.Null(handler.SslOptions.RemoteCertificateValidationCallback);
+        Assert.Null(handler.SslOptions.ClientCertificates);
+        Assert.Null(handler.SslOptions.LocalCertificateSelectionCallback);
+        using var http = new HttpClient(handler);
+        Assert.Empty(http.DefaultRequestHeaders);
+    }
+
     private static HttpResponseMessage StatusResponse(string jwt, string mediaType = "application/jwt")
     {
         var response = new HttpResponseMessage(System.Net.HttpStatusCode.OK)
