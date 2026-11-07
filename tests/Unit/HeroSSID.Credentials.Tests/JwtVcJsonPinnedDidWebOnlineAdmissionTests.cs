@@ -120,13 +120,52 @@ public sealed class JwtVcJsonPinnedDidWebOnlineAdmissionTests
         Assert.Equal("member", accepted.VerifiedSubject.GetProperty("role").GetString());
     }
 
+    [Theory]
+    [InlineData("issuer-name")]
+    [InlineData("credential-id")]
+    [InlineData("credential-type")]
+    [InlineData("subject-context")]
+    public async Task MismatchedPinnedIssuerPolicyIsRejectedBeforeStatusNetworkOrNonceSpend(
+        string mismatch)
+    {
+        Fixture f = CreateFixture();
+        using var handler = new StatusProbeHandler(_ => Response(Status(f, false)));
+        using var http = new HttpClient(handler);
+        var foreignId = new Uri("https://issuer.example/credentials/other");
+        var foreignContext = new Uri("https://issuer.example/contexts/other");
+        JwtVcJsonPinnedDidWebOnlineAdmissionResponse refused = await CheckAsync(
+            f, http, [], f.CredentialJwt,
+            expectedIssuerName: mismatch == "issuer-name" ? "Wrong Issuer" : IssuerName,
+            expectedCredentialId: mismatch == "credential-id" ? foreignId : CredentialId,
+            expectedCredentialType: mismatch == "credential-type"
+                ? "OtherCredential" : CredentialType,
+            expectedSubjectContextUri: mismatch == "subject-context"
+                ? foreignContext : Context);
+
+        Assert.Equal(JwtVcJsonPinnedDidWebIssuerAdmissionResult.Invalid, refused.Result);
+        Assert.Equal(JsonValueKind.Undefined, refused.VerifiedSubject.ValueKind);
+        Assert.Equal(0, handler.Calls);
+
+        // A rejected, locally mismatched policy must not burn the verifier's
+        // otherwise valid challenge. The same genuine proof can still be checked
+        // against the correctly pinned policy.
+        var accepted = await CheckAsync(f, http, [], f.CredentialJwt);
+        Assert.Equal(JwtVcJsonPinnedDidWebIssuerAdmissionResult.SignedNotRevoked,
+            accepted.Result);
+        Assert.Equal(1, handler.Calls);
+    }
+
     private static Task<JwtVcJsonPinnedDidWebOnlineAdmissionResponse> CheckAsync(
         Fixture f, HttpClient http, IReadOnlyCollection<string> denied,
-        string original, byte[]? key = null) =>
+        string original, byte[]? key = null, string? expectedIssuerName = null,
+        Uri? expectedCredentialId = null, string? expectedCredentialType = null,
+        Uri? expectedSubjectContextUri = null) =>
         JwtVcJsonPinnedDidWebOnlineAdmission.CheckAsync(
             StatusUri, http, original, f.PresentationJwt, f.Tenant, f.Audience,
-            f.Nonce, IssuerDid, Method, key ?? f.IssuerPublicKey, IssuerName,
-            CredentialId, CredentialType, Context, denied, f.Store, f.Clock);
+            f.Nonce, IssuerDid, Method, key ?? f.IssuerPublicKey,
+            expectedIssuerName ?? IssuerName, expectedCredentialId ?? CredentialId,
+            expectedCredentialType ?? CredentialType,
+            expectedSubjectContextUri ?? Context, denied, f.Store, f.Clock);
 
     private static string Status(Fixture f, bool revoked) =>
         JwtVcJsonPinnedDidWebIssuerStatus.Create(
