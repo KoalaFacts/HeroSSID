@@ -25,13 +25,14 @@ public sealed class Vcdm20DidWebIssuerCliIssuanceTests
         try
         {
             string subject = Path.Combine(directory, "subject.json");
-            File.WriteAllText(subject, JsonSerializer.Serialize(new { id = holder.Did, membership = "active" }));
+            await File.WriteAllTextAsync(subject,
+                JsonSerializer.Serialize(new { id = holder.Did, membership = "active" })).ConfigureAwait(true);
             string output = Path.Combine(directory, "signed.jwt");
             var request = Request(issuer.PublicKey, holder.Did, subject, output);
             using var pipe = Pipe(issuer.Seed);
 
             Assert.True(CredentialCommands.TryIssueVc2DidWeb(request, pipe));
-            string jwt = File.ReadAllText(output).TrimEnd('\r', '\n');
+            string jwt = (await File.ReadAllTextAsync(output).ConfigureAwait(true)).TrimEnd('\r', '\n');
             Assert.DoesNotContain(Convert.ToHexString(issuer.Seed), jwt, StringComparison.Ordinal);
             Assert.True(Vcdm20JoseCredential.TryVerifyPinnedDidWebIssuerForAudienceWithId(
                 jwt, IssuerDid, IssuerDid + "#key-1", issuer.PublicKey, IssuerName,
@@ -70,7 +71,7 @@ public sealed class Vcdm20DidWebIssuerCliIssuanceTests
                 jwt, IssuerDid, IssuerDid + "#key-1", issuer.PublicKey, IssuerName,
                 CredentialId, new Uri("https://different.example/entry"), holder.Did,
                 "MembershipCredential", Context, DateTimeOffset.UtcNow, out _));
-            Assert.NotEqual("{}", File.ReadAllText(output));
+            Assert.NotEqual("{}", await File.ReadAllTextAsync(output).ConfigureAwait(true));
         }
         finally
         {
