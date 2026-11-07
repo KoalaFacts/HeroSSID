@@ -1,4 +1,6 @@
+using System.CommandLine;
 using System.Globalization;
+using HeroSSID.Cli.Commands;
 using System.Text.Json;
 using HeroSSID.Credentials.Utilities;
 using HeroSSID.Credentials.Vcdm20;
@@ -91,6 +93,46 @@ public sealed class Vcdm20PinnedDidWebIssuerTests
             issued.IssuerPublicKey, IssuerName, CredentialId, issued.HolderDid,
             Type, Context, out var expiredSubject, now: DateTimeOffset.UtcNow.AddHours(1)));
         Assert.Equal(JsonValueKind.Undefined, expiredSubject.ValueKind);
+    }
+
+    [Theory]
+    [InlineData("#key-1")]
+    [InlineData("#key-2")]
+    public async Task CliAcceptsRealVc2DidWebIssuerOnlyWithCorrectExternalPins(string suffix)
+    {
+        var issued = Issue(suffix);
+        Assert.Equal(0, await InvokeCliAsync(issued).ConfigureAwait(false));
+        Assert.NotEqual(0, await InvokeCliAsync(issued,
+            methodOverride: IssuerDid + (suffix == "#key-1" ? "#key-2" : "#key-1"))
+            .ConfigureAwait(false));
+        Assert.NotEqual(0, await InvokeCliAsync(issued,
+            publicKeyHexOverride: new string('0', 64)).ConfigureAwait(false));
+    }
+
+    private static async Task<int> InvokeCliAsync(
+        (string Jwt, string HolderDid, byte[] IssuerPublicKey, string MethodId) issued,
+        string? methodOverride = null, string? publicKeyHexOverride = null)
+    {
+        string path = Path.Combine(Path.GetTempPath(),
+            "herossid-vc2-didweb-cli-" + Guid.NewGuid().ToString("N") + ".jwt");
+        try
+        {
+            await File.WriteAllTextAsync(path, issued.Jwt).ConfigureAwait(false);
+            return await CredentialCommands.CreateCommand(null!).InvokeAsync(
+                ["verify-vc2-didweb-issuer", "--jwt-file", path,
+                 "--trusted-issuer", IssuerDid,
+                 "--verification-method", methodOverride ?? issued.MethodId,
+                 "--public-key-hex", publicKeyHexOverride ?? Convert.ToHexString(issued.IssuerPublicKey),
+                 "--issuer-name", IssuerName,
+                 "--credential-id", CredentialId.AbsoluteUri,
+                 "--holder", issued.HolderDid,
+                 "--credential-type", Type,
+                 "--context", Context.AbsoluteUri]).ConfigureAwait(false);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     private static bool Check(
