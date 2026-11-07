@@ -26,6 +26,28 @@ dotnet run --project src/Cli/HeroSSID.Cli -- credential verify-vc2-didweb-issuer
   --context 'https://issuer.example/vocab/membership/v1'
 ```
 
+### Optional independently pinned recipient audience
+
+If the original issuer-signed direct VC2 JWT contains one top-level canonical
+HTTPS `aud` (a signed recipient restriction), the verifier can require its
+own independently configured exact receiving service:
+
+```sh
+# Add to the same verify-vc2-didweb-issuer command:
+--audience 'https://verifier.example/claims/member'
+```
+
+With `--audience`, acceptance requires a genuine Ed25519 signature, exact
+assertion method and public key, all existing issuer metadata pins AND the
+single signed `aud` equal to the verifier-owned HTTPS recipient. Wrong,
+missing, unsafe or changed `aud` is rejected without releasing subject.
+Without the flag the original issuer-only profile remains strict: a token
+containing an extra `aud` is not silently treated as issuer-only. The SDK
+entry is `Vcdm20JoseCredential.TryVerifyPinnedDidWebIssuerForAudienceWithId`.
+The verifier must independently enroll the recipient; it cannot be discovered
+from JWT claims, a DID document or holder input. This is **not** an HTTP
+transport, holder control, consent, replay protection or business authorization.
+
 This command is a template, **not** a working credential or real public key.
 The `--public-key-hex` value is the separately verified public key, never a
 private signing seed, did:key multicodec, or JWK. Do not paste private keys.
