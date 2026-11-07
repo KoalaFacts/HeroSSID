@@ -1,4 +1,5 @@
 using System.Text.Json;
+using HeroSSID.Credentials.Utilities;
 using HeroSSID.Credentials.VerifiablePresentations;
 
 namespace HeroSSID.Credentials.JwtVcJson;
@@ -74,6 +75,28 @@ public static class JwtVcJsonPinnedDidWebOnlineAdmission
             return invalid;
         }
 
+        // Verify the verifier's full *independently pinned* original issuer
+        // metadata and expiry BEFORE contacting the issuer's status endpoint.
+        // The JWT's untrusted sub is only a candidate for the issuer-signed
+        // holder binding; it cannot choose the issuer DID, method, key, name,
+        // credential ID, type or context. Claims must not escape this preflight.
+        // The holder proof and atomic nonce consumption remain solely in the
+        // final admission gate after the fresh remote status has been checked.
+        byte[] pinnedKey = independentlyPinnedIssuerPublicKey.ToArray();
+        if (!StrictJwtReader.TryRead(originalCredentialJwt, "JWT", 65_536,
+                out JsonElement originalPayload, trustedVerificationMethodId,
+                allowMissingType: true) ||
+            !StrictJwtReader.TryGetString(originalPayload, "sub",
+                out string claimedHolderDid) ||
+            !JwtVcJsonPinnedDidWebIssuerVerifier.TryVerifyWithPinnedIssuerNameAndId(
+                originalCredentialJwt, trustedIssuerDid, trustedVerificationMethodId,
+                pinnedKey, expectedIssuerName, expectedCredentialId,
+                claimedHolderDid, expectedCredentialType, expectedSubjectContextUri,
+                clock.GetUtcNow(), out _))
+        {
+            return invalid;
+        }
+
         // This transport verifies the genuine original issuer signature and
         // exact pinned did:web method/key before making a credential-free HTTPS
         // request. It then independently validates the issuer's signed, 60-second,
@@ -82,7 +105,7 @@ public static class JwtVcJsonPinnedDidWebOnlineAdmission
             await JwtVcJsonPinnedDidWebIssuerStatusTransport.FetchVerifiedStatusAsync(
                 independentlyPinnedStatusUri, http, originalCredentialJwt,
                 trustedIssuerDid, trustedVerificationMethodId,
-                independentlyPinnedIssuerPublicKey, clock,
+                pinnedKey, clock,
                 maximumDuration, cancellationToken).ConfigureAwait(false);
         if (fetched is null)
         {
@@ -98,7 +121,7 @@ public static class JwtVcJsonPinnedDidWebOnlineAdmission
             JwtVcJsonPinnedDidWebIssuerAdmission.Check(
                 presentationJwt, fetched.SignedStatusJwt, verifierTenantId,
                 expectedAudience, expectedNonce, trustedIssuerDid,
-                trustedVerificationMethodId, independentlyPinnedIssuerPublicKey,
+                trustedVerificationMethodId, pinnedKey,
                 expectedIssuerName, expectedCredentialId, expectedCredentialType,
                 expectedSubjectContextUri, deniedCredentialSha256,
                 challenges, clock, out JsonElement subject);
