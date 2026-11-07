@@ -4,6 +4,8 @@
 
 HeroSSID is a development-stage .NET foundation for issuing, holding and verifying identity credentials. A wallet can hold credentials and obtain holder-signed presentations through the library. The current implementation uses locally enrolled identities; external wallet interoperability and production operation remain release gates.
 
+For issuer-operated **real VC2 did:web recipient-bound JWT issuance**, the .NET 10 SDK offers [a signing API with a signer/public-key consistency check](docs/vcdm20-didweb-issuer-issuance.md); this does not enroll issuer trust or control a holder's key.
+
 For issuer-only checks without a hosted service, the .NET 10 CLI supports
 [VC1.1 `jwt_vc_json`](docs/cli-vc11-issuer-check.md),
 [separately pinned `did:web` VC1.1 issuer keys](docs/cli-vc11-didweb-issuer-check.md),
