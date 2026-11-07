@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
+      actions: read
       contents: read
       pull-requests: read
     steps:
@@ -30,6 +31,16 @@ jobs:
           test "$(git rev-parse c94dbc3e7bfa05ed81ae266bb209f51ae7a9c0f0^{commit})" = "c94dbc3e7bfa05ed81ae266bb209f51ae7a9c0f0"
           test "$(git rev-parse e44130c45542563419c90f91ba321d9d17f62cdb^{commit})" = "e44130c45542563419c90f91ba321d9d17f62cdb"
           test "$(git diff --name-only e44130c45542563419c90f91ba321d9d17f62cdb c94dbc3e7bfa05ed81ae266bb209f51ae7a9c0f0 | wc -l)" -eq 3
+      - name: Restore original completed part1 inference evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: independent-pr222-review
+          run-id: 42347202418
+          github-token: ${{ github.token }}
+      - name: Verify preserved original raw model output
+        shell: bash
+        run: |
+          test -s review-model-1.json
       - name: Install isolated independent local model
         shell: bash
         run: |
@@ -48,7 +59,11 @@ jobs:
         run: |
           set -euo pipefail
           for part in 1 2; do
-            REVIEW_PART="$part" python3 tools/offline_pr222_review.py
+            if [ "$part" = 1 ]; then
+              REUSE_REVIEW_PART=1 REVIEW_PART=1 python3 tools/offline_pr222_review.py
+            else
+              REVIEW_PART=2 python3 tools/offline_pr222_review.py
+            fi
             test -s "review-$part.md"
             test -s "review-$part.json"
             test "$(cat review-head-$part.txt)" = "c94dbc3e7bfa05ed81ae266bb209f51ae7a9c0f0"
