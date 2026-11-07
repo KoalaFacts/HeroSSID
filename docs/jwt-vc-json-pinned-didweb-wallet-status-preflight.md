@@ -44,6 +44,40 @@ if (safeToPreview && preview is not null)
 
 The private 60-second `herossid-didweb-vc11-exact-status+jwt` says **only that the same pinned issuer signed a current observation**. It is not a W3C Bitstring Status List, continuous real-time non-revocation, a hosted endpoint, third-party Wallet interoperability, a complete OpenID4VP flow or an external security audit. A compromised issuer signing key defeats this status; the verifier and wallet must independently change trust policy upon compromise.
 
+
+## Opt-in Wallet-owned emergency denial (SDK)
+
+A Wallet operator may independently maintain **up to 256 distinct lowercase 64-character SHA-256 hex digests** of the UTF-8 bytes of exact original compact issuer JWTs that must not be disclosed (for example, a known stolen or incident-affected membership credential). Pass the **current authoritative list** to both `TryPrepareWithEmergencyDenylist` and `CreateAfterEmergencyDenylistPreview`. A valid issuer signature and fresh signed `revoked=false` observation **do not override** local denial.
+
+```csharp
+// Local Wallet operator incident policy, not selected by a verifier or issuer JWT.
+IReadOnlyCollection<string> localDeniedOriginalJwtSha256 = /* enrolled policy */;
+bool mayDisplay = JwtVcJsonPinnedDidWebWalletPreflight.TryPrepareWithEmergencyDenylist(
+    authenticatedChallenge, originalIssuerJwt, issuerSignedExactStatusJwt,
+    "did:web:issuer.example:members", "did:web:issuer.example:members#key-2",
+    pinnedIssuerEd25519PublicKey, "Example Membership Office",
+    new Uri("https://issuer.example/credentials/membership-42"),
+    "MembershipCredential", new Uri("https://issuer.example/contexts/membership/v1"),
+    holderDid, localDeniedOriginalJwtSha256, TimeProvider.System, out var preview);
+
+if (mayDisplay && preview is not null)
+{
+    // Show EVERY field in preview.Disclosure.VerifiedSubject and obtain consent.
+    // Re-read current independently controlled denylist after consent.
+    IReadOnlyCollection<string> currentDeniedOriginalJwtSha256 = /* current policy */;
+    byte[] holderSeed = /* unlocked only after consent */;
+    string vp = JwtVcJsonPinnedDidWebWalletPreflight.CreateAfterEmergencyDenylistPreview(
+        preview, authenticatedChallenge, originalIssuerJwt,
+        issuerSignedExactStatusJwt, pinnedIssuerEd25519PublicKey,
+        currentDeniedOriginalJwtSha256, holderSeed, TimeProvider.System);
+    // Send only to a previously authenticated verifier.
+}
+```
+
+A malformed, duplicate, mixed-case or oversized policy fails closed; a listed original JWT releases **no claims even to the Wallet preview**. The entire canonically sorted policy has a SHA-256 commitment in the preview; a new incident entry, removed entry or other policy change requires a **new full-disclosure preview and new application consent**. The SDK validates again before and after holder signing; it does **not** atomically coordinate concurrent operator policy updates or prove that the application used its latest authoritative list. Integrators must serialize incident-policy updates with consent and send decisions and cancel an already visible UI when a new incident is reported.
+
+These are Wallet-local emergency controls, not W3C credential status, an issuer's official revocation act, continuous online status, a consent attestation, real-world identity verification, automatic issuer trust enrollment or Agent/business authorization. The verifier must separately apply its own trust, one-use challenge, and emergency denial policies.
+
 ## Regression
 
 ```bash
