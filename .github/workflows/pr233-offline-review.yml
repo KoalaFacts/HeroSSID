@@ -27,7 +27,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch origin feat/vc2-didweb-recipient-claim-cli-20261108:refs/remotes/origin/pr233-reviewed-source
-          test "$(gh api repos/KoalaFacts/HeroSSID/pulls/232 --jq '.head.sha')" = "7161e9b51b4dd81af0ba34bc86da394658635c33"
+          test "$(gh api repos/KoalaFacts/HeroSSID/pulls/233 --jq '.head.sha')" = "7161e9b51b4dd81af0ba34bc86da394658635c33"
           test "$(git rev-parse 7161e9b51b4dd81af0ba34bc86da394658635c33^{commit})" = "7161e9b51b4dd81af0ba34bc86da394658635c33"
           test "$(git rev-parse dc97e54c763d3e475d41898b7ac40ac6571fab65^{commit})" = "dc97e54c763d3e475d41898b7ac40ac6571fab65"
           test "$(git diff --name-only dc97e54c763d3e475d41898b7ac40ac6571fab65 7161e9b51b4dd81af0ba34bc86da394658635c33 | wc -l)" -eq 5
@@ -86,7 +86,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/232 --jq '.head.sha')"
+          actual="$(gh api repos/KoalaFacts/HeroSSID/pulls/233 --jq '.head.sha')"
           test "$actual" = "7161e9b51b4dd81af0ba34bc86da394658635c33"
           python3 - <<'PY'
           import json
@@ -131,7 +131,7 @@ jobs:
             cat review-2.md
             echo
           } > /tmp/pr233-review.md
-          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/232/reviews \
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/233/reviews \
             -f event=COMMENT -f commit_id="7161e9b51b4dd81af0ba34bc86da394658635c33" \
             -f body="$(cat /tmp/pr233-review.md)" \
             --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
