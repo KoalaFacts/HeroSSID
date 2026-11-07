@@ -8,6 +8,7 @@ The preview is for the integrating wallet UI; the SDK never asks the human, atte
 
 ```csharp
 using HeroSSID.Credentials.JwtVcJson;
+using HeroSSID.Credentials.VerifiablePresentations;
 
 // Obtained from a separately authenticated verifier channel.
 // Challenge metadata is not itself proof of verifier authentication.
