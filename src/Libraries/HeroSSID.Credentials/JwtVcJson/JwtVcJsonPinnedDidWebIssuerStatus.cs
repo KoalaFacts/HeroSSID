@@ -166,7 +166,8 @@ public static class JwtVcJsonPinnedDidWebIssuerStatus
         return status;
     }
 
-    private static RevocationSnapshotCheckResult CheckSignedStatus(
+    // Internal only: caller must first authenticate and atomically consume a real holder VP.
+    internal static RevocationSnapshotCheckResult CheckSignedStatus(
         string statusJwt, string originalCredentialJwt, string trustedIssuerDid,
         string trustedVerificationMethodId, byte[] pinnedKey, DateTimeOffset now)
     {
