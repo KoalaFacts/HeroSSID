@@ -137,12 +137,87 @@ internal static class CredentialCommands
             context.ExitCode = 0;
         });
         credentials.AddCommand(verifyVc2);
+
+        // This command accepts only the opt-in signed ID + single-recipient
+        // profile. An issuer-only VC2, VC1.1 JWT or different audience cannot
+        // satisfy the relying party's independently pinned recipient policy.
+        var recipientFile = new Option<FileInfo>("--jwt-file",
+            "Path to the unchanged recipient-bound issuer-signed VC2 JOSE JWT")
+        {
+            IsRequired = true
+        };
+        var recipientIssuer = new Option<string>("--trusted-issuer",
+            "Independently approved issuer did:key (not learned from JWT)")
+        {
+            IsRequired = true
+        };
+        var recipientHolder = new Option<string>("--holder",
+            "Independently expected subject DID, not holder key proof")
+        {
+            IsRequired = true
+        };
+        var recipientType = new Option<string>("--credential-type",
+            "Independently approved exact credential type")
+        {
+            IsRequired = true
+        };
+        var recipientContext = new Option<string>("--context",
+            "Independently pinned HTTPS subject vocabulary")
+        {
+            IsRequired = true
+        };
+        var recipientId = new Option<string>("--credential-id",
+            "Independently pinned exact signed HTTPS credential ID")
+        {
+            IsRequired = true
+        };
+        var recipientAudience = new Option<string>("--audience",
+            "Independently pinned canonical HTTPS relying-party recipient")
+        {
+            IsRequired = true
+        };
+
+        var verifyVc2Recipient = new Command("verify-vc2-recipient",
+            "Verify issuer-signed direct VC2 JWT for one pinned recipient and credential ID");
+        verifyVc2Recipient.AddOption(recipientFile);
+        verifyVc2Recipient.AddOption(recipientIssuer);
+        verifyVc2Recipient.AddOption(recipientHolder);
+        verifyVc2Recipient.AddOption(recipientType);
+        verifyVc2Recipient.AddOption(recipientContext);
+        verifyVc2Recipient.AddOption(recipientId);
+        verifyVc2Recipient.AddOption(recipientAudience);
+        verifyVc2Recipient.SetHandler((InvocationContext context) =>
+        {
+            FileInfo? file = context.ParseResult.GetValueForOption(recipientFile);
+            string? issuerDid = context.ParseResult.GetValueForOption(recipientIssuer);
+            string? holderDid = context.ParseResult.GetValueForOption(recipientHolder);
+            string? credentialType = context.ParseResult.GetValueForOption(recipientType);
+            string? vocabulary = context.ParseResult.GetValueForOption(recipientContext);
+            string? signedId = context.ParseResult.GetValueForOption(recipientId);
+            string? recipient = context.ParseResult.GetValueForOption(recipientAudience);
+            if (string.IsNullOrEmpty(signedId) || string.IsNullOrEmpty(recipient) ||
+                !IsIssuerSignatureVerified(file, issuerDid, holderDid,
+                    credentialType, vocabulary, vcdm20: true,
+                    credentialId: signedId, audience: recipient))
+            {
+                Console.Error.WriteLine(
+                    "Recipient-bound VC2 credential rejected: signature, exact credential ID, audience, other pins, validity, or file check failed. No claims released.");
+                context.ExitCode = 1;
+                return;
+            }
+
+            Console.Out.WriteLine(
+                "Issuer signature, exact VC2 credential ID and independently pinned recipient verified. " +
+                "Holder control, consent, current status, real-world identity and authorization NOT checked.");
+            context.ExitCode = 0;
+        });
+        credentials.AddCommand(verifyVc2Recipient);
         return credentials;
     }
 
     private static bool IsIssuerSignatureVerified(FileInfo? file, string? issuerDid,
         string? holderDid, string? credentialType, string? vocabulary,
-        bool vcdm20 = false)
+        bool vcdm20 = false, string? credentialId = null, string? audience = null)
     {
         if (file is null || string.IsNullOrWhiteSpace(issuerDid) ||
             !issuerDid.StartsWith("did:key:", StringComparison.Ordinal) ||
@@ -151,6 +226,20 @@ internal static class CredentialCommands
             !Uri.TryCreate(vocabulary, UriKind.Absolute, out Uri? contextUri) ||
             contextUri.Scheme != Uri.UriSchemeHttps ||
             contextUri.UserInfo.Length != 0 || contextUri.Fragment.Length != 0)
+        {
+            return false;
+        }
+
+        // Verify every recipient and credential-ID pin before reading any JWT.
+        // A caller cannot turn absent or unsafe recipient policy into a
+        // permissive issuer-only check through this overload.
+        bool recipientBound = credentialId is not null || audience is not null;
+        Uri? expectedId = null;
+        Uri? expectedAudience = null;
+        if (recipientBound &&
+            (!vcdm20 ||
+             !TryCanonicalHttpsPin(credentialId, out expectedId) ||
+             !TryCanonicalHttpsPin(audience, out expectedAudience)))
         {
             return false;
         }
@@ -182,6 +271,14 @@ internal static class CredentialCommands
                 .GetString(bytes, 0, length).TrimEnd('\r', '\n');
             // The formats are deliberately separate: direct VC2 JOSE must not
             // fall back to VC1.1 nested JWT or a private HeroSSID vc.context.
+            if (recipientBound)
+            {
+                return Vcdm20JoseCredential.TryVerifyForAudienceWithId(
+                    originalJwt, issuerDid, holderDid, credentialType,
+                    contextUri, expectedId!, expectedAudience!,
+                    DateTimeOffset.UtcNow, out _);
+            }
+
             return vcdm20
                 ? Vcdm20JoseCredential.TryVerify(originalJwt, issuerDid,
                     holderDid, credentialType, contextUri,
@@ -202,5 +299,22 @@ internal static class CredentialCommands
         {
             return false;
         }
+    }
+
+    private static bool TryCanonicalHttpsPin(string? text, out Uri? uri)
+    {
+        uri = null;
+        if (string.IsNullOrEmpty(text) || text.Length > 2_048 ||
+            !Uri.TryCreate(text, UriKind.Absolute, out Uri? parsed) ||
+            !string.Equals(parsed.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) ||
+            string.IsNullOrWhiteSpace(parsed.Host) ||
+            parsed.UserInfo.Length != 0 || parsed.Fragment.Length != 0 ||
+            !string.Equals(parsed.AbsoluteUri, text, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        uri = parsed;
+        return true;
     }
 }
