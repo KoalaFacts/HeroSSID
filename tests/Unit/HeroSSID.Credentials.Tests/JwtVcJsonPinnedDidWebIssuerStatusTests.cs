@@ -401,6 +401,166 @@ public sealed class JwtVcJsonPinnedDidWebIssuerStatusTests
         Assert.NotNull(unrelated);
     }
 
+
+    private static readonly Uri IssuerStatusUri =
+        new("https://issuer.example/status/credential-42.jwt");
+
+    [Fact]
+    public async Task PinnedHttpsIssuerStatusGenuinelyUnlocksOnlyNonRevokedWalletPreview()
+    {
+        Fixture f = CreateFixture();
+        string validStatus = CreateStatus(f, revoked: false);
+        using var handler = new StatusProbeHandler(request =>
+        {
+            Assert.Equal(HttpMethod.Get, request.Method);
+            Assert.Equal(IssuerStatusUri, request.RequestUri);
+            Assert.Null(request.Headers.Authorization);
+            return StatusResponse(validStatus);
+        });
+        using var http = new HttpClient(handler);
+        var fetched = await JwtVcJsonPinnedDidWebIssuerStatusTransport.FetchVerifiedStatusAsync(
+            IssuerStatusUri, http, f.CredentialJwt, IssuerDid, Method,
+            f.IssuerPublicKey, f.Clock);
+        Assert.NotNull(fetched);
+        Assert.Equal(RevocationSnapshotCheckResult.NotListed, fetched.Status);
+        Assert.Equal(validStatus, fetched.SignedStatusJwt);
+        Assert.Equal(1, handler.Calls);
+        Assert.True(PrepareWallet(f, fetched.SignedStatusJwt, f.CredentialJwt,
+            f.IssuerPublicKey, f.Challenge, out var preview));
+        Assert.NotNull(preview);
+        Assert.Equal("member", preview.VerifiedSubject.GetProperty("role").GetString());
+    }
+
+    [Fact]
+    public async Task GenuineIssuerRevocationIsReturnedAsRevokedAndWalletRefusesDisclosure()
+    {
+        Fixture f = CreateFixture();
+        string revokedStatus = CreateStatus(f, revoked: true);
+        using var handler = new StatusProbeHandler(_ => StatusResponse(revokedStatus));
+        using var http = new HttpClient(handler);
+        var fetched = await JwtVcJsonPinnedDidWebIssuerStatusTransport.FetchVerifiedStatusAsync(
+            IssuerStatusUri, http, f.CredentialJwt, IssuerDid, Method,
+            f.IssuerPublicKey, f.Clock);
+        Assert.NotNull(fetched);
+        Assert.Equal(RevocationSnapshotCheckResult.Revoked, fetched.Status);
+        Assert.False(PrepareWallet(f, fetched.SignedStatusJwt, f.CredentialJwt,
+            f.IssuerPublicKey, f.Challenge, out var preview));
+        Assert.Null(preview);
+    }
+
+    [Fact]
+    public async Task StatusFetchRejectsForgedWrongCredentialAndExpiredObservations()
+    {
+        var clock = new AdjustableClock(new DateTimeOffset(2026, 11, 7, 0, 0, 0, TimeSpan.Zero));
+        Fixture f = CreateFixture(clock);
+        string authentic = CreateStatus(f, revoked: false);
+        var attacker = Identity();
+        string forged = Ed25519JwtSigner.CreateSignedJwt(
+            Ed25519JwtSigner.ExtractHeader(authentic),
+            Ed25519JwtSigner.ExtractPayload(authentic), attacker.Seed);
+        foreach (string result in new[] { forged, authentic })
+        {
+            using var handler = new StatusProbeHandler(_ => StatusResponse(result));
+            using var http = new HttpClient(handler);
+            string original = result == forged ? f.CredentialJwt : f.CredentialJwt + "x";
+            Assert.Null(await JwtVcJsonPinnedDidWebIssuerStatusTransport.FetchVerifiedStatusAsync(
+                IssuerStatusUri, http, original, IssuerDid, Method,
+                f.IssuerPublicKey, clock));
+        }
+
+        clock.Advance(TimeSpan.FromSeconds(61));
+        using var expiredHandler = new StatusProbeHandler(_ => StatusResponse(authentic));
+        using var expiredHttp = new HttpClient(expiredHandler);
+        Assert.Null(await JwtVcJsonPinnedDidWebIssuerStatusTransport.FetchVerifiedStatusAsync(
+            IssuerStatusUri, expiredHttp, f.CredentialJwt, IssuerDid, Method,
+            f.IssuerPublicKey, clock));
+    }
+
+    [Fact]
+    public async Task StatusFetchBlocksUnsafeTargetsAndAmbientCredentialDisclosureBeforeNetwork()
+    {
+        Fixture f = CreateFixture();
+        using var handler = new StatusProbeHandler(_ => StatusResponse(CreateStatus(f, false)));
+        using var http = new HttpClient(handler);
+        foreach (Uri unsafeUri in new[]
+        {
+            new Uri("http://issuer.example/status/credential-42.jwt"),
+            new Uri("https://user:password@issuer.example/status/credential-42.jwt"),
+            new Uri("https://issuer.example/status/credential-42.jwt?token=private"),
+            new Uri("https://issuer.example:9443/status/credential-42.jwt"),
+            new Uri("https://127.0.0.1/status/credential-42.jwt")
+        })
+        {
+            Assert.Null(await JwtVcJsonPinnedDidWebIssuerStatusTransport.FetchVerifiedStatusAsync(
+                unsafeUri, http, f.CredentialJwt, IssuerDid, Method,
+                f.IssuerPublicKey, f.Clock));
+        }
+
+        http.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "wallet-secret");
+        Assert.Null(await JwtVcJsonPinnedDidWebIssuerStatusTransport.FetchVerifiedStatusAsync(
+            IssuerStatusUri, http, f.CredentialJwt, IssuerDid, Method,
+            f.IssuerPublicKey, f.Clock));
+        Assert.Equal(0, handler.Calls);
+    }
+
+    [Fact]
+    public async Task StatusFetchRejectsRedirectIncorrectMediaTypeAndOversizedBody()
+    {
+        Fixture f = CreateFixture();
+        using (var handler = new StatusProbeHandler(_ =>
+            new HttpResponseMessage(System.Net.HttpStatusCode.Redirect)
+            { Headers = { Location = new Uri("https://evil.example/collect") } }))
+        using (var http = new HttpClient(handler))
+        {
+            Assert.Null(await JwtVcJsonPinnedDidWebIssuerStatusTransport.FetchVerifiedStatusAsync(
+                IssuerStatusUri, http, f.CredentialJwt, IssuerDid, Method,
+                f.IssuerPublicKey, f.Clock));
+        }
+
+        using (var handler = new StatusProbeHandler(_ =>
+            StatusResponse(CreateStatus(f, false), "text/plain")))
+        using (var http = new HttpClient(handler))
+        {
+            Assert.Null(await JwtVcJsonPinnedDidWebIssuerStatusTransport.FetchVerifiedStatusAsync(
+                IssuerStatusUri, http, f.CredentialJwt, IssuerDid, Method,
+                f.IssuerPublicKey, f.Clock));
+        }
+
+        using (var handler = new StatusProbeHandler(_ =>
+            StatusResponse(new string('X', 9_000))))
+        using (var http = new HttpClient(handler))
+        {
+            Assert.Null(await JwtVcJsonPinnedDidWebIssuerStatusTransport.FetchVerifiedStatusAsync(
+                IssuerStatusUri, http, f.CredentialJwt, IssuerDid, Method,
+                f.IssuerPublicKey, f.Clock));
+        }
+    }
+
+    private static HttpResponseMessage StatusResponse(string jwt, string mediaType = "application/jwt")
+    {
+        var response = new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            Content = new StringContent(jwt, System.Text.Encoding.ASCII)
+        };
+        response.Content.Headers.ContentType =
+            new System.Net.Http.Headers.MediaTypeHeaderValue(mediaType);
+        return response;
+    }
+
+    private sealed class StatusProbeHandler(Func<HttpRequestMessage, HttpResponseMessage> respond)
+        : HttpMessageHandler
+    {
+        public int Calls { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return Task.FromResult(respond(request));
+        }
+    }
+
     private static bool PrepareEmergency(
         Fixture f, string status, IReadOnlyCollection<string> denied,
         out JwtVcJsonPinnedDidWebWalletEmergencyPreview? preview) =>
