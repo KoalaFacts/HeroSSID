@@ -16,6 +16,78 @@ internal static partial class CredentialCommands
         TryVerifyVc11DidKeyPinnedSubject(parameters, observedAt, out JsonElement subject) &&
         MatchesPinnedStringClaim(subject, claimName, claimValue);
 
+    // The default System.CommandLine parser expands @response files and prints
+    // unrecognized tokens before a command handler executes. For this command
+    // that could echo the verifier's expected --claim-value. Validate the full
+    // argument shape BEFORE invoking the parser; never report supplied tokens.
+    private static readonly string[] PinnedClaimCliOptions =
+    [
+        "--jwt-file", "--trusted-issuer", "--issuer-name", "--credential-id",
+        "--holder", "--credential-type", "--context", "--claim-name",
+        "--claim-value"
+    ];
+
+    internal static bool CanInvokePinnedClaimWithoutEchoingPolicy(string[] arguments)
+    {
+        ArgumentNullException.ThrowIfNull(arguments);
+        const string operation = "verify-vc11-didkey-pinned-claim";
+        if (Array.IndexOf(arguments, operation) < 0)
+        {
+            // Other existing CLI commands retain their original parsing.
+            return true;
+        }
+
+        if (arguments.Length == 3 &&
+            arguments[0] == "credential" && arguments[1] == operation &&
+            (arguments[2] == "--help" || arguments[2] == "-h"))
+        {
+            return true;
+        }
+
+        if (arguments.Length < 3 || arguments[0] != "credential" ||
+            arguments[1] != operation)
+        {
+            return false;
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 2; i < arguments.Length; i++)
+        {
+            string token = arguments[i];
+            int equals = token.IndexOf('=');
+            string option = equals >= 0 ? token[..equals] : token;
+            if (Array.IndexOf(PinnedClaimCliOptions, option) < 0 ||
+                !seen.Add(option))
+            {
+                return false;
+            }
+
+            string value;
+            if (equals >= 0)
+            {
+                value = token[(equals + 1)..];
+            }
+            else if (i + 1 < arguments.Length)
+            {
+                value = arguments[++i];
+            }
+            else
+            {
+                return false;
+            }
+
+            // @response-file expansion, option-shaped values and control
+            // characters could change parsing or expose later policy tokens.
+            if (string.IsNullOrEmpty(value) || value[0] == '@' ||
+                value[0] == '-' || value.Contains('\r') || value.Contains('\n'))
+            {
+                return false;
+            }
+        }
+
+        return seen.Count == PinnedClaimCliOptions.Length;
+    }
+
     private static Command CreateVc11PinnedClaimCommand()
     {
         var jwtFile = Required("--jwt-file", "Original unchanged issuer-signed VC1.1 JWT");

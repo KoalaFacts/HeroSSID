@@ -189,6 +189,48 @@ public sealed class CredentialCliVc11PinnedVerificationTests
         }
     }
 
+    [Fact]
+    public void PinnedClaimCliPreflightRejectsParserErrorsBeforeTheyEchoPolicyValue()
+    {
+        string[] valid =
+        [
+            "credential", "verify-vc11-didkey-pinned-claim",
+            "--jwt-file", "synthetic-missing.jwt",
+            "--trusted-issuer", "did:key:zSyntheticIssuer",
+            "--issuer-name", "Synthetic Issuer",
+            "--credential-id", "https://issuer.example/credentials/synthetic",
+            "--holder", "did:key:zSyntheticHolder",
+            "--credential-type", "MembershipCredential",
+            "--context", "https://issuer.example/vocab/synthetic",
+            "--claim-name", "membership",
+            "--claim-value", "SYNTHETIC_EXPECTED_VALUE_DO_NOT_PRINT"
+        ];
+        Assert.True(CredentialCommands.CanInvokePinnedClaimWithoutEchoingPolicy(valid));
+
+        string[] responseFile = (string[])valid.Clone();
+        responseFile[Array.IndexOf(responseFile, "membership")] = "@context";
+        Assert.False(CredentialCommands.CanInvokePinnedClaimWithoutEchoingPolicy(
+            responseFile));
+
+        string[] duplicate = [.. valid, "--claim-value", "different"];
+        Assert.False(CredentialCommands.CanInvokePinnedClaimWithoutEchoingPolicy(
+            duplicate));
+
+        string[] unknown = [.. valid, "--unexpected", "surprise"];
+        Assert.False(CredentialCommands.CanInvokePinnedClaimWithoutEchoingPolicy(
+            unknown));
+
+        string[] optionShapedValue = (string[])valid.Clone();
+        optionShapedValue[^1] = "--bad";
+        Assert.False(CredentialCommands.CanInvokePinnedClaimWithoutEchoingPolicy(
+            optionShapedValue));
+
+        Assert.True(CredentialCommands.CanInvokePinnedClaimWithoutEchoingPolicy(
+            ["credential", "verify-vc11-didkey-pinned-claim", "--help"]));
+        Assert.True(CredentialCommands.CanInvokePinnedClaimWithoutEchoingPolicy(
+            ["credential", "verify-vc11-didkey-pinned"]));
+    }
+
     private static CredentialCommands.Vc11PinnedVerifyParameters Pins(
         string path, string issuerDid, string holderDid) =>
         new(path, issuerDid, IssuerName, CredentialId, holderDid,
