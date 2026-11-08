@@ -125,6 +125,21 @@ jobs:
           fi
           grep -Fq 'No values released' "$output_dir/stderr"
 
+          # The parser accepts colon-separated option values. On an unknown
+          # command, the raw policy token must be stopped before diagnostics.
+          if dotnet src/Cli/HeroSSID.Cli/bin/Release/net10.0/HeroSSID.Cli.dll \
+              credential unknown-operation "--claim-value:$marker" \
+              >"$output_dir/stdout" 2>"$output_dir/stderr"; then
+            echo 'Unknown-operation colon policy unexpectedly succeeded' >&2
+            exit 1
+          fi
+          if grep -Fq "$marker" "$output_dir/stdout" || \
+             grep -Fq "$marker" "$output_dir/stderr"; then
+            echo 'Colon-separated policy leaked through parser diagnostics' >&2
+            exit 1
+          fi
+          grep -Fq 'No values released' "$output_dir/stderr"
+
       - name: Run unit tests
         run: |
           dotnet test tests/Unit/HeroSSID.Unit.Tests/HeroSSID.Unit.Tests.csproj \

@@ -245,6 +245,11 @@ public sealed class CredentialCliVc11PinnedVerificationTests
         Assert.False(CredentialCommands.CanInvokePinnedClaimWithoutEchoingPolicy(
             ["credential", "unknown-operation",
              "--claim-value=SYNTHETIC_EXPECTED_VALUE_DO_NOT_PRINT"]));
+        // System.CommandLine also supports ':' as an option-value delimiter.
+        // A misspelled command must not echo the exact verifier policy.
+        Assert.False(CredentialCommands.CanInvokePinnedClaimWithoutEchoingPolicy(
+            ["credential", "unknown-operation",
+             "--claim-value:SYNTHETIC_EXPECTED_VALUE_DO_NOT_PRINT"]));
     }
 
     private static CredentialCommands.Vc11PinnedVerifyParameters Pins(
