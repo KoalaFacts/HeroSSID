@@ -4,6 +4,8 @@
 
 HeroSSID is a development-stage .NET foundation for issuing, holding and verifying identity credentials. A wallet can hold credentials and obtain holder-signed presentations through the library. The current implementation uses locally enrolled identities; external wallet interoperability and production operation remain release gates.
 
+For agents, the .NET 10 SDK now supports [short-lived issuer-signed VC2 action assertions](docs/vcdm20-agent-scope-assertion.md) restricted to one pinned agent DID, one exact action and HTTPS resource, one recipient, and an independently trusted issuer. **This is only an issuer assertion:** agent private-key control, real organisation identity, live status, genuine business delegation and receiving-system authorization must be established separately. No external Wallet interoperability or full JSON-LD conformance is claimed.
+
 VC1.1 issuer operators and independently pinned verifiers can now [issue and check authentic 60-second did:key issuer-signed private status snapshots via .NET 10 CLI](docs/cli-vc11-didkey-issuer-status.md) over unchanged original `jwt_vc_json` credentials. `SignedNotListed` is a time-bounded signed observation only; it is not live non-revocation, holder key control, real identity, consent or business authorization.
 
 For issuer-operated **real VC2 did:web recipient-bound JWT issuance**, the .NET 10 SDK offers [a signing API with a signer/public-key consistency check](docs/vcdm20-didweb-issuer-issuance.md); this does not enroll issuer trust or control a holder's key.
