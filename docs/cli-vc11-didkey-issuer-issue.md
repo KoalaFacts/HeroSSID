@@ -37,3 +37,23 @@ The separate verifier must enroll and independently pin the issuer DID, holder D
 Issuance proves only that the specified issuer private key signed a statement. It **does not** prove control of the holder's private key, human consent, real-world identity, an unrevealed revocation state, authority to act for an organisation, or third-party wallet compatibility. No hosted issuance endpoint, wallet UI, independent conformance certification or credential exchange is added by this command.
 
 References: [W3C Verifiable Credentials Data Model 1.1 JWT encoding](https://www.w3.org/TR/2021/REC-vc-data-model-20211109/#jwt-encoding), [OpenID4VP 1.0](https://openid.net/specs/openid-4-verifiable-presentations-1_0.html).
+
+## Independently verify the original JWT with signed issuer metadata pins
+
+The matching offline .NET 10 verifier command operates with **separately established** pins; never extract expected values from the JWT being checked. After creating an original JWT as above, the verifier can run:
+
+```sh
+dotnet run --project src/Cli/HeroSSID.Cli -- \
+  credential verify-vc11-didkey-pinned \
+  --jwt-file ./issued-credential.jwt \
+  --trusted-issuer 'did:key:z6Mk...FULL_ISSUER_DID' \
+  --issuer-name 'Example Membership Issuer' \
+  --credential-id 'https://issuer.example/credentials/member-123' \
+  --holder 'did:key:z6Mk...FULL_HOLDER_DID' \
+  --credential-type MembershipCredential \
+  --context 'https://issuer.example/vocab/membership'
+```
+
+The CLI reads at most 65,536 JWT file bytes and verifies the **original** issuer signature plus the issuer DID, signed issuer name and credential ID, expected subject DID, type, HTTPS vocabulary and validity at verification time. Invalid, oversized, tampered, expired and mismatched credentials return failure without printing the JWT or claims. Both signed name and ID must be present and exactly equal to independent verifier policy; issuer-controlled metadata is not itself a trust anchor.
+
+A successful issuer-signature check **is not** proof of holder private-key control, human consent, revocation freshness, real-world identity, organisation registration or authorization to perform an action. This command does not implement OpenID4VP, a W3C conformance suite, third-party-wallet compatibility or user disclosure consent.
