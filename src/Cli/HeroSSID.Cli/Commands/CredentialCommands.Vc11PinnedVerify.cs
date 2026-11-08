@@ -1,6 +1,7 @@
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Text;
+using System.Text.Json;
 using HeroSSID.Credentials.JwtVcJson;
 
 namespace HeroSSID.Cli.Commands;
@@ -17,8 +18,16 @@ internal static partial class CredentialCommands
         string? Context);
 
     internal static bool TryVerifyVc11DidKeyPinned(
-        Vc11PinnedVerifyParameters parameters, DateTimeOffset observedAt)
+        Vc11PinnedVerifyParameters parameters, DateTimeOffset observedAt) =>
+        TryVerifyVc11DidKeyPinnedSubject(parameters, observedAt, out _);
+
+    // One bounded original file read and one genuine issuer verification shared
+    // by the issuer-only and exact-string-claim verifier commands.
+    private static bool TryVerifyVc11DidKeyPinnedSubject(
+        Vc11PinnedVerifyParameters parameters, DateTimeOffset observedAt,
+        out JsonElement verifiedSubject)
     {
+        verifiedSubject = default;
         ArgumentNullException.ThrowIfNull(parameters);
 
         // The operator must supply every exact trust pin independently; none
@@ -67,7 +76,7 @@ internal static partial class CredentialCommands
             return JwtVcJsonCredential.TryVerifyWithPinnedIssuerNameAndId(
                 originalJwt, parameters.TrustedIssuer, parameters.IssuerName,
                 parameters.HolderDid, parameters.CredentialType,
-                vocabulary, credentialId!, observedAt, out _);
+                vocabulary, credentialId!, observedAt, out verifiedSubject);
         }
         catch (IOException)
         {

@@ -57,3 +57,36 @@ dotnet run --project src/Cli/HeroSSID.Cli -- \
 The CLI reads at most 65,536 JWT file bytes and verifies the **original** issuer signature plus the issuer DID, signed issuer name and credential ID, expected subject DID, type, HTTPS vocabulary and validity at verification time. Invalid, oversized, tampered, expired and mismatched credentials return failure without printing the JWT or claims. Both signed name and ID must be present and exactly equal to independent verifier policy; issuer-controlled metadata is not itself a trust anchor.
 
 A successful issuer-signature check **is not** proof of holder private-key control, human consent, revocation freshness, real-world identity, organisation registration or authorization to perform an action. This command does not implement OpenID4VP, a W3C conformance suite, third-party-wallet compatibility or user disclosure consent.
+
+## Require one exact issuer-signed membership assertion (offline verifier)
+
+The additional `.NET 10` verifier command combines the unchanged original VC1.1
+issuer signature and independently pinned issuer DID/name, credential ID,
+subject DID, type and HTTPS context **with one exact top-level string**. Use an
+independently approved value such as `membership=active`; never take it from an
+unverified JWT or infer authorization from it.
+
+```sh
+dotnet run --project src/Cli/HeroSSID.Cli -- \
+  credential verify-vc11-didkey-pinned-claim \
+  --jwt-file ./issued-credential.jwt \
+  --trusted-issuer 'did:key:z6Mk...FULL_ISSUER_DID' \
+  --issuer-name 'Example Membership Issuer' \
+  --credential-id 'https://issuer.example/credentials/member-123' \
+  --holder 'did:key:z6Mk...FULL_HOLDER_DID' \
+  --credential-type MembershipCredential \
+  --context 'https://issuer.example/vocab/membership' \
+  --claim-name membership \
+  --claim-value active
+```
+
+The command reads at most 65,536 bytes of the ORIGINAL compact JWT, verifies
+the real issuer Ed25519 signature and all pins before examining any authenticated
+claim, then accepts only one exact nonempty string equality. Reserved `id`,
+invalid claim names, padded/empty/control-character values, missing/nested or
+non-string claims, duplicate object properties, stale credentials and tampered
+signatures all fail closed. Success/failure output never includes the JWT,
+subject claims or required value. A signed membership assertion is a historical
+issuer statement, **not** a holder key-control proof, current membership
+status, independent identity check or business authorization. No consent UI,
+revocation check, third-party wallet or OpenID4VP exchange is added.
