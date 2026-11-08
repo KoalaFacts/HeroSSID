@@ -367,6 +367,7 @@ internal static partial class CredentialCommands
         credentials.AddCommand(CreateVc2DidWebIssuerCommand());
         credentials.AddCommand(CreateVc2DidWebStatusCommand());
         credentials.AddCommand(CreateVc2DidWebStatusIssuerCommand());
+        credentials.AddCommand(CreateVc11IssuerCommand());
         return credentials;
     }
 
