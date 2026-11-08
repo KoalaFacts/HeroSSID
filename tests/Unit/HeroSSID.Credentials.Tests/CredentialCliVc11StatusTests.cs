@@ -1,3 +1,4 @@
+using System.CommandLine;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -131,6 +132,51 @@ public sealed class CredentialCliVc11StatusTests
                 IssueParameters(issuer.Did, malformed,
                     Path.Combine(directory, "malformed.status.jwt")),
                 SeedInput(issuer.Seed), TimeProvider.System));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task VerifierCliChecksGenuineSnapshotWithoutAnSdkCaller()
+    {
+        var issuer = Identity();
+        var holder = Identity();
+        string directory = DirectoryForTest();
+        try
+        {
+            string credential = Issue(directory, issuer, holder.Did);
+            string clean = Manifest(directory, "cli-clean.json", []);
+            string snapshot = Path.Combine(directory, "cli.status.jwt");
+            Assert.True(CredentialCommands.TryIssueVc11DidKeyStatus(
+                IssueParameters(issuer.Did, clean, snapshot),
+                SeedInput(issuer.Seed), TimeProvider.System));
+            if (!OperatingSystem.IsWindows())
+            {
+                Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite,
+                    File.GetUnixFileMode(snapshot));
+            }
+
+            string[] arguments =
+            [
+                "verify-vc11-didkey-pinned-status",
+                "--jwt-file", credential, "--snapshot-file", snapshot,
+                "--trusted-issuer", issuer.Did, "--issuer-name", IssuerName,
+                "--credential-id", CredentialId, "--holder", holder.Did,
+                "--credential-type", Type, "--context", Context,
+                "--minimum-observed-at",
+                DateTimeOffset.UtcNow.AddSeconds(-10)
+                    .ToString("O", CultureInfo.InvariantCulture)
+            ];
+            Assert.Equal(0, await CredentialCommands.CreateCommand(null!)
+                .InvokeAsync(arguments).ConfigureAwait(true));
+            string[] wrongIssuer = (string[])arguments.Clone();
+            wrongIssuer[Array.IndexOf(wrongIssuer, "--trusted-issuer") + 1] =
+                Identity().Did;
+            Assert.NotEqual(0, await CredentialCommands.CreateCommand(null!)
+                .InvokeAsync(wrongIssuer).ConfigureAwait(true));
         }
         finally
         {
