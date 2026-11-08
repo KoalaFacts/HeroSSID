@@ -1,0 +1,135 @@
+name: One-off independent offline PR246 review
+on:
+  push:
+    branches:
+      - review/pr246-vc11-vp-status-20261109
+
+permissions: {}
+
+jobs:
+  review:
+    name: Independent Qwen2.5 review of one-use VC1.1 holder VP + authentic issuer status CLI
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout review helper and pinned candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify immutable source and baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse 50a091cbcd5f54616df794f7137b26e4c4529f99^{commit})" = "50a091cbcd5f54616df794f7137b26e4c4529f99"
+          test "$(git rev-parse be7b925b13c3cad6fb83895dd946a058c9d1f7d3^{commit})" = "be7b925b13c3cad6fb83895dd946a058c9d1f7d3"
+          test "$(git diff --name-only be7b925b13c3cad6fb83895dd946a058c9d1f7d3 50a091cbcd5f54616df794f7137b26e4c4529f99 | wc -l)" -eq 6
+      - name: Install local independent model
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! curl --fail --silent --show-error --location --retry 8 --retry-all-errors --retry-delay 5 https://ollama.com/install.sh --output /tmp/ollama-install.sh; then
+            curl --fail --silent --show-error --location --retry 8 --retry-all-errors --retry-delay 5 https://raw.githubusercontent.com/ollama/ollama/main/scripts/install.sh --output /tmp/ollama-install.sh
+          fi
+          sh /tmp/ollama-install.sh
+          nohup ollama serve >/tmp/ollama-server.log 2>&1 </dev/null &
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null
+          for attempt in 1 2 3; do
+            if ollama pull qwen2.5-coder:7b; then break; fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            sleep 12
+          done
+      - name: Review complete pinned source patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          for part in 1 2; do
+            REVIEW_PART="$part" python3 tools/offline_pr246_review.py
+            test -s "review-$part.md"
+            test -s "review-$part.json"
+            test "$(cat review-head-$part.txt)" = "50a091cbcd5f54616df794f7137b26e4c4529f99"
+          done
+      - name: Retain raw model evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-pr246-review
+          path: |
+            review-*.md
+            review-*.json
+            review-head-*.txt
+            review-model-*.json
+          if-no-files-found: warn
+          retention-days: 30
+  publish:
+    name: Submit exact-head independent COMMENTED review
+    needs: review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Download independently completed model artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: independent-pr246-review
+      - name: Verify exact PR246 HEAD and full 6-file model coverage
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(gh api repos/KoalaFacts/HeroSSID/pulls/246 --jq '.head.sha')" = "50a091cbcd5f54616df794f7137b26e4c4529f99"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          expected_head = "50a091cbcd5f54616df794f7137b26e4c4529f99"
+          expected_files = {
+              "README.md",
+              "docs/cli-vc11-offline-vp-status-verifier.md",
+              "src/Cli/HeroSSID.Cli/Commands/CredentialCommands.cs",
+              "src/Cli/HeroSSID.Cli/Commands/CredentialCommands.Vc11VerifierStatus.cs",
+              "src/Libraries/HeroSSID.Credentials/JwtVcJson/JwtVcJsonRevocationSnapshot.cs",
+              "tests/Unit/HeroSSID.Credentials.Tests/CredentialCliVc11VerifierSessionTests.cs",
+          }
+          seen = set()
+          for part in (1, 2):
+              payload = json.loads(Path(f"review-{part}.json").read_text())
+              assert payload["head"] == expected_head and payload["part"] == part
+              files = set(payload["files"])
+              assert files and files.isdisjoint(seen)
+              seen.update(files)
+              assert payload["review"]["verdict"] in (
+                  "no_actionable_findings", "actionable_findings", "inconclusive"
+              )
+              assert Path(f"review-model-{part}.json").stat().st_size > 20
+              assert Path(f"review-{part}.md").stat().st_size > 200
+          assert seen == expected_files
+          PY
+      - name: Publish real COMMENTED review without approval claim
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo 'Independent local Qwen2.5-Coder 7B automated code review of PR #246.'
+            echo
+            echo 'Exact source: 50a091cbcd5f54616df794f7137b26e4c4529f99. Baseline: be7b925b13c3cad6fb83895dd946a058c9d1f7d3.'
+            echo 'Not human approval, third-party Wallet interoperability or an external security audit.'
+            echo 'Each finding must be checked against actual source and tests before merge.'
+            echo
+            cat review-1.md
+            echo
+            cat review-2.md
+          } > /tmp/pr246-review.md
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/246/reviews \
+            -f event=COMMENT -f commit_id="50a091cbcd5f54616df794f7137b26e4c4529f99" \
+            -f body="$(cat /tmp/pr246-review.md)" \
+            --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
