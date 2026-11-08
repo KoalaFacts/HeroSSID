@@ -160,6 +160,41 @@ public sealed class CredentialCliVc11VerifierSessionTests
         Assert.True(File.Exists(scenario.SessionFile + ".used"));
     }
 
+    [Fact]
+    public async Task RegisteredOfflineStatusVerifierCommandAcceptsOneAuthenticSessionOnly()
+    {
+        using var scenario = new Scenario();
+        Assert.True(scenario.IssueRequest());
+        Assert.True(scenario.Present());
+        string snapshot = scenario.IssueStatus();
+        string[] args =
+        [
+            "verify-vc11-didkey-vp-status",
+            "--verifier-did", scenario.Verifier.Did,
+            "--tenant-id", scenario.Tenant.ToString("D"),
+            "--audience", scenario.Audience,
+            "--trusted-issuer", scenario.Issuer.Did,
+            "--credential-type", Scenario.CredentialType,
+            "--context", Scenario.Context.AbsoluteUri,
+            "--request-jwt-file", scenario.RequestFile,
+            "--session-file", scenario.SessionFile,
+            "--presentation-jwt-file", scenario.VpFile,
+            "--snapshot-file", snapshot,
+            "--minimum-observed-at", DateTimeOffset.UtcNow
+                .AddSeconds(-15).ToString("O")
+        ];
+        string[] missingSnapshot = (string[])args.Clone();
+        missingSnapshot[Array.IndexOf(missingSnapshot, "--snapshot-file") + 1] =
+            Path.Combine(scenario.DirectoryPath, "absent.status.jwt");
+        Assert.NotEqual(0, await CredentialCommands.CreateCommand(null!)
+            .InvokeAsync(missingSnapshot).ConfigureAwait(true));
+        Assert.True(File.Exists(scenario.SessionFile));
+        Assert.Equal(0, await CredentialCommands.CreateCommand(null!)
+            .InvokeAsync(args).ConfigureAwait(true));
+        Assert.NotEqual(0, await CredentialCommands.CreateCommand(null!)
+            .InvokeAsync(args).ConfigureAwait(true));
+    }
+
     private static string Tamper(string original)
     {
         string[] segments = original.Split('.');
