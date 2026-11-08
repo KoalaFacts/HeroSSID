@@ -229,6 +229,27 @@ public sealed class CredentialCliVc11PinnedVerificationTests
             ["credential", "verify-vc11-didkey-pinned-claim", "--help"]));
         Assert.True(CredentialCommands.CanInvokePinnedClaimWithoutEchoingPolicy(
             ["credential", "verify-vc11-didkey-pinned"]));
+
+        // @response-file can expand into this protected operation only AFTER
+        // Program's raw-argv preflight. Never allow that parser entry point.
+        Assert.False(CredentialCommands.CanInvokePinnedClaimWithoutEchoingPolicy(
+            ["credential", "@command.rsp", "--claim-name", "@context",
+             "--claim-value", "SYNTHETIC_EXPECTED_VALUE_DO_NOT_PRINT"]));
+        Assert.False(CredentialCommands.CanInvokePinnedClaimWithoutEchoingPolicy(
+            ["@all-arguments.rsp"]));
+        // A mistyped operation can otherwise make the parser echo a policy
+        // value as an unrecognized argument. No real policy values in tests.
+        Assert.False(CredentialCommands.CanInvokePinnedClaimWithoutEchoingPolicy(
+            ["credential", "unknown-operation", "--claim-value",
+             "SYNTHETIC_EXPECTED_VALUE_DO_NOT_PRINT"]));
+        Assert.False(CredentialCommands.CanInvokePinnedClaimWithoutEchoingPolicy(
+            ["credential", "unknown-operation",
+             "--claim-value=SYNTHETIC_EXPECTED_VALUE_DO_NOT_PRINT"]));
+        // System.CommandLine also supports ':' as an option-value delimiter.
+        // A misspelled command must not echo the exact verifier policy.
+        Assert.False(CredentialCommands.CanInvokePinnedClaimWithoutEchoingPolicy(
+            ["credential", "unknown-operation",
+             "--claim-value:SYNTHETIC_EXPECTED_VALUE_DO_NOT_PRINT"]));
     }
 
     private static CredentialCommands.Vc11PinnedVerifyParameters Pins(

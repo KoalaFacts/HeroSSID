@@ -86,7 +86,14 @@ claim, then accepts only one exact nonempty string equality. Reserved `id`,
 invalid claim names, padded/empty/control-character values, missing/nested or
 non-string claims, duplicate object properties, stale credentials and tampered
 signatures all fail closed. Success/failure output never includes the JWT,
-subject claims or required value. A signed membership assertion is a historical
+subject claims or required value. The CLI rejects raw `@response-file` argument
+tokens before invoking System.CommandLine, because a response file can hide
+the protected operation until parsing and otherwise make parser diagnostics
+echo a verifier-supplied policy value. Unexpected `--claim-value` arguments
+outside the exact protected operation are also rejected without echoing them.
+Do not put real policy values in shell history or untrusted process arguments.
+
+A signed membership assertion is a historical
 issuer statement, **not** a holder key-control proof, current membership
 status, independent identity check or business authorization. No consent UI,
 revocation check, third-party wallet or OpenID4VP exchange is added.

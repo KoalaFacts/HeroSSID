@@ -33,7 +33,24 @@ internal static partial class CredentialCommands
         const string operation = "verify-vc11-didkey-pinned-claim";
         if (Array.IndexOf(arguments, operation) < 0)
         {
-            // Other existing CLI commands retain their original parsing.
+            // An @response file may expand into the protected operation after
+            // this raw-argv preflight. The parser could then echo --claim-value
+            // when its expansion or another option fails. Refuse response
+            // files before parsing rather than attempting to inspect them.
+            // Also reject an unexpected --claim-value on a mistyped command:
+            // its token or following value could be echoed as unrecognized.
+            foreach (string token in arguments)
+            {
+                if ((token.Length > 0 && token[0] == '@') ||
+                    token.Equals("--claim-value", StringComparison.Ordinal) ||
+                    token.StartsWith("--claim-value=", StringComparison.Ordinal) ||
+                    token.StartsWith("--claim-value:", StringComparison.Ordinal))
+                {
+                    return false;
+                }
+            }
+
+            // Ordinary unrelated CLI commands retain their original parsing.
             return true;
         }
 
