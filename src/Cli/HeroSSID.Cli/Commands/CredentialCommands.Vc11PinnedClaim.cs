@@ -43,7 +43,8 @@ internal static partial class CredentialCommands
             {
                 if ((token.Length > 0 && token[0] == '@') ||
                     token.Equals("--claim-value", StringComparison.Ordinal) ||
-                    token.StartsWith("--claim-value=", StringComparison.Ordinal))
+                    token.StartsWith("--claim-value=", StringComparison.Ordinal) ||
+                    token.StartsWith("--claim-value:", StringComparison.Ordinal))
                 {
                     return false;
                 }
