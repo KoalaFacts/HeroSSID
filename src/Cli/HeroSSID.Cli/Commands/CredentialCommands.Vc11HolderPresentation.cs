@@ -197,7 +197,7 @@ internal static partial class CredentialCommands
             {
                 original = original[..^2];
             }
-            else if (original.EndsWith("\n", StringComparison.Ordinal))
+            else if (original.EndsWith('\n'))
             {
                 original = original[..^1];
             }
