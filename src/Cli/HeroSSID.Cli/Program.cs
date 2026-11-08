@@ -32,8 +32,9 @@ rootCommand.AddCommand(CredentialCommands.CreateCommand(serviceProvider));
 // Authentication and claim comparisons still happen in the command handler.
 if (!CredentialCommands.CanInvokePinnedClaimWithoutEchoingPolicy(args))
 {
-    Console.Error.WriteLine(
-        "VC1.1 signed claim rejected: malformed CLI arguments. No values released.");
+    await Console.Error.WriteLineAsync(
+        "VC1.1 signed claim rejected: malformed CLI arguments. No values released.")
+        .ConfigureAwait(false);
     return 1;
 }
 

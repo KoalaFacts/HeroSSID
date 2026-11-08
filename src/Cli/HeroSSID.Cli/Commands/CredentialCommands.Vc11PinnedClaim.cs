@@ -54,7 +54,7 @@ internal static partial class CredentialCommands
         for (int i = 2; i < arguments.Length; i++)
         {
             string token = arguments[i];
-            int equals = token.IndexOf('=');
+            int equals = token.IndexOf('=', StringComparison.Ordinal);
             string option = equals >= 0 ? token[..equals] : token;
             if (Array.IndexOf(PinnedClaimCliOptions, option) < 0 ||
                 !seen.Add(option))
@@ -79,7 +79,7 @@ internal static partial class CredentialCommands
             // @response-file expansion, option-shaped values and control
             // characters could change parsing or expose later policy tokens.
             if (string.IsNullOrEmpty(value) || value[0] == '@' ||
-                value[0] == '-' || value.Contains('\r') || value.Contains('\n'))
+                value[0] == '-' || value.Contains('\r', StringComparison.Ordinal) || value.Contains('\n', StringComparison.Ordinal))
             {
                 return false;
             }
