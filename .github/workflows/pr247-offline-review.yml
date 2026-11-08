@@ -2,7 +2,7 @@ name: One-off independent offline PR247 review
 on:
   push:
     branches:
-      - review/pr247-vc11-vp-status-20261109
+      - review/pr247-agent-scope-20261109
 
 permissions: {}
 
