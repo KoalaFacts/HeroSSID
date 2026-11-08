@@ -375,6 +375,7 @@ internal static partial class CredentialCommands
         credentials.AddCommand(CreateVc11HolderPresentationCommand());
         credentials.AddCommand(CreateVc11VerifierRequestCommand());
         credentials.AddCommand(CreateVc11VerifierCheckCommand());
+        credentials.AddCommand(CreateVc11VerifierStatusCheckCommand());
         return credentials;
     }
 

@@ -207,7 +207,35 @@ public static class JwtVcJsonRevocationSnapshot
         string presentationJwt, string snapshotJwt, Guid verifierTenantId,
         string expectedAudience, string expectedNonce, string expectedCredentialType,
         Uri expectedSubjectContextUri, IPresentationChallengeStore challenges,
-        TimeProvider clock, out JsonElement verifiedSubject)
+        TimeProvider clock, out JsonElement verifiedSubject) =>
+        CheckPresentationCore(presentationJwt, snapshotJwt, verifierTenantId,
+            expectedAudience, expectedNonce, expectedCredentialType,
+            expectedSubjectContextUri, challenges, clock, null, out verifiedSubject);
+
+    /// <summary>
+    /// An independently chosen earliest acceptable issuer-observed UTC status
+    /// instant is required in addition to the original issuer and holder
+    /// signatures and one-use verifier challenge. For an authenticated VP,
+    /// challenge consumption precedes the status verdict: a revoked, expired
+    /// or foreign status cannot reuse a nonce. This is NOT live non-revocation.
+    /// </summary>
+    public static RevocationSnapshotCheckResult CheckPresentationWithObservationCutoff(
+        string presentationJwt, string snapshotJwt, Guid verifierTenantId,
+        string expectedAudience, string expectedNonce, string expectedCredentialType,
+        Uri expectedSubjectContextUri, IPresentationChallengeStore challenges,
+        TimeProvider clock, DateTimeOffset minimumObservedAt,
+        out JsonElement verifiedSubject) =>
+        CheckPresentationCore(presentationJwt, snapshotJwt, verifierTenantId,
+            expectedAudience, expectedNonce, expectedCredentialType,
+            expectedSubjectContextUri, challenges, clock, minimumObservedAt,
+            out verifiedSubject);
+
+    private static RevocationSnapshotCheckResult CheckPresentationCore(
+        string presentationJwt, string snapshotJwt, Guid verifierTenantId,
+        string expectedAudience, string expectedNonce, string expectedCredentialType,
+        Uri expectedSubjectContextUri, IPresentationChallengeStore challenges,
+        TimeProvider clock, DateTimeOffset? minimumObservedAt,
+        out JsonElement verifiedSubject)
     {
         ArgumentNullException.ThrowIfNull(presentationJwt);
         ArgumentNullException.ThrowIfNull(snapshotJwt);
@@ -216,7 +244,12 @@ public static class JwtVcJsonRevocationSnapshot
         ArgumentNullException.ThrowIfNull(clock);
         verifiedSubject = default;
 
-        if (!PresentationChallengePolicy.IsValidLookup(verifierTenantId,
+        // Impossible verifier policies are rejected before challenge consumption.
+        // Authentic but stale/invalid issuer status is checked AFTER an actual
+        // holder proof, so such a proof cannot be replayed with a new snapshot.
+        if ((minimumObservedAt is DateTimeOffset cutoff &&
+             (cutoff < DateTimeOffset.UnixEpoch || cutoff > clock.GetUtcNow())) ||
+            !PresentationChallengePolicy.IsValidLookup(verifierTenantId,
                 expectedAudience, expectedNonce))
         {
             return RevocationSnapshotCheckResult.Invalid;
@@ -233,8 +266,14 @@ public static class JwtVcJsonRevocationSnapshot
             return RevocationSnapshotCheckResult.Invalid;
         }
 
-        var status = Check(snapshotJwt, credentialJwt, challenge.TrustedIssuerDid,
-            clock.GetUtcNow());
+        // The original credential is extracted from the SAME VP bytes already
+        // authenticated above. No independent filename or substituted JWT can
+        // turn a status for one credential into the result for another.
+        DateTimeOffset now = clock.GetUtcNow();
+        var status = minimumObservedAt is DateTimeOffset earliest
+            ? CheckWithObservationCutoff(snapshotJwt, credentialJwt,
+                challenge.TrustedIssuerDid, now, earliest)
+            : Check(snapshotJwt, credentialJwt, challenge.TrustedIssuerDid, now);
         if (status == RevocationSnapshotCheckResult.NotListed)
         {
             verifiedSubject = subject;
