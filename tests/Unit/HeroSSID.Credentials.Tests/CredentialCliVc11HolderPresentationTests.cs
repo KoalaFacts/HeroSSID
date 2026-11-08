@@ -18,7 +18,7 @@ public sealed class CredentialCliVc11HolderPresentationTests
     public void HolderCliSignsOriginalVc11CredentialForOneUseVerifierChallenge()
     {
         using var scenario = new Scenario();
-        using var seed = scenario.SeedInput(scenario.Holder.Seed);
+        using var seed = Scenario.SeedInput(scenario.Holder.Seed);
         Assert.True(CredentialCommands.TryPresentVc11DidKey(scenario.Policy(), seed));
         string originalVp = File.ReadAllText(scenario.OutputFile).TrimEnd('\r', '\n');
         Assert.DoesNotContain(scenario.OriginalCredential, originalVp, StringComparison.Ordinal);
@@ -44,36 +44,36 @@ public sealed class CredentialCliVc11HolderPresentationTests
         using var scenario = new Scenario();
         var foreign = Scenario.Identity();
         var policy = scenario.Policy();
-        using (var seed = scenario.SeedInput(foreign.Seed))
+        using (var seed = Scenario.SeedInput(foreign.Seed))
         {
             Assert.False(CredentialCommands.TryPresentVc11DidKey(policy, seed));
         }
 
-        using (var seed = scenario.SeedInput(scenario.Holder.Seed))
+        using (var seed = Scenario.SeedInput(scenario.Holder.Seed))
         {
             Assert.False(CredentialCommands.TryPresentVc11DidKey(
                 policy with { TrustedVerifierDid = foreign.Did }, seed));
         }
 
-        using (var seed = scenario.SeedInput(scenario.Holder.Seed))
+        using (var seed = Scenario.SeedInput(scenario.Holder.Seed))
         {
             Assert.False(CredentialCommands.TryPresentVc11DidKey(
                 policy with { TrustedIssuerDid = foreign.Did }, seed));
         }
 
-        using (var seed = scenario.SeedInput(scenario.Holder.Seed))
+        using (var seed = Scenario.SeedInput(scenario.Holder.Seed))
         {
             Assert.False(CredentialCommands.TryPresentVc11DidKey(
                 policy with { IssuerName = "Unapproved Brand" }, seed));
         }
 
-        using (var seed = scenario.SeedInput(scenario.Holder.Seed))
+        using (var seed = Scenario.SeedInput(scenario.Holder.Seed))
         {
             Assert.False(CredentialCommands.TryPresentVc11DidKey(
                 policy with { CredentialId = "https://issuer.example/credentials/other" }, seed));
         }
 
-        using (var seed = scenario.SeedInput(scenario.Holder.Seed))
+        using (var seed = Scenario.SeedInput(scenario.Holder.Seed))
         {
             Assert.False(CredentialCommands.TryPresentVc11DidKey(
                 policy with { HolderDid = foreign.Did }, seed));
@@ -88,7 +88,7 @@ public sealed class CredentialCliVc11HolderPresentationTests
         using var scenario = new Scenario();
         var policy = scenario.Policy();
 
-        using (var seed = scenario.SeedInput(scenario.Holder.Seed))
+        using (var seed = Scenario.SeedInput(scenario.Holder.Seed))
         {
             Assert.False(CredentialCommands.TryPresentVc11DidKey(
                 policy with { FullDisclosureAcknowledged = false }, seed));
@@ -96,7 +96,7 @@ public sealed class CredentialCliVc11HolderPresentationTests
 
         string requestFile = Path.Combine(scenario.DirectoryPath, "forged-request.jwt");
         File.WriteAllText(requestFile, Tamper(scenario.OriginalRequest));
-        using (var seed = scenario.SeedInput(scenario.Holder.Seed))
+        using (var seed = Scenario.SeedInput(scenario.Holder.Seed))
         {
             Assert.False(CredentialCommands.TryPresentVc11DidKey(
                 policy with { RequestJwtFile = requestFile }, seed));
@@ -104,14 +104,14 @@ public sealed class CredentialCliVc11HolderPresentationTests
 
         string credentialFile = Path.Combine(scenario.DirectoryPath, "forged-vc.jwt");
         File.WriteAllText(credentialFile, Tamper(scenario.OriginalCredential));
-        using (var seed = scenario.SeedInput(scenario.Holder.Seed))
+        using (var seed = Scenario.SeedInput(scenario.Holder.Seed))
         {
             Assert.False(CredentialCommands.TryPresentVc11DidKey(
                 policy with { CredentialJwtFile = credentialFile }, seed));
         }
 
         File.WriteAllText(scenario.OutputFile, "must-not-overwrite");
-        using (var seed = scenario.SeedInput(scenario.Holder.Seed))
+        using (var seed = Scenario.SeedInput(scenario.Holder.Seed))
         {
             Assert.False(CredentialCommands.TryPresentVc11DidKey(policy, seed));
         }
@@ -177,7 +177,7 @@ public sealed class CredentialCliVc11HolderPresentationTests
                 IssuerName, CredentialId, Holder.Did, CredentialType,
                 Context.AbsoluteUri, OutputFile, true);
 
-        internal MemoryStream SeedInput(byte[] seed) =>
+        internal static MemoryStream SeedInput(byte[] seed) =>
             new(Encoding.ASCII.GetBytes(Convert.ToHexString(seed) + "\n"));
 
         internal static (byte[] Seed, string Did) Identity()
