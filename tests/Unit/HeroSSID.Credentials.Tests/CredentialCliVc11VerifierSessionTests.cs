@@ -82,6 +82,85 @@ public sealed class CredentialCliVc11VerifierSessionTests
         Assert.False(File.Exists(scenario.SessionFile));
     }
 
+
+    [Fact]
+    public void StatusAwareVerifierAcceptsOnlyOneGenuineIssuerAndHolderPresentation()
+    {
+        using var scenario = new Scenario();
+        Assert.True(scenario.IssueRequest());
+        Assert.True(scenario.Present());
+        string snapshot = scenario.IssueStatus();
+        string cutoff = DateTimeOffset.UtcNow.AddSeconds(-15).ToString("O");
+
+        Assert.True(CredentialCommands.TryVerifyVc11VerifierPresentationWithStatus(
+            scenario.Check(), snapshot, cutoff));
+        Assert.False(CredentialCommands.TryVerifyVc11VerifierPresentationWithStatus(
+            scenario.Check(), snapshot, cutoff));
+        Assert.True(File.Exists(scenario.SessionFile + ".used"));
+    }
+
+    [Fact]
+    public void AuthenticRevokedCredentialFailsAfterNonceConsumption()
+    {
+        using var scenario = new Scenario();
+        Assert.True(scenario.IssueRequest());
+        Assert.True(scenario.Present());
+        string revokedSnapshot = scenario.IssueStatus(revoked: true);
+
+        Assert.False(CredentialCommands.TryVerifyVc11VerifierPresentationWithStatus(
+            scenario.Check(), revokedSnapshot,
+            DateTimeOffset.UtcNow.AddSeconds(-15).ToString("O")));
+        Assert.False(File.Exists(scenario.SessionFile));
+        Assert.True(File.Exists(scenario.SessionFile + ".used"));
+    }
+
+    [Fact]
+    public void ForeignStatusAndForgedHolderProofCannotProduceAStatusAwareSuccess()
+    {
+        using var foreign = new Scenario();
+        Assert.True(foreign.IssueRequest());
+        Assert.True(foreign.Present());
+        string foreignSnapshot = foreign.IssueStatus(foreignIssuer: true);
+        Assert.False(CredentialCommands.TryVerifyVc11VerifierPresentationWithStatus(
+            foreign.Check(), foreignSnapshot,
+            DateTimeOffset.UtcNow.AddSeconds(-15).ToString("O")));
+
+        using var forged = new Scenario();
+        Assert.True(forged.IssueRequest());
+        Assert.True(forged.Present());
+        string snapshot = forged.IssueStatus();
+        string original = File.ReadAllText(forged.VpFile);
+        File.WriteAllText(forged.VpFile, Tamper(original.Trim()));
+        Assert.False(CredentialCommands.TryVerifyVc11VerifierPresentationWithStatus(
+            forged.Check(), snapshot,
+            DateTimeOffset.UtcNow.AddSeconds(-15).ToString("O")));
+        Assert.True(File.Exists(forged.SessionFile));
+        File.WriteAllText(forged.VpFile, original);
+        Assert.True(CredentialCommands.TryVerifyVc11VerifierPresentationWithStatus(
+            forged.Check(), snapshot,
+            DateTimeOffset.UtcNow.AddSeconds(-15).ToString("O")));
+    }
+
+    [Fact]
+    public void InvalidFutureOrStaleStatusPolicyCannotSpendTheOfflineVerifierChallenge()
+    {
+        using var scenario = new Scenario();
+        Assert.True(scenario.IssueRequest());
+        Assert.True(scenario.Present());
+        string snapshot = scenario.IssueStatus();
+
+        Assert.False(CredentialCommands.TryVerifyVc11VerifierPresentationWithStatus(
+            scenario.Check(), snapshot,
+            DateTimeOffset.UtcNow.AddMinutes(1).ToString("O")));
+        Assert.False(CredentialCommands.TryVerifyVc11VerifierPresentationWithStatus(
+            scenario.Check(), snapshot,
+            DateTimeOffset.UtcNow.AddSeconds(-1).ToString("O")));
+        Assert.True(File.Exists(scenario.SessionFile));
+        Assert.True(CredentialCommands.TryVerifyVc11VerifierPresentationWithStatus(
+            scenario.Check(), snapshot,
+            DateTimeOffset.UtcNow.AddSeconds(-15).ToString("O")));
+    }
+
     private static string Tamper(string original)
     {
         string[] segments = original.Split('.');
@@ -126,6 +205,26 @@ public sealed class CredentialCliVc11VerifierSessionTests
                 DateTimeOffset.UtcNow.AddMinutes(6).ToString("O"), CredentialFile);
             using var seed = SeedInput(Issuer.Seed);
             Assert.True(CredentialCommands.TryIssueVc11DidKey(issue, seed));
+        }
+
+
+        internal string IssueStatus(bool revoked = false, bool foreignIssuer = false)
+        {
+            var signer = foreignIssuer ? Identity() : Issuer;
+            string manifest = Path.Combine(DirectoryPath,
+                "status-manifest-" + Guid.NewGuid().ToString("N") + ".json");
+            string snapshot = Path.Combine(DirectoryPath,
+                "status-" + Guid.NewGuid().ToString("N") + ".jwt");
+            string[] revokedJwts = revoked
+                ? [File.ReadAllText(CredentialFile).TrimEnd('\r', '\n')]
+                : [];
+            File.WriteAllText(manifest, JsonSerializer.Serialize(revokedJwts));
+            using var seed = SeedInput(signer.Seed);
+            Assert.True(CredentialCommands.TryIssueVc11DidKeyStatus(
+                new(signer.Did, manifest, snapshot,
+                    DateTimeOffset.UtcNow.AddSeconds(-3).ToString("O")),
+                seed, TimeProvider.System));
+            return snapshot;
         }
 
         internal bool IssueRequest(int lifetimeSeconds = 120)
