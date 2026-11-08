@@ -26,9 +26,9 @@ public sealed class CredentialCliVc2AgentScopeTests
         try
         {
             DateTimeOffset now = DateTimeOffset.UtcNow;
-            File.WriteAllText(file, Vcdm20AgentScopeAssertion.Create(
+            await File.WriteAllTextAsync(file, Vcdm20AgentScopeAssertion.Create(
                 issuer.Did, agent.Did, Context, Id, Recipient, Resource,
-                "invoices.read", issuer.Seed, now.AddSeconds(-5), now.AddMinutes(5)));
+                "invoices.read", issuer.Seed, now.AddSeconds(-5), now.AddMinutes(5)).ConfigureAwait(true);
             Assert.Equal(0, await Invoke(file, issuer.Did, agent.Did,
                 "invoices.read", Resource.AbsoluteUri).ConfigureAwait(true));
         }
@@ -48,9 +48,9 @@ public sealed class CredentialCliVc2AgentScopeTests
         {
             DateTimeOffset now = DateTimeOffset.UtcNow;
             Uri resource = new("https://api.example/projects/43");
-            File.WriteAllText(file, Vcdm20AgentScopeAssertion.Create(
+            await File.WriteAllTextAsync(file, Vcdm20AgentScopeAssertion.Create(
                 issuer.Did, agent.Did, Context, Id, Recipient, resource,
-                "projects:read", issuer.Seed, now.AddSeconds(-5), now.AddMinutes(5)));
+                "projects:read", issuer.Seed, now.AddSeconds(-5), now.AddMinutes(5)).ConfigureAwait(true);
             Assert.Equal(0, await Invoke(file, issuer.Did, agent.Did,
                 "projects:read", resource.AbsoluteUri).ConfigureAwait(true));
             Assert.NotEqual(0, await Invoke(file, issuer.Did, agent.Did,
@@ -76,7 +76,7 @@ public sealed class CredentialCliVc2AgentScopeTests
             string original = Vcdm20AgentScopeAssertion.Create(
                 issuer.Did, agent.Did, Context, Id, Recipient, Resource,
                 "invoices.read", issuer.Seed, now.AddSeconds(-5), now.AddMinutes(5));
-            File.WriteAllText(file, original);
+            await File.WriteAllTextAsync(file, original);
             Assert.NotEqual(0, await Invoke(file, Identity().Did, agent.Did,
                 "invoices.read", Resource.AbsoluteUri).ConfigureAwait(true));
             Assert.NotEqual(0, await Invoke(file, issuer.Did, Identity().Did,
@@ -84,7 +84,7 @@ public sealed class CredentialCliVc2AgentScopeTests
 
             string[] parts = original.Split('.');
             parts[2] = (parts[2][0] == 'A' ? "B" : "A") + parts[2][1..];
-            File.WriteAllText(file, string.Join('.', parts));
+            await File.WriteAllTextAsync(file, string.Join('.', parts));
             Assert.NotEqual(0, await Invoke(file, issuer.Did, agent.Did,
                 "invoices.read", Resource.AbsoluteUri).ConfigureAwait(true));
 
@@ -92,10 +92,10 @@ public sealed class CredentialCliVc2AgentScopeTests
             {
                 id = agent.Did, action = "invoices.read", resource = Resource.AbsoluteUri
             }));
-            File.WriteAllText(file, Vcdm20JoseCredential.CreateForAudienceWithId(
+            await File.WriteAllTextAsync(file, Vcdm20JoseCredential.CreateForAudienceWithId(
                 issuer.Did, agent.Did, Vcdm20AgentScopeAssertion.CredentialType,
                 Context, subject.RootElement, issuer.Seed,
-                now.AddMinutes(-1), now.AddHours(1), Id, Recipient));
+                now.AddMinutes(-1), now.AddHours(1), Id, Recipient)).ConfigureAwait(true);
             Assert.NotEqual(0, await Invoke(file, issuer.Did, agent.Did,
                 "invoices.read", Resource.AbsoluteUri).ConfigureAwait(true));
         }
