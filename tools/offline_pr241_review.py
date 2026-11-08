@@ -11,15 +11,17 @@ import sys
 from urllib.request import Request, urlopen
 
 BASE = "e55effeb6c1b1eb4416854c0bd6d8be7bbb95e02"
-HEAD = "bdaa93bc130d2328a8103ea69fa92c28d54642f0"
+HEAD = "10dd2f20e31b96ae1fffb94515a99f7c13dc209a"
 MODEL = "qwen2.5-coder:7b"
 PARTS = 2
 CHANGED_FILES = {
+    ".github/workflows/ci.yml",
     "README.md",
     "docs/cli-vc11-didkey-issuer-issue.md",
     "src/Cli/HeroSSID.Cli/Commands/CredentialCommands.Vc11PinnedClaim.cs",
     "src/Cli/HeroSSID.Cli/Commands/CredentialCommands.Vc11PinnedVerify.cs",
     "src/Cli/HeroSSID.Cli/Commands/CredentialCommands.cs",
+    "src/Cli/HeroSSID.Cli/Program.cs",
     "tests/Unit/HeroSSID.Credentials.Tests/CredentialCliVc11PinnedVerificationTests.cs",
 }
 
