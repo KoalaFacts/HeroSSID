@@ -582,7 +582,7 @@ public static class Vcdm20RevocationSnapshot
             items[1].ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(items[1].GetString());
     }
 
-    private static bool TryExtractEnclosedJwt(string presentationJwt, out string credentialJwt)
+    internal static bool TryExtractEnclosedJwt(string presentationJwt, out string credentialJwt)
     {
         credentialJwt = string.Empty;
         if (!StrictJwtReader.IsCanonicalCompact(presentationJwt, MaximumPresentationLength))

@@ -85,3 +85,49 @@ application-defined subject terms.
 References: [VC Data Model 2.0](https://www.w3.org/TR/vc-data-model-2.0/),
 [VC JOSE/COSE](https://www.w3.org/TR/vc-jose-cose/),
 [existing recipient-bound VC2 and one-use holder presentation](vcdm20-recipient-bound-jwt.md).
+
+## Issuer scope + real agent proof + one-use verifier request + signed status
+
+An independently operated verifier can now compose the separately signed
+objects through `Vcdm20AgentScopePresentation.CheckWithIssuerStatus`. It
+checks the **exact original issuer-signed agent scope credential enclosed in
+the agent's holder-signed VP**, an independently pinned genuine signed verifier
+request, an atomic one-use nonce, and the **same issuer's** private 60-second
+signed exact-token status under the verifier's minimum observation cutoff.
+The holder and issuer are distinct real Ed25519 signing keys.
+
+```csharp
+// Request, VP and status are separately received. All pins below must be
+// retained in the verifier's own configuration and challenge store.
+Vcdm20RevocationCheckResult result =
+    Vcdm20AgentScopePresentation.CheckWithIssuerStatus(
+        holderSignedVp, verifierSignedRequest, pinnedRequestSha256,
+        pinnedVerifierDid, issuerSignedStatus, verifierTenantId,
+        recipient.AbsoluteUri, nonce, pinnedIssuerDid, pinnedAgentDid,
+        context, credentialId, recipient, resource, "invoices.read",
+        minimumIssuerStatusObservation, challenges, clock,
+        out JsonElement verifiedScope);
+
+if (result == Vcdm20RevocationCheckResult.SignedNotListed)
+{
+    // Verify local tenant/ACL/delegation/incident/business policy before
+    // acting. SignedNotListed does NOT establish current non-revocation.
+}
+```
+
+A wrong verifier request pin, untrusted issuer enrollment or wrong audience
+cannot consume the verifier's genuine challenge. A genuine holder-signed
+presentation spends its nonce even if the signed issuer status says revoked,
+is stale/foreign, or its otherwise authentic action/resource/agent scope fails
+local policy. No scope is returned for any failure or replay. A signed VC2
+whose expiry interval exceeds 15 minutes is rejected even if the underlying
+VC2 and VP signatures are otherwise authentic. The verifier rechecks bounded
+signed-token expiry at disclosure.
+
+This is an **SDK-only private full-disclosure composition**, not a hosted
+OpenID4VP endpoint or independent wallet interoperability. The issuer-signed
+statement does not prove that the agent has business authority. The recipient
+must enforce its own local authorization, issuer-to-resource authority,
+actual organisation identity, incident status and approval policy. No
+human-consent evidence, standard revocation status, or live complete
+revocation inventory is claimed.
