@@ -11,7 +11,7 @@ import sys
 from urllib.request import Request, urlopen
 
 BASE = "7056dbcc5679123d930bd896379b3c4e9e35fd69"
-HEAD = "85decd4b3324936b72c3b8c7feace3129983c9f8"
+HEAD = "0c661568eb9d414660e2c1b95da0f1446044e0aa"
 MODEL = "qwen2.5-coder:7b"
 PARTS = 2
 CHANGED_FILES = {
@@ -99,7 +99,7 @@ def main() -> int:
         "fail-closed preflight handles @response tokens before any parser expansion, "
         "including hidden operation and top-level response files, and rejects unexpected "
         "--claim-value tokens on mistyped operations without revealing sensitive data. "
-        "Check correct normal direct invocation, help and existing unrelated CLI use; "
+        "Probe all supported option-value delimiters (space, equals, colon) on unknown commands; check correct normal direct invocation, help and existing unrelated CLI use; "
         "flag unintended command breakage. Inspect the real-process CI regression and unit "
         "test coverage, documentation, strict C# behavior and concrete bypasses. "
         "No schema, production, wallet interop, identity-vetting, consent, revocation or "
