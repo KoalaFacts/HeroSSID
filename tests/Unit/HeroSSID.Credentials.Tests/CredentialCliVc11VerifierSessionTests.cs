@@ -142,7 +142,7 @@ public sealed class CredentialCliVc11VerifierSessionTests
     }
 
     [Fact]
-    public void InvalidFutureOrStaleStatusPolicyCannotSpendTheOfflineVerifierChallenge()
+    public void FutureCutoffCannotSpendButStaleIssuerObservationConsumesARealHolderChallenge()
     {
         using var scenario = new Scenario();
         Assert.True(scenario.IssueRequest());
@@ -152,13 +152,12 @@ public sealed class CredentialCliVc11VerifierSessionTests
         Assert.False(CredentialCommands.TryVerifyVc11VerifierPresentationWithStatus(
             scenario.Check(), snapshot,
             DateTimeOffset.UtcNow.AddMinutes(1).ToString("O")));
+        Assert.True(File.Exists(scenario.SessionFile));
         Assert.False(CredentialCommands.TryVerifyVc11VerifierPresentationWithStatus(
             scenario.Check(), snapshot,
             DateTimeOffset.UtcNow.AddSeconds(-1).ToString("O")));
-        Assert.True(File.Exists(scenario.SessionFile));
-        Assert.True(CredentialCommands.TryVerifyVc11VerifierPresentationWithStatus(
-            scenario.Check(), snapshot,
-            DateTimeOffset.UtcNow.AddSeconds(-15).ToString("O")));
+        Assert.False(File.Exists(scenario.SessionFile));
+        Assert.True(File.Exists(scenario.SessionFile + ".used"));
     }
 
     private static string Tamper(string original)
