@@ -98,18 +98,152 @@ public sealed class CredentialCliVc11PinnedVerificationTests
         }
     }
 
+
+    [Fact]
+    public void ExactSignedMembershipStringMatchesVerifierOwnedPolicyOnly()
+    {
+        var issuer = Identity();
+        var holder = Identity();
+        string directory = CreateDirectory();
+        try
+        {
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            string jwt = Issue(directory, "claim.jwt", issuer, holder.Did, now);
+            var pins = Pins(jwt, issuer.Did, holder.Did);
+            Assert.True(CredentialCommands.TryVerifyVc11DidKeyPinnedClaim(
+                pins, "membership", "active", now));
+            Assert.False(CredentialCommands.TryVerifyVc11DidKeyPinnedClaim(
+                pins, "membership", "inactive", now));
+            Assert.False(CredentialCommands.TryVerifyVc11DidKeyPinnedClaim(
+                pins, "role", "admin", now));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SignedClaimDoesNotOverrideIssuerPinsOrAuthenticateForgedJwt()
+    {
+        var issuer = Identity();
+        var other = Identity();
+        var holder = Identity();
+        string directory = CreateDirectory();
+        try
+        {
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            string jwt = Issue(directory, "genuine-claim.jwt", issuer, holder.Did, now);
+            var pins = Pins(jwt, issuer.Did, holder.Did);
+            Assert.True(CredentialCommands.TryVerifyVc11DidKeyPinnedClaim(
+                pins, "membership", "active", now));
+            Assert.False(CredentialCommands.TryVerifyVc11DidKeyPinnedClaim(
+                pins with { TrustedIssuer = other.Did }, "membership", "active", now));
+            Assert.False(CredentialCommands.TryVerifyVc11DidKeyPinnedClaim(
+                pins with { IssuerName = "Untrusted Brand" }, "membership", "active", now));
+            Assert.False(CredentialCommands.TryVerifyVc11DidKeyPinnedClaim(
+                pins with { HolderDid = other.Did }, "membership", "active", now));
+
+            string[] segments = File.ReadAllText(jwt).TrimEnd('\r', '\n').Split('.');
+            Assert.Equal(3, segments.Length);
+            segments[1] = (segments[1][0] == 'A' ? "B" : "A") + segments[1][1..];
+            string forged = Path.Combine(directory, "forged-claim.jwt");
+            File.WriteAllText(forged, string.Join(".", segments));
+            Assert.False(CredentialCommands.TryVerifyVc11DidKeyPinnedClaim(
+                pins with { JwtFile = forged }, "membership", "active", now));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void NonStringClaimsAndUnsafePolicyKeysAreNotAccepted()
+    {
+        var issuer = Identity();
+        var holder = Identity();
+        string directory = CreateDirectory();
+        try
+        {
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            string good = Issue(directory, "good-claim.jwt", issuer, holder.Did, now);
+            var pins = Pins(good, issuer.Did, holder.Did);
+            Assert.True(CredentialCommands.TryVerifyVc11DidKeyPinnedClaim(
+                pins, "membership", "active", now));
+            Assert.False(CredentialCommands.TryVerifyVc11DidKeyPinnedClaim(
+                pins, "id", holder.Did, now));
+            Assert.False(CredentialCommands.TryVerifyVc11DidKeyPinnedClaim(
+                pins, "membership", " active", now));
+            Assert.False(CredentialCommands.TryVerifyVc11DidKeyPinnedClaim(
+                pins, "membership", "", now));
+
+            string nonString = Issue(directory, "non-string.jwt", issuer, holder.Did,
+                now, membership: new { level = 1 });
+            Assert.False(CredentialCommands.TryVerifyVc11DidKeyPinnedClaim(
+                pins with { JwtFile = nonString }, "membership", "active", now));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void PinnedClaimCliPreflightRejectsParserErrorsBeforeTheyEchoPolicyValue()
+    {
+        string[] valid =
+        [
+            "credential", "verify-vc11-didkey-pinned-claim",
+            "--jwt-file", "synthetic-missing.jwt",
+            "--trusted-issuer", "did:key:zSyntheticIssuer",
+            "--issuer-name", "Synthetic Issuer",
+            "--credential-id", "https://issuer.example/credentials/synthetic",
+            "--holder", "did:key:zSyntheticHolder",
+            "--credential-type", "MembershipCredential",
+            "--context", "https://issuer.example/vocab/synthetic",
+            "--claim-name", "membership",
+            "--claim-value", "SYNTHETIC_EXPECTED_VALUE_DO_NOT_PRINT"
+        ];
+        Assert.True(CredentialCommands.CanInvokePinnedClaimWithoutEchoingPolicy(valid));
+
+        string[] responseFile = (string[])valid.Clone();
+        responseFile[Array.IndexOf(responseFile, "membership")] = "@context";
+        Assert.False(CredentialCommands.CanInvokePinnedClaimWithoutEchoingPolicy(
+            responseFile));
+
+        string[] duplicate = [.. valid, "--claim-value", "different"];
+        Assert.False(CredentialCommands.CanInvokePinnedClaimWithoutEchoingPolicy(
+            duplicate));
+
+        string[] unknown = [.. valid, "--unexpected", "surprise"];
+        Assert.False(CredentialCommands.CanInvokePinnedClaimWithoutEchoingPolicy(
+            unknown));
+
+        string[] optionShapedValue = (string[])valid.Clone();
+        optionShapedValue[^1] = "--bad";
+        Assert.False(CredentialCommands.CanInvokePinnedClaimWithoutEchoingPolicy(
+            optionShapedValue));
+
+        Assert.True(CredentialCommands.CanInvokePinnedClaimWithoutEchoingPolicy(
+            ["credential", "verify-vc11-didkey-pinned-claim", "--help"]));
+        Assert.True(CredentialCommands.CanInvokePinnedClaimWithoutEchoingPolicy(
+            ["credential", "verify-vc11-didkey-pinned"]));
+    }
+
     private static CredentialCommands.Vc11PinnedVerifyParameters Pins(
         string path, string issuerDid, string holderDid) =>
         new(path, issuerDid, IssuerName, CredentialId, holderDid,
             "MembershipCredential", Context);
 
     private static string Issue(string directory, string filename,
-        (byte[] Seed, string Did) issuer, string holderDid, DateTimeOffset now)
+        (byte[] Seed, string Did) issuer, string holderDid, DateTimeOffset now,
+        object? membership = null)
     {
         string subject = Path.Combine(directory, filename + ".subject.json");
         string output = Path.Combine(directory, filename);
         File.WriteAllText(subject, JsonSerializer.Serialize(
-            new { id = holderDid, membership = "active" }));
+            new { id = holderDid, membership = membership ?? "active" }));
         var request = new CredentialCommands.Vc11IssueParameters(
             issuer.Did, IssuerName, CredentialId, holderDid,
             "MembershipCredential", Context, subject,

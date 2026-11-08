@@ -28,6 +28,16 @@ var rootCommand = new RootCommand("HeroSSID CLI - Decentralized Identity Managem
 rootCommand.AddCommand(DidCommands.CreateCommand(serviceProvider));
 rootCommand.AddCommand(CredentialCommands.CreateCommand(serviceProvider));
 
+// Keep malformed --claim-value arguments out of parser-generated diagnostics.
+// Authentication and claim comparisons still happen in the command handler.
+if (!CredentialCommands.CanInvokePinnedClaimWithoutEchoingPolicy(args))
+{
+    await Console.Error.WriteLineAsync(
+        "VC1.1 signed claim rejected: malformed CLI arguments. No values released.")
+        .ConfigureAwait(false);
+    return 1;
+}
+
 // Display banner
 AnsiConsole.Write(
     new FigletText("HeroSSID")

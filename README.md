@@ -10,6 +10,8 @@ The .NET SDK also supports [private, pinned did:web issuer-signed VC2 60-second 
 For a non-SDK relying party, the offline CLI can [verify the original did:web VC2 JWT together with the separately signed status snapshot](docs/cli-vc2-didweb-issuer-status.md), under an independently pinned issuer and minimum observation policy. It does not print claims or prove live non-revocation.
 Issuer operators can now [sign that private VC2 status snapshot using an offline CLI with redirected private-seed stdin](docs/cli-vc2-didweb-issuer-status-issue.md), a bounded issuer-owned complete revoked-original-JWT file and non-overwriting output. This cannot prove inventory completeness or live revocation.
 
+For a no-SDK relying party, the offline CLI can [require one exact original VC1.1 issuer-signed string assertion under fully independent DID/name/ID/subject/type/context pins](docs/cli-vc11-didkey-issuer-issue.md#require-one-exact-issuer-signed-membership-assertion-offline-verifier). This does not establish holder key possession, consent, current membership status or authority.
+
 For issuer-only checks without a hosted service, the .NET 10 CLI supports
 [VC1.1 `jwt_vc_json`](docs/cli-vc11-issuer-check.md),
 [separately pinned `did:web` VC1.1 issuer keys](docs/cli-vc11-didweb-issuer-check.md),

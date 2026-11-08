@@ -67,6 +67,38 @@ jobs:
       - name: Build solution
         run: dotnet build --configuration Release --no-restore
 
+      # Real process-level regression: System.CommandLine must not print a
+      # verifier-supplied policy value when malformed @response-file syntax
+      # prevents the pinned-claim command handler from running.
+      - name: Reject malformed pinned-claim CLI without echoing policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          output_dir="$(mktemp -d)"
+          trap 'rm -rf "$output_dir"' EXIT
+          marker='SYNTHETIC_EXPECTED_VALUE_DO_NOT_PRINT'
+          if dotnet src/Cli/HeroSSID.Cli/bin/Release/net10.0/HeroSSID.Cli.dll \
+              credential verify-vc11-didkey-pinned-claim \
+              --jwt-file synthetic-missing.jwt \
+              --trusted-issuer did:key:zSyntheticIssuer \
+              --issuer-name 'Synthetic Issuer' \
+              --credential-id https://issuer.example/credentials/synthetic \
+              --holder did:key:zSyntheticHolder \
+              --credential-type MembershipCredential \
+              --context https://issuer.example/vocab/synthetic \
+              --claim-name @context \
+              --claim-value "$marker" \
+              >"$output_dir/stdout" 2>"$output_dir/stderr"; then
+            echo 'Malformed pinned-claim invocation unexpectedly succeeded' >&2
+            exit 1
+          fi
+          if grep -Fq "$marker" "$output_dir/stdout" || \
+             grep -Fq "$marker" "$output_dir/stderr"; then
+            echo 'CLI exposed a verifier-supplied policy value in diagnostics' >&2
+            exit 1
+          fi
+          grep -Fq 'No values released' "$output_dir/stderr"
+
       - name: Run unit tests
         run: |
           dotnet test tests/Unit/HeroSSID.Unit.Tests/HeroSSID.Unit.Tests.csproj \
