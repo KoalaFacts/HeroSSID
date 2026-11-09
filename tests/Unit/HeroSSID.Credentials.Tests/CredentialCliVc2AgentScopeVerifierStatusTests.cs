@@ -1,3 +1,4 @@
+using System.CommandLine;
 using System.Security.Cryptography;
 using System.Text;
 using HeroSSID.Cli.Commands;
@@ -46,6 +47,37 @@ public sealed class CredentialCliVc2AgentScopeVerifierStatusTests
         Assert.False(scenario.Verify());
         Assert.False(File.Exists(scenario.SessionFile));
         Assert.True(File.Exists(scenario.SessionFile + ".used"));
+    }
+
+    [Fact]
+    public async Task PublicVerifierCommandChecksAuthenticVpAndRejectsReplay()
+    {
+        using var scenario = new Scenario();
+        Assert.True(scenario.Request());
+        scenario.Present();
+        scenario.Status();
+        string[] args =
+        [
+            "verify-vc2-agent-scope-vp-status",
+            "--verifier-did", scenario.Verifier.Did,
+            "--tenant-id", scenario.TenantId,
+            "--audience", Scenario.Audience,
+            "--trusted-issuer", scenario.Issuer.Did,
+            "--agent", scenario.Agent.Did,
+            "--context", Scenario.Context.AbsoluteUri,
+            "--credential-id", Scenario.CredentialIdUri.AbsoluteUri,
+            "--resource", Scenario.ResourceUri.AbsoluteUri,
+            "--action", "invoices.read",
+            "--request-jwt-file", scenario.RequestFile,
+            "--session-file", scenario.SessionFile,
+            "--presentation-jwt-file", scenario.VpFile,
+            "--snapshot-file", scenario.SnapshotFile,
+            "--minimum-observed-at", DateTimeOffset.UtcNow.AddSeconds(-15).ToString("O")
+        ];
+        Assert.Equal(0, await CredentialCommands.CreateCommand(null!)
+            .InvokeAsync(args).ConfigureAwait(true));
+        Assert.NotEqual(0, await CredentialCommands.CreateCommand(null!)
+            .InvokeAsync(args).ConfigureAwait(true));
     }
 
     [Fact]
@@ -99,9 +131,9 @@ public sealed class CredentialCliVc2AgentScopeVerifierStatusTests
         internal const string Audience = "https://verifier.example/agent-requests";
         internal static readonly Uri Context = new("https://issuer.example/vocab/agent-scope/v1");
         private const string Action = "invoices.read";
-        private static readonly Uri CredentialId =
+        internal static readonly Uri CredentialIdUri =
             new("https://issuer.example/credentials/agent/42");
-        private static readonly Uri Resource = new("https://api.example/projects/42");
+        internal static readonly Uri ResourceUri = new("https://api.example/projects/42");
 
         internal readonly (byte[] Seed, string Did) Issuer = Identity();
         internal readonly (byte[] Seed, string Did) Agent = Identity();
@@ -112,6 +144,8 @@ public sealed class CredentialCliVc2AgentScopeVerifierStatusTests
         internal readonly string RequestFile;
         internal readonly string SessionFile;
         internal readonly string VpFile;
+        internal string TenantId => _tenant.ToString("D");
+        internal string SnapshotFile => _snapshotFile;
         private readonly string _snapshotFile;
         private string _original = string.Empty;
 
@@ -137,14 +171,14 @@ public sealed class CredentialCliVc2AgentScopeVerifierStatusTests
         {
             DateTimeOffset now = DateTimeOffset.UtcNow;
             _original = Vcdm20AgentScopeAssertion.Create(
-                Issuer.Did, Agent.Did, Context, CredentialId,
-                new Uri(Audience), Resource, Action, Issuer.Seed,
+                Issuer.Did, Agent.Did, Context, CredentialIdUri,
+                new Uri(Audience), ResourceUri, Action, Issuer.Seed,
                 now.AddSeconds(-5), now.AddMinutes(5));
             string request = File.ReadAllText(RequestFile).TrimEnd('\r', '\n');
             string vp = Vcdm20JosePresentation.CreateForAudienceWithIdAndSignedRequest(
                 request, Verifier.Did, Audience, _original,
                 Vcdm20AgentScopeAssertion.CredentialType, Context,
-                CredentialId, new Uri(Audience), Agent.Did, Agent.Seed,
+                CredentialIdUri, new Uri(Audience), Agent.Did, Agent.Seed,
                 TimeProvider.System);
             File.WriteAllText(VpFile, vp);
         }
@@ -165,7 +199,7 @@ public sealed class CredentialCliVc2AgentScopeVerifierStatusTests
                     Audience, Issuer.Did,
                     Vcdm20AgentScopeAssertion.CredentialType, Context.AbsoluteUri,
                     RequestFile, SessionFile, VpFile),
-                Agent.Did, CredentialId.AbsoluteUri, Resource.AbsoluteUri,
+                Agent.Did, CredentialIdUri.AbsoluteUri, ResourceUri.AbsoluteUri,
                 action ?? Action, _snapshotFile,
                 DateTimeOffset.UtcNow.AddSeconds(-15).ToString("O"));
 
