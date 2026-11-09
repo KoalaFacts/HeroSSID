@@ -47,7 +47,7 @@ trusted operational channel and passes it as `--snapshot-file` to
 [`verify-vc2-agent-scope-vp-status`](cli-vc2-agent-scope-vp-status.md),
 together with its **own** minimum issuer observation time, original Agent
 full-disclosure VP, exact trusted issuer, scope and one-use challenge. The
-verifier cannot derive its policy from the snapshot. The SDK can also use
+verifier cannot derive its policy from the snapshot. A no-SDK relying party can instead run the [offline VC2 did:key issuer-status verifier CLI](cli-vc2-didkey-status-verify.md) with independently pinned issuer, holder, type and context plus its own minimum observed-at cutoff. This verifies a genuine original issuer-signed VC2 before checking the same unchanged JWT digest against the signed status; it does not authenticate a holder key or release claims. The SDK can also use
 `Vcdm20RevocationSnapshot.CheckWithObservationCutoff` to distinguish
 `Invalid`, `Revoked` and `SignedNotListed` for an exact original VC2 JWT.
 
