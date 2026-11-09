@@ -2,7 +2,7 @@ name: One-off independent offline PR249 agent scope CLI review
 on:
   push:
     branches:
-      - review/pr249-agent-holder-20261109
+      - review/pr249-agent-cli-20261109
 
 permissions: {}
 
