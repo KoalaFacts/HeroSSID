@@ -43,8 +43,11 @@ application independently pins the actual verifier DID, audience, issuer DID,
 context, credential ID and signed recipient, displays the **entire credential
 and disclosures**, then calls
 `Vcdm20JosePresentation.CreateForAudienceWithIdAndSignedRequest` using the
-Agent's **own** Ed25519 seed. This holder operation currently requires an SDK
-caller; the verifier CLI is **not** a third-party Wallet interoperability claim.
+Agent's **own** Ed25519 seed. Alternatively an Agent holder without an SDK caller can use
+[`present-vc2-agent-scope`](cli-vc2-agent-scope-holder.md) with independently
+pinned verifier, issuer and exact scope policy, full-disclosure acknowledgement
+and the Agent's own seed from redirected stdin. Neither CLI nor the SDK
+establishes human consent or third-party Wallet interoperability.
 The verifier obtains a signed same-issuer private VC2 status JWT separately
 from the Agent.
 
