@@ -2,7 +2,7 @@ name: One-off independent offline PR252 Agent holder CLI review
 on:
   push:
     branches:
-      - review/pr252-agent-vp-status-20261109
+      - review/pr252-agent-holder-20261109
 
 permissions: {}
 
@@ -85,7 +85,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          test "$(gh api repos/KoalaFacts/HeroSSID/pulls/251 --jq '.head.sha')" = "86f1db647247c4d819fac3baccf6ebbd98a3efcb"
+          test "$(gh api repos/KoalaFacts/HeroSSID/pulls/252 --jq '.head.sha')" = "86f1db647247c4d819fac3baccf6ebbd98a3efcb"
           python3 - <<'PY'
           import json
           from pathlib import Path
@@ -129,7 +129,7 @@ jobs:
             echo
             cat review-2.md
           } > /tmp/pr252-review.md
-          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/251/reviews \
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/252/reviews \
             -f event=COMMENT -f commit_id="86f1db647247c4d819fac3baccf6ebbd98a3efcb" \
             -f body="$(cat /tmp/pr252-review.md)" \
             --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
