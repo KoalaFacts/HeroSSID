@@ -34,7 +34,8 @@ internal static partial class CredentialCommands
         string Nonce, DateTimeOffset ExpiresAt, string RequestSha256);
 
     internal static bool TryCreateVc11VerifierRequest(
-        Vc11VerifierRequestParameters parameters, Stream verifierSeedInput)
+        Vc11VerifierRequestParameters parameters, Stream verifierSeedInput,
+        bool policyBound = false)
     {
         ArgumentNullException.ThrowIfNull(parameters);
         ArgumentNullException.ThrowIfNull(verifierSeedInput);
@@ -42,7 +43,7 @@ internal static partial class CredentialCommands
         if (!ValidVerifierPolicy(parameters.VerifierDid, parameters.TenantId,
                 parameters.Audience, parameters.TrustedIssuerDid,
                 parameters.CredentialType, parameters.Context,
-                out Guid tenantId, out _) ||
+                out Guid tenantId, out Uri? subjectContext) ||
             string.IsNullOrWhiteSpace(parameters.RequestJwtFile) ||
             string.IsNullOrWhiteSpace(parameters.SessionFile) ||
             string.Equals(Path.GetFullPath(parameters.RequestJwtFile),
@@ -67,13 +68,27 @@ internal static partial class CredentialCommands
             }
 
             var store = new InMemoryPresentationChallengeStore(TimeProvider.System);
-            var challenge = store.Issue(tenantId, parameters.Audience!,
+            var issuedChallenge = store.Issue(tenantId, parameters.Audience!,
                 parameters.TrustedIssuerDid!, TimeSpan.FromSeconds(parameters.LifetimeSeconds));
+            var challenge = policyBound
+                ? issuedChallenge with
+                {
+                    CredentialType = parameters.CredentialType,
+                    SubjectContextUri = subjectContext
+                }
+                : issuedChallenge;
             string request = OfflineSignedPresentationRequest.Create(
                 challenge, parameters.VerifierDid!, seed, TimeProvider.System);
-            if (!OfflineSignedPresentationRequest.TryRead(request, parameters.VerifierDid!,
-                    parameters.Audience!, TimeProvider.System, out var signedChallenge) ||
-                signedChallenge is null ||
+            PresentationChallenge? signedChallenge;
+            bool authenticRequest = policyBound
+                ? OfflineSignedPresentationRequest.TryReadPolicyBound(
+                    request, parameters.VerifierDid!, parameters.Audience!,
+                    parameters.CredentialType!, subjectContext!, TimeProvider.System,
+                    out signedChallenge)
+                : OfflineSignedPresentationRequest.TryRead(
+                    request, parameters.VerifierDid!, parameters.Audience!,
+                    TimeProvider.System, out signedChallenge);
+            if (!authenticRequest || signedChallenge is null ||
                 !string.Equals(signedChallenge.TrustedIssuerDid, parameters.TrustedIssuerDid,
                     StringComparison.Ordinal))
             {
