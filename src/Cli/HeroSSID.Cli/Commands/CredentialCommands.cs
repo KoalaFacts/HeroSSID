@@ -378,6 +378,8 @@ internal static partial class CredentialCommands
         credentials.AddCommand(CreateVc11VerifierStatusCheckCommand());
         credentials.AddCommand(CreateVc2AgentScopeCommand());
         credentials.AddCommand(CreateVc2AgentScopeIssueCommand());
+        credentials.AddCommand(CreateVc2AgentScopeVerifierRequestCommand());
+        credentials.AddCommand(CreateVc2AgentScopeVerifierStatusCommand());
         return credentials;
     }
 
