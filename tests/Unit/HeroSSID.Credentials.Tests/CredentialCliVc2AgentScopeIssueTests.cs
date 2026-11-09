@@ -33,7 +33,7 @@ public sealed class CredentialCliVc2AgentScopeIssueTests
                     Request(issuer.Did, agent.Did, output), pipe));
             }
 
-            string jwt = File.ReadAllText(output).TrimEnd('\r', '\n');
+            string jwt = (await File.ReadAllTextAsync(output).ConfigureAwait(true)).TrimEnd('\r', '\n');
             Assert.True(Vcdm20AgentScopeAssertion.TryVerify(
                 jwt, issuer.Did, agent.Did, new Uri(Context),
                 new Uri(CredentialId), new Uri(Audience), new Uri(Resource),
