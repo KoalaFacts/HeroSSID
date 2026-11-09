@@ -7,85 +7,28 @@ on:
 permissions: {}
 
 jobs:
-  review:
-    name: Independent Qwen2.5 review of direct VC2 did:key holder proof
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout review helper and pinned candidate
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Verify immutable source and baseline
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse 29228b96147d52425bdfd212f7d1c1e0210b5ac6^{commit})" = "29228b96147d52425bdfd212f7d1c1e0210b5ac6"
-          test "$(git rev-parse a39bb3fb92b8b2cbb4d468dbc644bcfa9af8ccf9^{commit})" = "a39bb3fb92b8b2cbb4d468dbc644bcfa9af8ccf9"
-          test "$(git diff --name-only a39bb3fb92b8b2cbb4d468dbc644bcfa9af8ccf9 29228b96147d52425bdfd212f7d1c1e0210b5ac6 | wc -l)" -eq 5
-      - name: Install local independent model
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! curl --fail --silent --show-error --location --retry 8 --retry-all-errors --retry-delay 5 https://ollama.com/install.sh --output /tmp/ollama-install.sh; then
-            curl --fail --silent --show-error --location --retry 8 --retry-all-errors --retry-delay 5 https://raw.githubusercontent.com/ollama/ollama/main/scripts/install.sh --output /tmp/ollama-install.sh
-          fi
-          sh /tmp/ollama-install.sh
-          nohup ollama serve >/tmp/ollama-server.log 2>&1 </dev/null &
-          for i in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
-            sleep 2
-          done
-          curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null
-          for attempt in 1 2 3; do
-            if ollama pull qwen2.5-coder:7b; then break; fi
-            if [ "$attempt" -eq 3 ]; then exit 1; fi
-            sleep 12
-          done
-      - name: Review complete pinned source patches
-        shell: bash
-        run: |
-          set -euo pipefail
-          for part in 1 2; do
-            REVIEW_PART="$part" python3 tools/offline_pr256_review.py
-            test -s "review-$part.md"
-            test -s "review-$part.json"
-            test "$(cat review-head-$part.txt)" = "29228b96147d52425bdfd212f7d1c1e0210b5ac6"
-          done
-      - name: Retain raw model evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: independent-pr256-review
-          path: |
-            review-*.md
-            review-*.json
-            review-head-*.txt
-            review-model-*.json
-          if-no-files-found: warn
-          retention-days: 30
   publish:
     name: Submit exact-head independent COMMENTED review
-    needs: review
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
+      actions: read
       pull-requests: write
     steps:
       - name: Download independently completed model artifacts
         uses: actions/download-artifact@v4
         with:
           name: independent-pr256-review
+          run-id: 42572903756
+          github-token: ${{ github.token }}
       - name: Verify exact PR256 HEAD and full 5-file model coverage
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          test "$(gh api repos/KoalaFacts/HeroSSID/pulls/255 --jq '.head.sha')" = "29228b96147d52425bdfd212f7d1c1e0210b5ac6"
+          test "$(gh api repos/KoalaFacts/HeroSSID/pulls/256 --jq '.head.sha')" = "29228b96147d52425bdfd212f7d1c1e0210b5ac6"
           python3 - <<'PY'
           import json
           from pathlib import Path
@@ -128,7 +71,7 @@ jobs:
             echo
             cat review-2.md
           } > /tmp/pr256-review.md
-          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/255/reviews \
+          gh api --method POST repos/KoalaFacts/HeroSSID/pulls/256/reviews \
             -f event=COMMENT -f commit_id="29228b96147d52425bdfd212f7d1c1e0210b5ac6" \
             -f body="$(cat /tmp/pr256-review.md)" \
             --jq '{id: .id, state: .state, submitted_at: .submitted_at}'
