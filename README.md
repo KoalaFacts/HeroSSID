@@ -135,7 +135,7 @@ For optional issuer-signed VC2 status enforcement **before the Wallet can previe
 
 ## Offline historical/current VC1.1 issuer verification (opt-in)
 
-`.NET 10` relying parties can now call `JwtVcJsonTrustedIssuerVerifier.Check` or `CheckWithStatus` against their **own** 1–16 independently pinned historical/current issuer Ed25519 `did:key` entries, with no HTTP or issuer database. The original VC1.1 `jwt_vc_json` signature and pinned holder/type/context are checked before returning actual signer and claims; optional private 60-second status must be signed by that **same actual issuer**. Revoked/invalid results release neither signer nor subject. Removing an issuer DID rejects its old credentials. This neither promotes trusted successors automatically nor establishes holder possession, complete/live revocation, identity, consent, authority or third-party Wallet interoperability. See the [offline verifier example and exact outcomes](docs/jwt-vc-json-offline-trusted-issuer-profile.md).
+`.NET 10` and `.NET 11` relying parties can now call `JwtVcJsonTrustedIssuerVerifier.Check` or `CheckWithStatus` against their **own** 1–16 independently pinned historical/current issuer Ed25519 `did:key` entries, with no HTTP or issuer database. The original VC1.1 `jwt_vc_json` signature and pinned holder/type/context are checked before returning actual signer and claims; optional private 60-second status must be signed by that **same actual issuer**. Revoked/invalid results release neither signer nor subject. Removing an issuer DID rejects its old credentials. This neither promotes trusted successors automatically nor establishes holder possession, complete/live revocation, identity, consent, authority or third-party Wallet interoperability. See the [offline verifier example and exact outcomes](docs/jwt-vc-json-offline-trusted-issuer-profile.md).
 
 ## Opt-in JWT VC JSON (VC Data Model 1.1) credential SDK
 
@@ -205,7 +205,7 @@ HTTP requests now have distinct budgets for validated tenant/client identities i
 
 ## Local development
 
-Prerequisites: .NET 10 SDK (LTS; projects target `net10.0`), a reachable PostgreSQL instance, and Docker for the container-backed integration/HTTP contract tests. The examples below bind development services to localhost.
+Prerequisites: .NET 11 SDK (GA 11.0.100 or later; the libraries and test projects target `net10.0` and `net11.0`, while the CLI, API and AppHost stay on `net10.0` LTS) plus the .NET 10 runtime, a reachable PostgreSQL instance, and Docker for the container-backed integration/HTTP contract tests. The examples below bind development services to localhost.
 
 ```bash
 git clone https://github.com/KoalaFacts/HeroSSID.git
@@ -450,6 +450,8 @@ A successful direct `vc+jwt` verification now requires signed, non-empty `iss` a
 `VerifyCredentialAsync` and `VerifyCredentialFromIssuerAsync` return `CredentialSubject`, `IssuerDid` and `ExpiresAt` only for successful verification. Every rejected result leaves those fields null, while preserving `IsValid=false`, its status and diagnostic errors. Expiry errors no longer echo the parsed timestamp. This is an intentional tightening of the library contract: integrations that previously used parsed metadata from rejected results must stop relying on those values. Valid credential results are unchanged; consumers must still check `IsValid` and apply issuer trust and business authorization policy.
 
 The `.NET 10` retarget changes the required runtime and patched ASP.NET Core, EF Core, Npgsql, Aspire and OpenIddict dependencies. Before upgrading an existing deployment, review runtime/container image compatibility and test the prior database schema and persisted token/credential behaviour in an isolated environment; upgrading a production runtime or applying migrations is not part of the source-code change.
+
+The NuGet libraries (`HeroSSID.Core`, `.DidOperations`, `.Credentials`, `.Data`, `.Observability`) also ship a `net11.0` build since .NET 11 GA (2026-11-10). It uses the same ASP.NET Core/EF Core/Npgsql 10.x dependencies as `net10.0`. One runtime difference is visible: on .NET 11 the BCL base64 decoder rejects non-canonical (non-zero) pad bits, so `Base64UrlEncoder.DecodeBytes` throws `FormatException` for such input instead of silently decoding it; JWT verification already rejected those signatures on both runtimes.
 
 ## Verification and development
 
