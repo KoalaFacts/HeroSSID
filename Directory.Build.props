@@ -12,9 +12,9 @@
 
   <ItemGroup>
     <!-- Common package versions for dependency management -->
-    <PackageReference Update="Aspire.Hosting.AppHost" Version="13.6.4" />
-    <PackageReference Update="Aspire.Hosting.PostgreSQL" Version="13.6.4" />
-    <PackageReference Update="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" Version="13.6.4" />
+    <PackageReference Update="Aspire.Hosting.AppHost" Version="13.6.5" />
+    <PackageReference Update="Aspire.Hosting.PostgreSQL" Version="13.6.5" />
+    <PackageReference Update="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" Version="13.6.5" />
     <PackageReference Update="Microsoft.Extensions.DependencyInjection" Version="10.0.13" />
     <PackageReference Update="Microsoft.Extensions.Configuration" Version="10.0.13" />
     <PackageReference Update="Microsoft.Extensions.Configuration.Json" Version="10.0.13" />
