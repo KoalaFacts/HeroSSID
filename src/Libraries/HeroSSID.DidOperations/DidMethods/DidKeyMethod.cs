@@ -111,7 +111,7 @@ public sealed class DidKeyMethod : IDidMethod
             string multibasePortion = did.Substring(8); // "did:key:".Length == 8
 
             // Must start with 'z' (Base58 multibase prefix)
-            if (!multibasePortion.StartsWith('z'))
+            if (!multibasePortion.AsSpan().StartsWith("z", StringComparison.Ordinal))
             {
                 return false;
             }

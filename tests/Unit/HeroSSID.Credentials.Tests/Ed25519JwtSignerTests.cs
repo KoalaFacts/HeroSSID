@@ -198,7 +198,13 @@ public sealed class Ed25519JwtSignerTests
         var alternateFinalCharacter = base64UrlAlphabet[(finalIndex & 0x30) | ((finalIndex + 1) & 0x0f)];
         var alternateSignature = parts[2][..^1] + alternateFinalCharacter;
         Assert.NotEqual(parts[2], alternateSignature);
+#if NET11_0_OR_GREATER
+        // .NET 11's base64 decoder rejects non-zero pad bits itself.
+        Assert.Throws<FormatException>(() => Base64UrlEncoder.DecodeBytes(alternateSignature));
+#else
+        // Older runtimes ignore the pad bits, so both strings decode to the same bytes.
         Assert.Equal(Base64UrlEncoder.DecodeBytes(parts[2]), Base64UrlEncoder.DecodeBytes(alternateSignature));
+#endif
 
         Assert.True(Ed25519JwtSigner.VerifySignedJwt(jwt, publicKey));
         Assert.False(Ed25519JwtSigner.VerifySignedJwt(

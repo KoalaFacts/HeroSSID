@@ -350,7 +350,7 @@ public static class OpenId4VpJwtVcJsonDirectPost
         int delimiter = form.IndexOf('&', StringComparison.Ordinal);
         if (!form.StartsWith("vp_token=", StringComparison.Ordinal) ||
             delimiter <= "vp_token=".Length ||
-            delimiter != form.LastIndexOf('&') ||
+            delimiter != form.AsSpan().LastIndexOf('&') ||
             !string.Equals(form[(delimiter + 1)..],
                 "state=" + Uri.EscapeDataString(request.Challenge.Nonce),
                 StringComparison.Ordinal))

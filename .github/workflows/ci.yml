@@ -23,7 +23,9 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: |
+            10.0.x
+            11.0.x
 
       - name: Restore dependencies
         run: dotnet restore
@@ -54,7 +56,9 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: |
+            10.0.x
+            11.0.x
 
       - name: Download build artifacts
         uses: actions/download-artifact@v4
@@ -146,7 +150,7 @@ jobs:
             --configuration Release \
             --no-build \
             --verbosity normal \
-            --logger "trx;LogFileName=unit-tests.trx" \
+            --logger "trx;LogFilePrefix=unit-tests" \
             --collect:"XPlat Code Coverage"
 
       - name: Run API endpoint tests
@@ -155,7 +159,7 @@ jobs:
             --configuration Release \
             --no-build \
             --verbosity normal \
-            --logger "trx;LogFileName=api-tests.trx" \
+            --logger "trx;LogFilePrefix=api-tests" \
             --collect:"XPlat Code Coverage"
 
       - name: Run Credentials tests
@@ -164,7 +168,7 @@ jobs:
             --configuration Release \
             --no-build \
             --verbosity normal \
-            --logger "trx;LogFileName=credentials-tests.trx" \
+            --logger "trx;LogFilePrefix=credentials-tests" \
             --collect:"XPlat Code Coverage"
 
       - name: Run Data tests
@@ -173,7 +177,7 @@ jobs:
             --configuration Release \
             --no-build \
             --verbosity normal \
-            --logger "trx;LogFileName=data-tests.trx" \
+            --logger "trx;LogFilePrefix=data-tests" \
             --collect:"XPlat Code Coverage"
 
       - name: Run DidOperations tests
@@ -182,7 +186,7 @@ jobs:
             --configuration Release \
             --no-build \
             --verbosity normal \
-            --logger "trx;LogFileName=didops-tests.trx" \
+            --logger "trx;LogFilePrefix=didops-tests" \
             --collect:"XPlat Code Coverage"
 
       - name: Run contract tests
@@ -191,7 +195,7 @@ jobs:
             --configuration Release \
             --no-build \
             --verbosity normal \
-            --logger "trx;LogFileName=contract-tests.trx" \
+            --logger "trx;LogFilePrefix=contract-tests" \
             --collect:"XPlat Code Coverage"
 
       - name: Run OpenID4VC HTTP contract tests
@@ -200,7 +204,7 @@ jobs:
             --configuration Release \
             --no-build \
             --verbosity normal \
-            --logger "trx;LogFileName=openid4vc-contract-tests.trx" \
+            --logger "trx;LogFilePrefix=openid4vc-contract-tests" \
             --collect:"XPlat Code Coverage"
 
       - name: Run integration tests
@@ -209,7 +213,7 @@ jobs:
             --configuration Release \
             --no-build \
             --verbosity normal \
-            --logger "trx;LogFileName=integration-tests.trx" \
+            --logger "trx;LogFilePrefix=integration-tests" \
             --collect:"XPlat Code Coverage"
 
       - name: Upload test results
@@ -234,7 +238,9 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: |
+            10.0.x
+            11.0.x
 
       - name: Restore dependencies
         run: dotnet restore
@@ -277,7 +283,9 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: |
+            10.0.x
+            11.0.x
 
       - name: Restore dependencies
         run: dotnet restore

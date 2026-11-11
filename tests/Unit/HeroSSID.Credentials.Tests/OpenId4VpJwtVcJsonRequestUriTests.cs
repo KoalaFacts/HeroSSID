@@ -322,7 +322,7 @@ public sealed class OpenId4VpJwtVcJsonRequestUriTests
         string json = WebUtility.UrlDecode(originalForm["vp_token=".Length..separator]);
         using var parsed = System.Text.Json.JsonDocument.Parse(json);
         string jwt = parsed.RootElement.GetProperty("jwt_vc_json_credential")[0].GetString()!;
-        int signatureStart = jwt.LastIndexOf('.') + 1;
+        int signatureStart = jwt.AsSpan().LastIndexOf('.') + 1;
         char substitute = jwt[signatureStart] == 'A' ? 'B' : 'A';
         string tampered = jwt[..signatureStart] + substitute + jwt[(signatureStart + 1)..];
         string tokenJson = System.Text.Json.JsonSerializer.Serialize(
